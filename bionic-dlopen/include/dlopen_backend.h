@@ -97,11 +97,13 @@ int gw_dlopen_enter(uint64_t);
    proceed. Must pair 1:1 with a successful enter. */
 void gw_dlopen_leave(uint64_t);
 /* Executing scope: pins the module and records it on the calling Host thread.
-   Includes recursive/ancestor scopes. Close on any locally held module returns
-   BUSY before changing its state. Successful enters must be balanced on the
-   same thread before thread exit; scopes cannot be transferred or cancelled.
-   Enter returns 0 on refusal; leave returns 0 for a stale, unheld or foreign
-   scope without consuming another thread's scope or a transferable pin. */
+   Includes recursive/ancestor scopes. Close on any locally held module, or
+   close requiring a borrow wait while any local scope is held, returns BUSY
+   before changing its state. Unwind scopes before retrying; do not spin on
+   BUSY. Successful enters must be balanced on the same thread before thread
+   exit; scopes cannot be transferred or cancelled. Enter returns 0 on refusal;
+   leave returns 0 for a stale, unheld or foreign scope without consuming
+   another thread's scope or a transferable pin. */
 int gw_dlopen_scope_enter(uint64_t);
 int gw_dlopen_scope_leave(uint64_t);
 /* Id of the most recently committed open, 0 if none. A snapshot for

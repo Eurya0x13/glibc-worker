@@ -162,6 +162,21 @@ def verify(
         }
     ]:
         raise ValueError("Missing execution-scope and nested-close evidence")
+    close_wait_rows = [
+        json.loads(row)
+        for row in re.findall(
+            r"^AUDIT_CLOSE_WAIT_TEST (\{[^\n]+\})$", report, re.MULTILINE
+        )
+    ]
+    if group == "coverage" and close_wait_rows != [
+        {
+            "result": "PASS",
+            "threads": 2,
+            "busy_refusals": 2,
+            "resources_preserved": True,
+        }
+    ]:
+        raise ValueError("Missing cross-thread close-wait refusal evidence")
     if group == "coverage":
         expected_rows = [
             {"cycle": cycle, "checks": 6, "expected_errors": 3}
@@ -274,6 +289,7 @@ def verify(
         "descriptor_boundaries": descriptor_rows,
         "failure_boundaries": failure_rows,
         "execution_scopes": scope_rows,
+        "close_waits": close_wait_rows,
         "mutex_contract": mutex_contract,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit

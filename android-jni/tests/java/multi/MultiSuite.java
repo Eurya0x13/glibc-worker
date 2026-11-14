@@ -5,6 +5,8 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
 import java.util.function.IntUnaryOperator;
 
 /** Tests the JRE load API; no Guest implementation details in the modules. */
@@ -226,6 +228,57 @@ public final class MultiSuite {
         + "\"busy_refusals\":4,\"exception_unwind\":true,\"resources_preserved\":true}");
   }
 
+  static IntUnaryOperator closePeer(Loaded target, CyclicBarrier ready, CyclicBarrier returned) {
+    return depth -> {
+      try {
+        ready.await(5, TimeUnit.SECONDS);
+        int result = closeBusy(target);
+        // Both native calls stay in flight until both closes have returned.
+        returned.await(5, TimeUnit.SECONDS);
+        return result;
+      } catch (RuntimeException failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new AssertionError("Cross-thread close rendezvous", failure);
+      }
+    };
+  }
+
+  static Thread routeThread(Loaded module, int expected, List<Throwable> errors) {
+    Thread thread = new Thread(() -> {
+      try {
+        requireScope(module.integer("route", 1) == expected);
+      } catch (Throwable failure) {
+        errors.add(failure);
+      }
+    }, "scope-close-" + expected);
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  static void closeWaits(Loaded a, Loaded b) throws Exception {
+    int closures = metric(5), unloads = metric(2), errorsBefore = metric(4);
+    List<Throwable> errors = Collections.synchronizedList(new ArrayList<Throwable>());
+    CyclicBarrier ready = new CyclicBarrier(2), returned = new CyclicBarrier(2);
+    a.type.getField("peer").set(null, closePeer(b, ready, returned));
+    b.type.getField("peer").set(null, closePeer(a, ready, returned));
+    Thread first = routeThread(a, 111, errors), second = routeThread(b, 222, errors);
+    try {
+      first.start();
+      second.start();
+      first.join(10_000);
+      second.join(10_000);
+      requireScope(!first.isAlive() && !second.isAlive() && errors.isEmpty());
+      requireScope(a.integer("cached", 9) == 10009 && b.integer("cached", 10) == 10010);
+      requireScope(metric(5) == closures && metric(2) == unloads && metric(4) == errorsBefore);
+    } finally {
+      a.type.getField("peer").set(null, null);
+      b.type.getField("peer").set(null, null);
+    }
+    System.out.println("AUDIT_CLOSE_WAIT_TEST {\"result\":\"PASS\",\"threads\":2,"
+        + "\"busy_refusals\":2,\"resources_preserved\":true}");
+  }
+
   static void rejectedLoad(String path, Loaded a, Loaded b) throws Exception {
     Loaded rejected = new Loaded();
     int closures = metric(5), failed = metric(12);
@@ -294,6 +347,7 @@ public final class MultiSuite {
 
     crossCalls(a, b);
     executionScopes(a, b);
+    closeWaits(a, b);
     concurrent(a, b);
     sqlite(directory, a, b);
     rejectedLoad(directory + "/libmulti_reject.so", a, b);

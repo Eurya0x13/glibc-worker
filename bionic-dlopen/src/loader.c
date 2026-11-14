@@ -58,6 +58,29 @@ static int scope_held(uint64_t id) {
   return index >= 0 && scopes[index].id == id && scopes[index].count;
 }
 
+/* Called with lock held, before entering CLOSING. A thread may not wait
+   for another module's borrowers while retaining executing scopes of its
+   own: those scopes can be what the other borrowers need to finish. Scan
+   only on close; scope enter/leave needs no additional hot-path tracking. */
+static int check_close_scopes(const struct module *m,
+                              struct gw_loader_error *error) {
+  if (scope_held(m->id)) {
+    return gw_dlopen_fail(
+        error, GW_E_BUSY,
+        "Cannot close a module held by this thread's execution scope");
+  }
+  if (m->active) {
+    for (unsigned i = 0; i < FB_MODULES; i++) {
+      if (scopes[i].count) {
+        return gw_dlopen_fail(
+            error, GW_E_BUSY,
+            "Cannot wait for module borrows while holding an execution scope");
+      }
+    }
+  }
+  return GW_OK;
+}
+
 void gw_dlopen_quarantine(void) {
   pthread_mutex_lock(&lock);
   atomic_store_explicit(&quarantined, 1, memory_order_release);
@@ -517,11 +540,9 @@ static int loader_close(void *context, uint64_t id,
     return gw_dlopen_fail(error, GW_E_HANDLE,
                           "Guest library handle is stale or closing");
   }
-  if (scope_held(id)) {
+  if (check_close_scopes(m, error) == GW_ERROR) {
     pthread_mutex_unlock(&lock);
-    return gw_dlopen_fail(
-        error, GW_E_BUSY,
-        "Cannot close a module held by this thread's execution scope");
+    return GW_ERROR;
   }
   pthread_mutex_unlock(&lock);
 
@@ -546,11 +567,9 @@ static int loader_close(void *context, uint64_t id,
     return gw_dlopen_fail(error, GW_E_HANDLE,
                           "Guest library handle is stale or closing");
   }
-  if (scope_held(id)) {
+  if (check_close_scopes(m, error) == GW_ERROR) {
     pthread_mutex_unlock(&lock);
-    return gw_dlopen_fail(
-        error, GW_E_BUSY,
-        "Cannot close a module held by this thread's execution scope");
+    return GW_ERROR;
   }
   m->state = GW_MODULE_CLOSING;
   /* Active borrowers finish before transport teardown. The adapter services

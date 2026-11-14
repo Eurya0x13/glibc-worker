@@ -19,7 +19,7 @@
 - [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
 - [x] AUD-12：清理结果不确定时永久隔离桥、保留可能仍被使用的资源，由宿主丢弃进程；不自动杀应用。
 
-AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验证，具体契约见 [JNI 失败处理](../android-jni/docs/FAILURES.md)。AUD-07 已补注册期间模块借用、CLOSING 后拒绝发布，以及同线程祖先模块关闭的 scope 检查；上下文、重入容量及注册/依赖归属仍待审。AUD-08 已确定不可恢复清理的进程处置方式，尚无通用 deadline 或取消协议。
+AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验证，具体契约见 [JNI 失败处理](../android-jni/docs/FAILURES.md)。AUD-07 已补注册期间模块借用、CLOSING 后拒绝发布，以及执行 scope 关闭保护：拒绝关闭本线程持有的模块，也拒绝持有任意 scope 时等待目标借用；上下文、重入容量及注册/依赖归属仍待审。AUD-08 已确定不可恢复清理的进程处置方式，尚无通用 deadline 或取消协议。
 
 ## 1. 装载与 JNI 资源
 
@@ -144,6 +144,7 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | 停止 | 有加载中、活跃或关闭中模块时拒绝停止；quarantine 后也拒绝停止/重配以保留资源 |
 | 不确定清理失败 | UnregisterNatives、弱类提升 OOM、在途注册或 Guest 提交/清理失败时永久隔离桥，保留仍可能被引用的资源；宿主丢弃进程 |
 | 同线程回调中关闭祖先模块 | native/查找/注册持有执行 scope；关闭当前线程仍持有的任意祖先返回 BUSY，不进入 CLOSING；可跨线程归还的 pin 单独记账 |
+| 持有 scope 时关闭其他活跃模块 | 目标 active 非零即 BUSY，不进入借用等待；无 scope 的线程仍可等待，目标无活跃借用仍可关闭；调用方退出回调后再处理 BUSY，不自旋重试 |
 | 后台线程 | 模组必须停止并 join；桥不会自动发现任意后台线程或缓存函数指针的借用 |
 | 等待和取消 | 无通用 deadline / 超时取消协议；对端卡住可能无限等待 |
 | 跨 libc 对象 | 不可自由混用 allocator、`FILE`、pthread 对象、C++ 对象及异常；Guest 内部使用 C++ 不因此被禁止 |
@@ -167,13 +168,15 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | --- | --- | --- |
 | 上下文生命周期 | Host 首次调用即绑定一对 Host/Guest 上下文，通常到 Host 线程退出才释放；16 是长期绑定槽数，不只是瞬时并发调用数 | 保留线程绑定以维持 JNI 线程语义；审定是否按块扩容及资源预算，不仅增大默认常量 |
 | 重入深度 | 12 个普通调用槽，另有应急 RPC；超限已由 AUD-03 明确报错 | 是否保留固定值或增加构建配置；不可只扩大数组而忽略对称协议和诊断 |
-| 同线程祖先模块关闭 | 已将执行 scope 与可转移 pin 分开；连续 TLS 表按模块代数记录当前线程持有的全部模块和递归次数，关闭祖先在 CLOSING 前返回 BUSY；C 和真实 JNI 嵌套/异常回归通过 | 局部问题已修复；不代表跨线程等待图无环，也不自动追踪任意后台 Guest 工作；完整规则见执行借用契约 |
+| 执行 scope 与关闭等待 | 连续 TLS 表按模块代数记录当前线程持有的全部模块和递归次数；关闭祖先，或持有 scope 时关闭有活跃借用的其他模块，均在 CLOSING 前返回 BUSY；借用归还的正常等待保留 | 已登记 scope 与 loader 借用等待构成的环被保守拒绝；纯 pin 环、OnUnload/transport、用户锁/join/RPC 和未登记后台工作仍需宿主管理；完整规则见执行借用契约 |
 | 类注册所有权 | 一个类只允许一个模块；UnregisterNatives 后记录保留到卸载，其他模块无法接管 | 类级独占与成功注销后的交接规则一起审定，不能单独放开多 owner 后让一个模块卸载时注销别人的方法 |
 | 依赖库归属 | 有调用上下文时归当前逻辑模块；无上下文时 FB_OWNER 仅匹配顶层 link_map；共享依赖地址不能唯一确定 owner | 以装载/调用所有权为准，审定无上下文的依赖函数注册策略，不按单个地址猜测唯一归属 |
 | 发布后的 RPC 超时 | 命令仍可能访问 caller 栈上的参数、Guest 地址或 JNI frame；隔离 registry 不会延长这些借用对象的寿命 | deadline 检测、取消请求、对端确认和进程处置分开定义；未确认停止访问前不能直接超时返回并释放栈/上下文 |
 | 关闭与退出 | active 借用、事件等待、pthread join 均可能无期限阻塞；不能强制结束任意 Guest 函数并保证资源安全 | 分开审定优雅关闭期限与不可恢复处置；继续由宿主决定丢弃进程，不把 watchdog 警报等同于安全取消 |
 
 旧版自等待由本地 [C 最小用例](../bionic-dlopen/build/aud07/ancestor_close.c) 和 [审阅结果](../bionic-dlopen/build/aud07/review.json) 记录：进入 CLOSING 后由外部 watchdog 结束独立进程。修复后的维护用例为 [execution_scopes.c](../bionic-dlopen/tests/execution_scopes.c)，真实 JNI 证据见 [本轮 coverage](../jvm-jni/build/aud07/coverage-final/summary.json)：四例、四次 BUSY、异常展开后继续调用、最终零引用/closure。新规则借鉴 LRPC 执行链记账和 SRCU 禁止自等待，未移植完整 SRCU；调用方契约和剩余边界见 [EXECUTION_SCOPES.md](../bionic-dlopen/docs/EXECUTION_SCOPES.md)。
+
+跨线程对照由 [close_waits.c](../bionic-dlopen/tests/close_waits.c) 维护。修改前的 [基线复现](../bionic-dlopen/build/aud07-waits/baseline.json) 确认两个线程都持有 scope、两个目标均进入 CLOSING；归还被各自的 close 返回阻断。修复后使用 barrier 保持所有 scope，要求两/三线程 close 全部 BUSY，且 pin 等待、探测后状态变化和无活跃借用目标关闭符合契约。真实 JNI 两线程对照见 [coverage](../jvm-jni/build/aud07-waits/coverage-final/summary.json)。
 
 ## 7. 运行时制品、部署和适配
 
@@ -231,7 +234,7 @@ AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配�
 | Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 所有资源上限已取消、任意并发卸载安全或性能提升 |
 | 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消 |
 | AUD-03 失败语义 | ASan/UBSan 的生产 RPC/引用/ID/上下文故障注入、libffi/注册回滚检查及真机三轮各 6 项失败/恢复检查通过；9 个预期桥错误逐轮核对，最终引用和 closure 为 0 | 全系统 OOM 行为、任意第三方模组的异常恢复、ART 完整兼容 |
-| AUD-07 执行 scope | ASan/UBSan 的 CTest 6/6；64 模块、递归计数、跨线程关闭及可转移 pin 隔离通过；真实 Android JRE 四例嵌套/异常场景及既有 142 Java / 26 装载检查通过 | 跨线程等待环检测、任意后台线程/缓存入口追踪、上下文扩容或注册/依赖所有权审定 |
+| AUD-07 执行 scope | ASan/UBSan 的 CTest 7/7；64 模块、递归计数、正常跨线程关闭、两/三线程 scope 关闭环拒绝、pin 隔离通过；真实 Android JRE 四例嵌套/异常、两线程互关及既有 142 Java / 26 装载检查通过 | 通用死锁检测、纯 pin 或用户代码等待环、任意后台线程/缓存入口追踪、上下文扩容或注册/依赖所有权审定 |
 | runtime 补丁流程 | 8 项回归检查；新 robust 拒绝补丁已核对源码、匹配 loader/libc 与 APK 内散列；ARM64 coverage 通过 | robust mutex 恢复能力（本 runtime 明确拒绝）、所有 pthread 属性 |
 
 本地结果在各项目 `build/`，不是源代码发布包的必备文件：

@@ -22,7 +22,9 @@ AUTO 根据 ELF GNU 标记分类；显式 GUEST 需要调用者确认 ABI。GW_P
 
 `gw_dlopen_enter/leave` 则提供可跨线程归还的保活 pin，不表示执行归属。两类借用分别记账，不能用一种 leave 消耗另一种借用；scope_leave 对陈旧、未持有或其他线程的 scope 返回 0，不修改计数。pin 持有者若自行 close，仍会等待 pin 归还；应先归还或确保其他线程会归还，不能把 pin 当作自等待保护。
 
-close 阻止新借用，等待其他线程持有的 scope/pin 归还，再通过 transport 卸载。该规则不检查跨线程等待环，也不会自动发现后台线程和缓存入口的使用；调用者必须停止它们并同步卸载。完整规则、适用边界和研究来源见 [执行借用](EXECUTION_SCOPES.md)。
+持有任意执行 scope 时，如果目标还有活跃 scope/pin，close 返回 BUSY，避免保持 scope 等待其他借用。目标无活跃借用时允许关闭；没有执行 scope 的生命周期线程仍可正常等待。BUSY 不安排异步重试，调用方应退出回调、归还 scope 后再关闭，不得在 scope 内自旋重试。
+
+允许的 close 阻止新借用，等待其他线程持有的 scope/pin 归还，再通过 transport 卸载。该规则不构造完整等待图，也不会自动发现后台线程和缓存入口的使用；纯 pin 环、transport teardown 与其他任意等待仍须由调用方管理。完整规则、适用边界和研究来源见 [执行借用](EXECUTION_SCOPES.md)。
 
 有模块正在加载、运行或关闭时，stop 不能成功。观察器在后端锁内被调用，只用于轻量计数；不得重入 loader 或执行阻塞工作。错误对象由调用方持有，路径和符号只在单次调用期间借用。
 
@@ -36,7 +38,7 @@ transport 仍须负责保留可能被 VM 或 Guest 线程引用的映像、入�
 
 ## 验证
 
-CTest 的 `loader_contract` 使用纯 C transport 检查事务、代数、忙碌关闭及停止约束；`execution_scopes` 检查祖先/递归关闭、64 模块借用、线程归属、pin 与 scope 隔离、句柄代数及正常跨线程关闭；`quarantine_0..3` 检查失败装载、失败关闭以及 pin/scope 等待关闭中的终态隔离和资源保留。它们不宣称独立建立双 libc。真实 ELF 分类测试显式指定输入，不依赖固定上层路径：
+CTest 的 `loader_contract` 使用纯 C transport 检查事务、代数、忙碌关闭及停止约束；`execution_scopes` 检查祖先/递归关闭、64 模块借用、线程归属、pin 与 scope 隔离、句柄代数及正常跨线程关闭；`close_waits` 检查两/三线程 scope 关闭环拒绝、pin 等待和无活跃借用目标关闭；`quarantine_0..3` 检查失败装载、失败关闭以及 pin/scope 等待关闭中的终态隔离和资源保留。它们不宣称独立建立双 libc。真实 ELF 分类测试显式指定输入，不依赖固定上层路径：
 
 ```sh
 python3 tests/elf_route.py --libraries /path/to/test-dsos \

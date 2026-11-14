@@ -25,6 +25,8 @@ smoke/coverage 都会执行 core 的 GNU mutex 夹具：普通锁/条件变量�
 
 coverage 另有四个执行 scope 场景：自身关闭、A→B 关闭 A/B、A→B→A 关闭 B、异常展开后继续调用。`AUDIT_SCOPE_TEST` JSON 独立于原 142 项 Java 断言，要求四次 BUSY 拒绝、模块仍 LIVE、无额外资源释放或桥错误；后续真实卸载和最终零资源检查必须继续通过。C 层的线程归属和可转移 pin 对照在 bionic-dlopen CTest 内。
 
+`AUDIT_CLOSE_WAIT_TEST` 要求两个真实 JNI 调用同时回调 Java 并关闭对方模块，均返回 BUSY；两次 close 返回前，两个 native 调用都保持在途。测试核对模块仍 LIVE、无提前释放且随后可继续调用。barrier/join 的测试期限不代表生产 bridge 具有超时取消能力。两/三线程的生产 C loader 对照、目标 pin 和探测后竞态在 bionic-dlopen 的 `close_waits` 内。
+
 桌面故障注入入口为 `python3 android-jni/tests/failures.py`、`bindings.py`、`resources.py` 和 `audit.py`，分别覆盖生产 RPC 失败、libffi/注册、引用存储以及装卸载事务；它们使用 VM/worker 替身，不代表 Android 双 libc 验证。
 
 严格模式默认使用解释器和 CheckJNI。超时、CheckJNI 违规、错误数据或生命周期不完整均为失败。覆盖为 235 个 JNI/VM 槽位清单及功能触达，正常运行不执行破坏性的 FatalError，不能描述为完整 JNI 规范或源代码分支覆盖。
