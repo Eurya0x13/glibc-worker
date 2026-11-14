@@ -5,6 +5,9 @@
 #include <dlopen_backend.h>
 
 int main(void) {
+  if (full_host_state() != GW_HOST_NEW) {
+    return 1;
+  }
   const struct gw_loader_api_v1 *api =
       gw_loader_query(GW_LOADER_ABI_V1, sizeof(struct gw_loader_api_v1));
   struct gw_jvm_profile_v1 empty = {0};

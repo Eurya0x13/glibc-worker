@@ -54,7 +54,7 @@ AUTO 分类损坏或不支持的 ELF 返回 IMAGE，分类器资源上限返回 
 
 这不是通用死锁检测；纯 pin 环、OnUnload/transport 和用户代码内的其他等待尚无通用处置。借用计数不代表任意原生后台线程，模组必须自行停止并 join 后台工作。两类借用及限制见 [执行借用规则](../../bionic-dlopen/docs/EXECUTION_SCOPES.md)。
 
-当前进程只支持一次配置、一套 Guest 和一个目标 VM。初始化失败后的完整重试、GNU loader/libc 映射销毁与重建尚无通用 API；失败无法安全恢复时应结束隔离的宿主进程。shutdown 不替宿主调用 DestroyJavaVM。
+当前进程只支持一次配置、一套 Guest 和一个目标 VM。初始化失败后的完整重试、GNU loader/libc 映射销毁与重建尚无通用 API；失败无法安全恢复时应结束隔离的宿主进程。shutdown 不替宿主调用 DestroyJavaVM。单实例状态、所有者线程、关闭前停止生产者，以及 deadline/取消/进程处置规则见 [生命周期契约](LIFECYCLE.md)。
 
 ## 卸载与失败隔离
 

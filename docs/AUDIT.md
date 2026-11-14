@@ -13,19 +13,19 @@
 - [x] AUD-05：RPC 序号明确无溢出回绕；引用/ID 代数耗尽永久退役；现行 Zig 及已删除 C 对照均有边界验证。
 - [x] AUD-06：复现关闭 robust-list 后的假成功与 owner-death 超时；robust mutex 初始化明确返回 ENOTSUP，普通锁/条件变量及真机组合回归通过。
 - [x] AUD-07：上下文/重入帧稳定分块增长，保留线程身份与应急失败通道；完成类注册交接、严格依赖归属及执行 scope 关闭规则，默认/诊断真机组合通过。
-- [ ] AUD-08：审定卡死时的 deadline、取消、关闭及进程处置策略。
+- [x] AUD-08：每进程单 Runtime 绑定一个目标 VM，关闭后不重建；deadline 只作监督，不提前释放在途借用，无法确认安全时隔离并由宿主处置进程。生命周期/停滞保留主机验证及真实 Android JRE 覆盖、冒烟通过。
 - [x] AUD-09：runner 独占结果目录，先归档旧制品再检查设备，原子记录本轮状态与 run_id，并核对安装 APK 散列。
 - [ ] AUD-10：按具体 Android JRE 制品扩展验证，不把桌面适配器测试当作 Android 双 libc 通过。
 - [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
 - [x] AUD-12：清理结果不确定时永久隔离桥、保留可能仍被使用的资源，由宿主丢弃进程；不自动杀应用。
 
-AUD-03 的错误映射和故障回滚保持有效；AUD-07 将原固定深度/上下文耗尽替换为动态增长，扩容失败继续保留异常、撤回未发布资源并使用独立应急 RPC。AUD-07 的线程、类交接、依赖归属及容量规则见 [JNI 交互契约](../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md)。AUD-08 仍没有通用 deadline 或取消确认协议，不能因 AUD-07 完成而将任意在途调用当作可安全撤销。
+AUD-03 的错误映射和故障回滚保持有效；AUD-07 将原固定深度/上下文耗尽替换为动态增长，扩容失败继续保留异常、撤回未发布资源并使用独立应急 RPC。AUD-07 的线程、类交接、依赖归属及容量规则见 [JNI 交互契约](../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md)。AUD-08 的决策为不提供任意 native 的通用超时返回或强制取消：期限由宿主监督，真实完成/取消确认前保留在途资源，不能将隔离等同于安全撤销。单实例、关闭与处置规则见 [生命周期契约](../android-jni/docs/LIFECYCLE.md)。
 
 ## 1. 装载与 JNI 资源
 
 | 项目 | 当前限制 | 作用域与耗尽行为 | 审计项 |
 | --- | --- | --- | --- |
-| Guest Runtime / 目标 VM | 每进程一套 | 单例；停止后不能重新配置并启动另一套 | AUD-08 |
+| Guest Runtime / 目标 VM | 每进程一套桥绑定一个选定目标 VM | 多模块/ClassLoader 共用；STOPPED/隔离均不可重建；core 不管理 JavaVM | AUD-08 |
 | 顶层 Guest 模块 | 固定 64 槽 | 所有模块共享；加载中、已加载、关闭中都占槽；耗尽返回 `GW_E_CAPACITY` | AUD-01 |
 | JNI 函数跳板 | 初始全局共享 512 槽，按 64 槽增长 | 按模块、Guest 函数地址和描述符复用；初始预留不创建 closure；分配失败使查找返回 `GW_E_CAPACITY`；JNI 注册返回 `JNI_ERR` 并保留或抛出 OOM | AUD-01、AUD-03 |
 | JNI 引用与 ID | 初始共用 16,384 槽，按 64 槽增长 | local/global/weak 引用与 methodID/fieldID 缓存共用；分配失败返回 NULL，保留已有异常或抛出 `OutOfMemoryError`；撤销本次新建的 VM 引用 | AUD-01、AUD-03 |
@@ -160,23 +160,25 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 
 源码与契约位置：[jni_capabilities.h](../android-jni/src/common/jni_capabilities.h)、[full_guest.c](../android-jni/src/guest/full_guest.c)、[guest_loader.c](../android-jni/src/guest/guest_loader.c)、[full_host.c](../android-jni/src/host/full_host.c)、[bindings.c](../android-jni/src/host/bindings.c)、[JvmAdapter.java](../jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java)、[LOADER_BACKEND.md](../android-jni/docs/LOADER_BACKEND.md)。
 
-### AUD-07 已审定规则 / AUD-08 待审问题
+### AUD-07 / AUD-08 交互与生命周期规则
 
-AUD-07 的规则和边界已实现并验证；任意等待/取消仍由 AUD-08 单独审理。
+AUD-07 管理线程身份、容量、所有权和借用；AUD-08 明确进程生命周期及等待失败的处置。通用强制取消不在支持范围；监督和丢弃执行进程属于宿主。
 
-| 问题 | 当前实现与风险 | 待审方向 |
+| 问题 | 当前实现与风险 | 审定规则与边界 |
 | --- | --- | --- |
 | 上下文生命周期 | Host 绑定至线程退出，Guest 附着至 detach；初始 16、按 16 项增长，退出后槽可复用，已发布页保留到进程退出 | 已完成；不改变线程 JNI/TLS 身份，不保证无限资源或自动发现后台工作 |
 | 重入深度 | 初始 12、按 16 层增长，帧地址稳定；独立应急 RPC 及禁止应急重入保护；v5 握手验证布局 | 已完成；实际 VM 栈/原生栈与索引溢出边界仍存在；诊断 handoff 只记录前 12 层 |
 | 执行 scope 与关闭等待 | 连续 TLS 表按模块代数记录当前线程持有的全部模块和递归次数；关闭祖先，或持有 scope 时关闭有活跃借用的其他模块，均在 CLOSING 前返回 BUSY；借用归还的正常等待保留 | 已登记 scope 与 loader 借用等待构成的环被保守拒绝；纯 pin 环、OnUnload/transport、用户锁/join/RPC 和未登记后台工作仍需宿主管理；完整规则见执行借用契约 |
 | 类注册所有权 | 一个类一个模块；注册/注销预留排斥其他更新，成功显式注销释放所有权；有主类注销不确定失败隔离桥 | 已完成；交接后旧模块卸载不能注销新所有者的类；未假设任意 VM/缓存入口并发卸载安全 |
 | 依赖库归属 | 当前调用/装载上下文决定逻辑所有者；无上下文须逐项得到同一顶层模块，拒绝共享依赖和混合批次 | 已完成；无上下文共享依赖注册明确不支持；Guest 自行管理的任意映像/函数指针寿命不自动推断 |
-| 发布后的 RPC 超时 | 命令仍可能访问 caller 栈上的参数、Guest 地址或 JNI frame；隔离 registry 不会延长这些借用对象的寿命 | deadline 检测、取消请求、对端确认和进程处置分开定义；未确认停止访问前不能直接超时返回并释放栈/上下文 |
-| 关闭与退出 | active 借用、事件等待、pthread join 均可能无期限阻塞；不能强制结束任意 Guest 函数并保证资源安全 | 分开审定优雅关闭期限与不可恢复处置；继续由宿主决定丢弃进程，不把 watchdog 警报等同于安全取消 |
+| 发布后的 RPC 超时 | 命令仍可能访问 caller 栈上的参数、Guest 地址或 JNI frame；隔离 registry 不会延长这些借用对象的寿命 | 宿主 deadline 仅触发监督；不提供通用取消确认。真实响应/可靠协作确认前保留栈、引用、buffer 与 scope；无法确认安全时隔离并处置进程，隔离本身不解除调用等待 |
+| 关闭与退出 | active 借用、事件等待、pthread join 均可能无期限阻塞；不能强制结束任意 Guest 函数并保证资源安全 | 所有者先停止生产者、完成模组工作并关闭模块；保守拒绝在途请求/回调和线程交接，允许静止的 Host 绑定。shutdown 同步且无内置期限；启动后的失败或关闭中的不确定失败隔离，禁止同进程重启；不自动杀应用 |
 
 旧版自等待由本地 [C 最小用例](../bionic-dlopen/build/aud07/ancestor_close.c) 和 [审阅结果](../bionic-dlopen/build/aud07/review.json) 记录：进入 CLOSING 后由外部 watchdog 结束独立进程。修复后的维护用例为 [execution_scopes.c](../bionic-dlopen/tests/execution_scopes.c)，真实 JNI 证据见 [本轮 coverage](../jvm-jni/build/aud07/coverage-final/summary.json)：四例、四次 BUSY、异常展开后继续调用、最终零引用/closure。新规则借鉴 LRPC 执行链记账和 SRCU 禁止自等待，未移植完整 SRCU；调用方契约和剩余边界见 [EXECUTION_SCOPES.md](../bionic-dlopen/docs/EXECUTION_SCOPES.md)。
 
 跨线程对照由 [close_waits.c](../bionic-dlopen/tests/close_waits.c) 维护。修改前的 [基线复现](../bionic-dlopen/build/aud07-waits/baseline.json) 确认两个线程都持有 scope、两个目标均进入 CLOSING；归还被各自的 close 返回阻断。修复后使用 barrier 保持所有 scope，要求两/三线程 close 全部 BUSY，且 pin 等待、探测后状态变化和无活跃借用目标关闭符合契约。真实 JNI 两线程对照见 [coverage](../jvm-jni/build/aud07-waits/coverage-final/summary.json)。
+
+生命周期的主机回归为 [lifecycle.py](../android-jni/tests/lifecycle.py)（单例/所有者/终态及故障注入）和 [audit.py](../android-jni/tests/audit.py)（在途栈保留、迟到响应、外部父进程处置）。真实 Android JRE 的 [coverage](../jvm-jni/build/aud08/coverage-final/summary.json) 与 [smoke](../jvm-jni/build/aud08/smoke-final/summary.json) 同时验证正常桥关闭、GNU 主线程退出和 VM 销毁；允许协调静止的 Host 绑定，不把空闲 JVM 线程误判为在途调用。报告检查器拒绝生命周期记录缺失、重复或任何失败字段。主机替身不替代 Android 验证，破坏性停滞不计作真机取消能力。
 
 ## 7. 运行时制品、部署和适配
 

@@ -39,3 +39,5 @@ GNU 侧由本项目 `build-guest.sh` 单独构建，通过环境变量显式指�
 Host binding、引用/ID 和注册类记录使用 [Zig 存储](docs/ZIG_BINDINGS.md)，构建需要 Zig 0.16.0。初始容量分别为 512、16,384、256，按 64 槽稳定分块扩容；旧 C 定容后端已移除。模块固定上限为 64。公共 ABI 和 libffi/JNI 执行由 C 薄层维护，Host/Guest 必须成套部署。
 
 线程绑定、动态上下文/重入帧、类注册交接及依赖函数归属见 [JNI 交互契约](docs/CONTEXTS_AND_OWNERSHIP.md)。
+
+每进程一套 Runtime 绑定一个目标 VM；关闭与隔离后均不可重建。所有者线程、正常关闭顺序、超时不能提前释放在途资源，以及宿主监督责任见 [生命周期与进程处置](docs/LIFECYCLE.md)。

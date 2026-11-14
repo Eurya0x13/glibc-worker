@@ -12,6 +12,7 @@
 #include "dlopen_backend.h"
 #include "jni_vm_adapter.h"
 #include "image_policy.h"
+#include "host_bridge.h"
 
 struct full_bridge *gw_host_bridge;
 JavaVM *gw_host_vm;
@@ -19,6 +20,20 @@ jint gw_host_jni_version;
 static struct shared *jni_shared;
 static _Atomic int jni_accepted;
 __thread struct host_context *gw_host_current;
+static _Atomic int lifecycle = GW_HOST_NEW;
+static pthread_t lifecycle_owner;
+
+enum gw_host_state full_host_state(void) {
+  return gw_dlopen_is_quarantined() ? GW_HOST_QUARANTINED
+                                    : (enum gw_host_state)atomic_load_explicit(
+                                          &lifecycle, memory_order_acquire);
+}
+
+static int lifecycle_on_owner(int expected) {
+  return full_host_state() == (enum gw_host_state)expected &&
+         pthread_equal(pthread_self(), lifecycle_owner) && gw_host_current &&
+         gw_host_current->id == 0;
+}
 
 struct host_slot {
   struct host_context context;
@@ -111,7 +126,8 @@ int gw_jni_register_vm_adapter(const struct gw_jni_vm_adapter_v1 *adapter) {
     return GW_ERROR;
   }
 
-  if (gw_host_bridge || (vm_adapter && vm_adapter != adapter)) {
+  if (full_host_state() != GW_HOST_NEW || gw_host_bridge ||
+      (vm_adapter && vm_adapter != adapter)) {
     return GW_ERROR;
   }
 
@@ -722,32 +738,10 @@ void full_host_poll(void) {
    BridgeTypes, configure the loader transports and image policy, install
    the legacy adapter when requested, and start the controller. The Guest
    handshake must still pass full_host_ready before any load is allowed. */
-int full_host_start(struct shared *s, JNIEnv *env,
-                    const struct gw_host_bridge_config *options) {
-  if (!s || !env || !options ||
-      (options->abi_version != GW_HOST_BRIDGE_CONFIG_V1 &&
-       options->abi_version != GW_HOST_BRIDGE_CONFIG_V2) ||
-      options->struct_size < GW_HOST_BRIDGE_CONFIG_V1_SIZE ||
-      (options->abi_version == GW_HOST_BRIDGE_CONFIG_V2 &&
-       options->struct_size < sizeof *options) ||
-      (options->flags &
-       ~(GW_HOST_LEGACY_JRE17 | GW_HOST_DIRECT_IMAGES |
-         GW_HOST_ARRAY_COPY_CACHE | GW_HOST_DISABLE_ARRAY_COPY_CACHE)) ||
-      !options->native_directory || !options->image_catalog) {
-    return JNI_ERR;
-  }
-
-  if (gw_host_bridge) {
-    return JNI_ERR; /* Explicitly refuse reinitialization in the same process.
-                     */
-  }
-
+static int start_bridge(struct shared *s, JNIEnv *env,
+                        const struct gw_host_bridge_config *options) {
   const char *dir = options->native_directory;
   legacy_adapter = (options->flags & GW_HOST_LEGACY_JRE17) != 0;
-  if (legacy_adapter && !vm_adapter) {
-    fprintf(stderr, "JNI adapter requested but jvm-jni is not registered\n");
-    return JNI_ERR;
-  }
   fh_array_copy_start((options->flags & GW_HOST_DISABLE_ARRAY_COPY_CACHE) == 0);
   printf("BINDING_REGISTRY backend=%s\n", fh_binding_backend());
 
@@ -859,10 +853,49 @@ fail:
   return JNI_ERR;
 }
 
+/* Claim the process once, before publishing any bridge state. Validation and
+   missing-adapter errors leave NEW; failures after the claim retain resources
+   and require process disposal rather than a partially initialized shutdown. */
+int full_host_start(struct shared *s, JNIEnv *env,
+                    const struct gw_host_bridge_config *options) {
+  if (!s || !env || !options ||
+      (options->abi_version != GW_HOST_BRIDGE_CONFIG_V1 &&
+       options->abi_version != GW_HOST_BRIDGE_CONFIG_V2) ||
+      options->struct_size < GW_HOST_BRIDGE_CONFIG_V1_SIZE ||
+      (options->abi_version == GW_HOST_BRIDGE_CONFIG_V2 &&
+       options->struct_size < sizeof *options) ||
+      (options->flags &
+       ~(GW_HOST_LEGACY_JRE17 | GW_HOST_DIRECT_IMAGES |
+         GW_HOST_ARRAY_COPY_CACHE | GW_HOST_DISABLE_ARRAY_COPY_CACHE)) ||
+      !options->native_directory || !options->image_catalog) {
+    return JNI_ERR;
+  }
+
+  if ((options->flags & GW_HOST_VM_ADAPTER) && !vm_adapter) {
+    fprintf(stderr, "JNI adapter requested but jvm-jni is not registered\n");
+    return JNI_ERR;
+  }
+  int expected = GW_HOST_NEW;
+  if (gw_dlopen_is_quarantined() ||
+      !atomic_compare_exchange_strong_explicit(
+          &lifecycle, &expected, GW_HOST_STARTING, memory_order_acq_rel,
+          memory_order_acquire)) {
+    return JNI_ERR;
+  }
+  lifecycle_owner = pthread_self();
+  int result = start_bridge(s, env, options);
+  if (result != JNI_OK) {
+    gw_dlopen_quarantine();
+  } else {
+    atomic_store_explicit(&lifecycle, GW_HOST_STARTED, memory_order_release);
+  }
+  return result;
+}
+
 /* Handshake gate once the Guest reached phase 2: verify the JNI (and any
    optional wake-filter/profile) acknowledgements, then activate the loader
    so dlopen interception begins. */
-int full_host_ready(void) {
+static int accept_guest(void) {
   if (jni_accept() != JNI_OK) {
     return JNI_ERR;
   }
@@ -904,24 +937,90 @@ int full_host_ready(void) {
   return rc == GW_OK ? JNI_OK : JNI_ERR;
 }
 
+int full_host_ready(void) {
+  if (!lifecycle_on_owner(GW_HOST_STARTED)) {
+    return JNI_ERR;
+  }
+  int result = accept_guest();
+  if (result == JNI_OK) {
+    atomic_store_explicit(&lifecycle, GW_HOST_READY, memory_order_release);
+  } else {
+    gw_dlopen_quarantine();
+  }
+  return result;
+}
+
+static int shutdown_requests_idle(struct fb_context *w) {
+  if (atomic_load(&w->emergency.active) ||
+      atomic_load(&w->emergency.request) !=
+          atomic_load(&w->emergency.response)) {
+    return 0;
+  }
+  for (int depth = 0; depth < fb_frame_capacity(w); depth++) {
+    struct fb_call *call = fb_call_at(w, depth);
+    struct fb_rpc *rpc = fb_rpc_at(w, depth);
+    if (atomic_load(&call->request) != atomic_load(&call->response) ||
+        atomic_load(&rpc->active) ||
+        atomic_load(&rpc->request) != atomic_load(&rpc->response)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* Idle Host bindings may outlive the bridge (e.g. VM reference-handler
+   threads); their TLS/private mappings remain pinned. Guest attachments must
+   detach and be reaped. FB_JOINED alone is insufficient: the Host destructor
+   may still be releasing references. The owner must already have stopped
+   producers; this snapshot is not a concurrent admission gate. */
+static int shutdown_contexts_idle(void) {
+  if (gw_host_current->depth || gw_host_current->module ||
+      gw_host_current->emergency) {
+    fprintf(stderr, "JNI shutdown refused: owner still executing\n");
+    return 0;
+  }
+  for (int i = 0; i < fb_context_capacity(gw_host_bridge); i++) {
+    struct fb_context *w = fb_context_at(gw_host_bridge, i);
+    int state = atomic_load_explicit(&w->state, memory_order_acquire);
+    if ((state != FB_FREE && (state != FB_RUNNING || atomic_load(&w->origin) ||
+                              atomic_load(&w->closing))) ||
+        !shutdown_requests_idle(w)) {
+      fprintf(stderr,
+              "JNI shutdown refused: context=%d state=%d origin=%d "
+              "host_done=%d guest_done=%d\n",
+              i, atomic_load(&w->state), atomic_load(&w->origin),
+              atomic_load(&w->host_done), atomic_load(&w->guest_done));
+      return 0;
+    }
+  }
+  return 1;
+}
+
 /* Teardown mirrors full_host_start on the launcher thread: the loader must
    stop cleanly (it refuses while guest images remain live), helpers are
    woken and joined, and the array cache, ID cache, and pinned refs are
    released. The bridge mapping is left in place on purpose — gw_host_bridge
    stays set so a second start is refused. */
 int full_host_shutdown(void) {
-  if (!gw_host_bridge) {
+  if (!lifecycle_on_owner(GW_HOST_READY) || !shutdown_contexts_idle()) {
     return JNI_ERR;
   }
+  atomic_store_explicit(&lifecycle, GW_HOST_STOPPING, memory_order_release);
   JNIEnv *env = gw_host_current->env;
   struct gw_loader_error error = {0};
   if (gw_loader_stop(&error) != GW_OK) {
     printf("LOADER_BACKEND teardown_refused=%s\n", error.message);
+    if (error.code == GW_E_BUSY) {
+      atomic_store_explicit(&lifecycle, GW_HOST_READY, memory_order_release);
+    } else {
+      gw_dlopen_quarantine();
+    }
     return JNI_ERR;
   }
 
   if (legacy_adapter && vm_adapter->restore(env, &error) != GW_OK) {
     printf("LOADER_BACKEND adapter_restore_failed=%s\n", error.message);
+    gw_dlopen_quarantine();
     return JNI_ERR;
   }
 
@@ -933,11 +1032,17 @@ int full_host_shutdown(void) {
     fb_event_notify(&fb_context_at(gw_host_bridge, i)->guest_event);
   }
 
-  pthread_join(controller, NULL);
+  if (pthread_join(controller, NULL)) {
+    gw_dlopen_quarantine();
+    return JNI_ERR;
+  }
   for (int i = 1; i < fb_context_capacity(gw_host_bridge); i++) {
     struct host_slot *slot = host_slot(i, 0);
     if (slot && slot->helper_live) {
-      pthread_join(slot->helper, NULL);
+      if (pthread_join(slot->helper, NULL)) {
+        gw_dlopen_quarantine();
+        return JNI_ERR;
+      }
       slot->helper_live = 0;
     }
   }
@@ -951,6 +1056,7 @@ int full_host_shutdown(void) {
   pthread_setspecific(context_key, NULL);
   pthread_key_delete(context_key);
   gw_host_current = NULL;
+  atomic_store_explicit(&lifecycle, GW_HOST_STOPPED, memory_order_release);
   printf("FULL_HOST_SHUTDOWN helpers_joined=1 id_cache_weak=0\n");
   return JNI_OK;
 }

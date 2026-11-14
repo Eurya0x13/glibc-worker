@@ -37,3 +37,7 @@ VM 已创建的 local/global/weak 引用若无法转换成 token，删除本次�
 `tests/failures.py` 以 ASan/UBSan 编译生产 Host/Guest RPC，注入共享帧/上下文页、私有记录、引用/ID 扩容、TLS 绑定和 worker 附着失败，检查错误状态、原异常、回滚和后续调用；使用 VM 和 worker 替身，不执行 Android 双 libc。`tests/bindings.py` 使用真实 libffi closure 检查帧/参数失败时不发命令，以及注册预留/扩容和 closure 分配失败的资源平衡。`tests/resources.py` 检查存储与 token 边界，`tests/audit.py` 检查装卸载事务。
 
 Android 组合 coverage 在真实 HotSpot 的严格 CheckJNI 下运行三轮 32 层重入和 Host/Guest 各 32 线程扩容、注册数量拒绝及释放后复用。结构化结果要求零桥错误和最终零活跃引用/closure；映射失败与应急 RPC 的故障注入在桌面生产路径夹具完成。它不等于全系统内存耗尽实验，不包含完整 ART 验证，也不保证任意模组能够恢复自身的部分操作。
+
+## 生命周期失败
+
+启动领取后的初始化失败、Guest 握手失败，以及关闭中的 VM 钩子恢复或 join 失败均使桥永久隔离。错误线程、错误状态和忙碌上下文的关闭请求直接拒绝，不进入资源释放。同步调用没有通用超时返回或取消确认协议；宿主的 deadline 不允许释放仍在借用的参数、引用或映像。完整顺序与监督责任见 [生命周期契约](LIFECYCLE.md)。

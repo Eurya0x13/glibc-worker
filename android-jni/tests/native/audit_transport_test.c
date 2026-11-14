@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <limits.h>
 #include <errno.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +26,8 @@ static int operations[32], operation_count, cleanup[32], cleanup_count;
 static const char *exception_type;
 static struct binding binding;
 static int fail_pages;
+static _Atomic int stall, published, returned;
+static int monitor_fd, lose_reply;
 void *__real_mmap(void *, size_t, int, int, int, off_t);
 
 void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
@@ -148,6 +152,10 @@ struct binding *make_binding(uint64_t id, uintptr_t guest, const char *sig,
 void full_host_poll(void) {
   struct fb_call *command = fb_call_at(&bridge.ctx[0], context.depth - 1);
   int sequence = atomic_load_explicit(&command->request, memory_order_acquire);
+  if (atomic_load(&stall)) {
+    atomic_store_explicit(&published, 1, memory_order_release);
+    return;
+  }
   assert(sequence != atomic_load(&command->response));
   operations[operation_count++] = command->op;
   cleanup[cleanup_count++] = command->op;
@@ -286,6 +294,84 @@ static void scenario(unsigned test) {
   }
 }
 
+/* Watchdog runs outside the blocked caller. Quarantine is a refusal gate,
+   never an acknowledgement that the Guest stopped using borrowed memory. */
+static void *watch_pending(void *unused) {
+  (void)unused;
+  while (!atomic_load_explicit(&published, memory_order_acquire)) {
+    sched_yield();
+  }
+  struct fb_call *call = &bridge.ctx[0].call[0];
+  int sequence = atomic_load_explicit(&call->request, memory_order_acquire);
+  assert(sequence != atomic_load(&call->response));
+  gw_dlopen_quarantine();
+  fb_event_notify(&bridge.ctx[0].host_event);
+  usleep(25000); /* Test observation window, not a production deadline. */
+  assert(!atomic_load(&returned) && context.depth == 1);
+  assert(sequence != atomic_load(&call->response));
+  int *borrowed = (int *)call->args[0].l;
+  assert(*borrowed == 73 && !released && !dropped && !popped);
+  assert(write(monitor_fd, "P", 1) == 1);
+  if (!lose_reply) {
+    *borrowed = 94;
+    call->result.i = *borrowed;
+    atomic_store_explicit(&call->response, sequence, memory_order_release);
+    fb_event_notify(&bridge.ctx[0].host_event);
+  }
+  return NULL;
+}
+
+static void pending_case(int lost) {
+  int channel[2];
+  assert(!pipe(channel));
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (!pid) {
+    close(channel[0]);
+    monitor_fd = channel[1];
+    lose_reply = lost;
+    context.env = &environment;
+    int borrowed = 73;
+    jvalue args[FB_ARGS + 2] = {{.l = (jobject)&borrowed}};
+    atomic_store(&stall, 1);
+    pthread_t watcher;
+    assert(!pthread_create(&watcher, NULL, watch_pending, NULL));
+    jvalue result = fh_command(&context, FB_NATIVE, 0, "()I", args);
+    atomic_store(&returned, 1);
+    assert(!lost && result.i == 94 && borrowed == 94 && !context.depth);
+    assert(!pthread_join(watcher, NULL));
+    assert(gw_dlopen_is_quarantined());
+    fh_command(&context, FB_NATIVE, 0, "()I", NULL);
+    assert(context.command_error == GW_E_QUARANTINED);
+    assert(write(monitor_fd, "D", 1) == 1);
+    _exit(0);
+  }
+  close(channel[1]);
+  struct pollfd event = {.fd = channel[0], .events = POLLIN};
+  char stage = 0;
+  int ready = poll(&event, 1, 5000);
+  int observed = ready > 0 && read(channel[0], &stage, 1) == 1 && stage == 'P';
+  if (lost || !observed) {
+    /* Only the test supervisor terminates its disposable child process. */
+    assert(!kill(pid, SIGKILL));
+  } else {
+    ready = poll(&event, 1, 5000);
+    if (ready <= 0 || read(channel[0], &stage, 1) != 1 || stage != 'D') {
+      kill(pid, SIGKILL);
+      observed = 0;
+    }
+  }
+  int status;
+  assert(waitpid(pid, &status, 0) == pid);
+  close(channel[0]);
+  assert(observed);
+  if (lost) {
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+  } else {
+    assert(WIFEXITED(status) && !WEXITSTATUS(status));
+  }
+}
+
 int main(void) {
   for (unsigned test = 0; test < 13; test++) {
     pid_t pid = fork();
@@ -301,7 +387,11 @@ int main(void) {
       abort();
     }
   }
+  pending_case(0);
+  pending_case(1);
   puts(
-      "{\"result\":\"PASS\",\"scenarios\":13,\"cleanup_order\":true,"
-      "\"quarantine\":true,\"exception_preserved\":true}");
+      "{\"result\":\"PASS\",\"scenarios\":15,\"cleanup_order\":true,"
+      "\"quarantine\":true,\"exception_preserved\":true,"
+      "\"pending_call_retained\":true,\"late_reply\":true,"
+      "\"supervisor_disposal\":true}");
 }

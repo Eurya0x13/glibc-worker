@@ -45,6 +45,21 @@ def verify(
         "SMOKE_TEST_RESULT=PASS group=" + group,
     ]
 
+    runtime_rows = re.findall(
+        r"^RUNTIME_LIFECYCLE_TEST (\{[^\n]+\})$", report, re.MULTILINE
+    )
+    if len(runtime_rows) != 1:
+        raise ValueError("Missing unique runtime lifecycle evidence")
+    runtime_lifecycle = json.loads(runtime_rows[0])
+    if runtime_lifecycle != {
+        "result": "PASS",
+        "singleton": True,
+        "foreign_shutdown_refused": True,
+        "stopped": True,
+        "restart_refused": True,
+    }:
+        raise ValueError("Runtime lifecycle contract failed")
+
     mutex_rows = re.findall(
         r"^MUTEX_CONTRACT (\{[^\n]+\})$", report, re.MULTILINE
     )
@@ -341,6 +356,7 @@ def verify(
         "binding_capacity": capacity_rows,
         "resource_capacity": resource_rows,
         "bridge_lifecycle": lifecycle,
+        "runtime_lifecycle": runtime_lifecycle,
         "descriptor_boundaries": descriptor_rows,
         "failure_boundaries": failure_rows,
         "execution_scopes": scope_rows,

@@ -90,3 +90,7 @@ python3 jvm-jni/tests/scripts/test-adapters.py --runtime 6:/path/to/reviewed-jre
 故障注入只在测试中临时替换当前线程 JNI 表的 RegisterNatives，其余函数和 CheckJNI 保持原样；生产适配器没有此开关。每次运行先启动同参数、未加载适配器的空白程序作为启动对照。部分 JRE8 launcher 会在进入 main 前按参数数目产生 JNI 告警，必须与该对照逐字匹配；main 之后的任何 JNI 告警都判失败。ClassLoader 回收使用 GC 和有界等待，不通过 System.runFinalization 引入该旧 VM 的额外告警。
 
 输出在 `jvm-jni/build/adapter-tests/`，包括编译输入、每个 VM 的散列、JSON 断言与原始日志；不通过打印措辞判定普通断言。Android 覆盖另外输出 JNI 能力协商的结构化结果，确认当前版本可用和未来版本拒绝。
+
+## 单 Runtime 生命周期
+
+smoke/coverage 必须各输出唯一且通过的 `RUNTIME_LIFECYCLE_TEST`：一进程一次启动、错误线程关闭拒绝、正常 STOPPED、重复关闭和重启拒绝。后续 Guest 线程退出及 VM 销毁仍独立验证。桌面 `android-jni/tests/lifecycle.py` 覆盖初始化/关闭故障和资源保留；`audit.py` 覆盖隔离后在途调用保留、迟到响应及由外部测试父进程处置永久停滞子进程。见 [生命周期契约](../../android-jni/docs/LIFECYCLE.md)。

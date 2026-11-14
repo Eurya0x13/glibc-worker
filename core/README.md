@@ -24,7 +24,7 @@ ctest --test-dir build --output-on-failure
 
 `rpc_sequence.h` 将有符号原子序号的下一值明确为 `INT_MAX → INT_MIN`，避免 C 有符号溢出；零同样是有效序号。它是每槽最多一个在途请求的等值令牌，不可用于大小排序或并发生产者分配。边界测试在四种通知/轮询配置下执行真实 pthread/futex 请求与响应，覆盖两处回绕。
 
-core 提供低层 bootstrap，不提供任意 runtime 的一键启动/销毁 API。宿主仍负责部署、栈与共享区生命周期、信号策略、启动参数和线程退出确认；GNU 映射当前保留到进程退出。core 不管理 JavaVM，也不混用两套 libc 的 allocator、FILE 或 pthread 对象。
+core 提供低层 bootstrap，不提供任意 runtime 的一键启动/销毁 API。宿主仍负责部署、栈与共享区生命周期、信号策略、启动参数和线程退出确认；GNU 映射当前保留到进程退出。超时或通知唤醒不等于对端已经停止访问共享区/借用地址；未确认线程退出前不得释放其栈和映像。若宿主选择丢弃执行进程，应由其监督路径处理，core 不取消任意函数或自动结束宿主。core 不管理 JavaVM，也不混用两套 libc 的 allocator、FILE 或 pthread 对象。
 
 等待与诊断设计见 [WAITING](docs/WAITING.md)，实验性通知过滤见 [WAKE_FILTER](docs/WAKE_FILTER.md)。JNI 上下文配对与对象协议属于上层 android-jni。
 
