@@ -20,5 +20,5 @@ fi
   -I"$GW_CORE_INCLUDE" -I"$GW_DLOPEN_INCLUDE" -I"$GW_JNI_INCLUDE" \
   -I"$(dirname "$GW_JNI_GENERATED")" -I"$GW_FFI_GUEST/include" \
   "$project_root/src/guest/service_main.c" "$project_root/src/guest/full_guest.c" \
-  "$project_root/src/guest/guest_loader.c" "$GW_FFI_GUEST/lib/libffi.a" \
+  "$project_root/src/guest/rpc.c" "$project_root/src/guest/guest_loader.c" "$GW_FFI_GUEST/lib/libffi.a" \
   -ldl -pthread -o "$GW_GUEST_OUT"

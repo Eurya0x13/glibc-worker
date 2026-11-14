@@ -8,7 +8,7 @@
 
 - [x] AUD-01：模块固定 64 槽；binding、引用/ID、注册类记录初始容量为 512 / 16,384 / 256，统一使用 Zig 稳定分块扩容；完成 C 对照后删除定容后端。
 - [x] AUD-02：反射、ID、注册、查找和命令路径检查描述符长度后完整复制；超长明确拒绝。
-- [ ] AUD-03：统一资源耗尽和重入超限的失败语义，避免仅返回 NULL/零值而丢失明确错误。
+- [x] AUD-03：资源耗尽与 Host/Guest 重入超限使用明确异常或结构化错误；保留已有异常，回滚未发布资源，深度耗尽仍可查询/清除异常及释放资源。
 - [x] AUD-04：启动栈写入前校验 argc、地址、参数、固定环境和完整帧空间；保护页/哨兵回归通过。
 - [x] AUD-05：RPC 序号明确无溢出回绕；引用/ID 代数耗尽永久退役；现行 Zig 及已删除 C 对照均有边界验证。
 - [ ] AUD-06：验证 glibc 补丁关闭 robust-list 登记后的互斥量语义，明确支持契约。
@@ -19,7 +19,7 @@
 - [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
 - [x] AUD-12：清理结果不确定时永久隔离桥、保留可能仍被使用的资源，由宿主丢弃进程；不自动杀应用。
 
-AUD-03 仅完成 Host 命令超深和超长的明确错误；Guest 侧及资源耗尽异常仍未统一。AUD-07 已补注册期间模块借用及 CLOSING 后拒绝发布，但上下文/依赖归属仍待审。AUD-08 已确定不可恢复清理的进程处置方式，尚无通用 deadline 或取消协议。
+AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验证，具体契约见 [JNI 失败处理](../android-jni/docs/FAILURES.md)。AUD-07 已补注册期间模块借用及 CLOSING 后拒绝发布，但上下文/依赖归属仍待审。AUD-08 已确定不可恢复清理的进程处置方式，尚无通用 deadline 或取消协议。
 
 ## 1. 装载与 JNI 资源
 
@@ -27,14 +27,14 @@ AUD-03 仅完成 Host 命令超深和超长的明确错误；Guest 侧及资源�
 | --- | --- | --- | --- |
 | Guest Runtime / 目标 VM | 每进程一套 | 单例；停止后不能重新配置并启动另一套 | AUD-08 |
 | 顶层 Guest 模块 | 固定 64 槽 | 所有模块共享；加载中、已加载、关闭中都占槽；耗尽返回 `GW_E_CAPACITY` | AUD-01 |
-| JNI 函数跳板 | 初始全局共享 512 槽，按 64 槽增长 | 按模块、Guest 函数地址和描述符复用；初始预留不创建 closure；分配失败使查找或注册失败 | AUD-01、AUD-03 |
-| JNI 引用与 ID | 初始共用 16,384 槽，按 64 槽增长 | local/global/weak 引用与 methodID/fieldID 缓存共用；耗尽返回 NULL 并累计桥错误，未统一抛出 OOM | AUD-01、AUD-03 |
-| 注册类所有权记录 | 初始共用 256 槽，按 64 槽增长 | 所有模块共享；无可用记录使 `RegisterNatives` 失败 | AUD-01、AUD-07 |
+| JNI 函数跳板 | 初始全局共享 512 槽，按 64 槽增长 | 按模块、Guest 函数地址和描述符复用；初始预留不创建 closure；分配失败使查找返回 `GW_E_CAPACITY`；JNI 注册返回 `JNI_ERR` 并保留或抛出 OOM | AUD-01、AUD-03 |
+| JNI 引用与 ID | 初始共用 16,384 槽，按 64 槽增长 | local/global/weak 引用与 methodID/fieldID 缓存共用；分配失败返回 NULL，保留已有异常或抛出 `OutOfMemoryError`；撤销本次新建的 VM 引用 | AUD-01、AUD-03 |
+| 注册类所有权记录 | 初始共用 256 槽，按 64 槽增长 | 所有模块共享；分配失败使 `RegisterNatives` 返回 `JNI_ERR` 并保留或抛出 OOM | AUD-01、AUD-07 |
 | 同一 Java 类的注册所有者 | 一个 Guest 模块 | 其他模块不能同时持有该类的 native 注册 | AUD-07 |
-| 单次 `RegisterNatives` | 最多 64 个方法 | 超过返回 `JNI_ERR`；分批仍受共享跳板和注册记录容量约束 | AUD-01、AUD-03 |
-| JNI 上下文 | 默认及当前 ARM64 构建为 16 个 | 包含 owner 上下文，额外剩 15 个；Host 调用线程与 Guest 附着线程共享 | AUD-07 |
+| 单次 `RegisterNatives` | 最多 64 个方法 | 非法数量返回 `JNI_ERR` 并抛 `IllegalArgumentException`；分批仍受共享跳板和注册记录容量约束 | AUD-01、AUD-03 |
+| JNI 上下文 | 默认及当前 ARM64 构建为 16 个 | 包含 owner 上下文，额外剩 15 个；Host 调用线程与 Guest 附着线程共享；耗尽分别为 OOM / `JNI_ENOMEM` | AUD-07 |
 | 上下文构建范围 | `GW_CONTEXTS=2..256` | 组合脚本允许的构建范围；不是运行时热调整参数 | AUD-07 |
-| 调用协议深度 | 12 个槽，索引 0..11 | Host 命令超深抛 StackOverflowError 并记录 CAPACITY；Guest 部分路径仍累计错误并返回零值；可重入层数受双向调用影响 | AUD-03、AUD-07 |
+| 调用协议深度 | 12 个普通调用槽，另有 1 个应急 RPC 槽 | Host/Guest 超深抛 `StackOverflowError`；应急槽只允许报告失败、异常处理和必要释放，不增加 native 重入容量 | AUD-03、AUD-07 |
 | native 显式参数 | 最多 32 个 | 不含隐含的 `JNIEnv*` 和对象/类参数；每个 long/double 仍只占一个 `jvalue` 参数项 | AUD-07 |
 
 64 个槽限制的是本项目管理的顶层库，不是进程中所有 `.so` 的数量：
@@ -93,7 +93,7 @@ AUD-03 仅完成 Host 命令超深和超长的明确错误；Guest 侧及资源�
 
 源码位置：[elf_route.h](../bionic-dlopen/src/elf_route.h)、[elf_route.c](../bionic-dlopen/src/elf_route.c)、[loader.c](../bionic-dlopen/src/loader.c) 的 `loader_open`。测试：[elf_route.py](../bionic-dlopen/tests/elf_route.py)、[loader_contract.c](../bionic-dlopen/tests/loader_contract.c)。
 
-状态：49 项 ASan/UBSan 元数据检查、纯 C 装载检查及 删除前 C 对照及默认 Zig Android 真机组合回归通过，见第 9 节。
+状态：49 项 ASan/UBSan 元数据检查、纯 C 装载检查、删除前 C 对照及默认 Zig Android 真机组合回归通过，见第 9 节。
 
 ## 4. 数组副本缓存
 
@@ -148,7 +148,7 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | 等待和取消 | 无通用 deadline / 超时取消协议；对端卡住可能无限等待 |
 | 跨 libc 对象 | 不可自由混用 allocator、`FILE`、pthread 对象、C++ 对象及异常；Guest 内部使用 C++ 不因此被禁止 |
 | 进程故障隔离 | 同进程执行；Guest 原生崩溃和进程级 `exit` 没有进程隔离 |
-| Host/Guest 协议 | 配置必须匹配并成套部署；JNI 能力与装载协议 v3 均要求 Guest 确认；核对共享区大小、上下文数和模块上限后才 ready |
+| Host/Guest 协议 | 配置必须匹配并成套部署；JNI 能力与装载协议 v4 均要求 Guest 确认；核对共享区大小、上下文数和模块上限后才 ready |
 | runtime 组合 | 模块化 DSOs 与兼容单 DSO 二选一，不能在同一进程重复装入两套单例状态 |
 
 存储初始容量集中在 [resource_limits.h](../android-jni/src/host/resource_limits.h)。超过初始容量时按块增长，已有地址和 token 不移动；空块保留并复用至 store 销毁。初始容量不能防止无限资源请求或保证扩容后的性能，ID/类身份路径仍扫描已分配容量。
@@ -201,7 +201,7 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 
 引用槽位通过缩小配置中的代数上限验证耗尽退役，不以运行 2³² 次替代。RPC 在四种通知/轮询组合下以真实 pthread/futex 交换跨过 INT_MAX 和零；序号不得排序或作为并发生产者分配器。
 
-源码位置：[loader.c](../bionic-dlopen/src/loader.c) 的 `reserve`、[references.c](../android-jni/src/host/references.c) 的引用分配路径及 [slot_store.zig](../android-jni/src/host/slot_store.zig)、[command.c](../android-jni/src/host/command.c) 的 `fh_command`、[full_guest.c](../android-jni/src/guest/full_guest.c) 的 `fg_rpc`、[rpc_metrics.h](../core/include/rpc_metrics.h)、[rpc_handoff.h](../core/include/rpc_handoff.h)、[build-runtime.sh](../scripts/build-runtime.sh)。
+源码位置：[loader.c](../bionic-dlopen/src/loader.c) 的 `reserve`、[references.c](../android-jni/src/host/references.c) 的引用分配路径及 [slot_store.zig](../android-jni/src/host/slot_store.zig)、[command.c](../android-jni/src/host/command.c) 的 `fh_command`、[rpc.c](../android-jni/src/guest/rpc.c) 的 `fg_rpc`、[rpc_metrics.h](../core/include/rpc_metrics.h)、[rpc_handoff.h](../core/include/rpc_handoff.h)、[build-runtime.sh](../scripts/build-runtime.sh)。
 
 ## 9. 已有证据与未完成验证
 
@@ -213,15 +213,17 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 | Android 固定 JRE17 | 删除前 C 对照及当前默认 Zig 均通过：142 项 Java/JNI、26 项装载、234/235 槽功能触达；Guest 退出与 VM 销毁完成 | 完整 JNI 规范、所有源码分支或其他 Android JRE 制品 |
 | ELF 分类三态与边界 | 49 项 ASan/UBSan 检查、C 装载检查和当前 Android 组合回归通过 | 真实 GNU loader 的完整 ELF 验证 |
 | Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 所有资源上限已取消、任意并发卸载安全或性能提升 |
-| 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消、所有耗尽路径统一异常 |
+| 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消 |
+| AUD-03 失败语义 | ASan/UBSan 的生产 RPC/引用/ID/上下文故障注入、libffi/注册回滚检查及真机三轮各 6 项失败/恢复检查通过；9 个预期桥错误逐轮核对，最终引用和 closure 为 0 | 全系统 OOM 行为、任意第三方模组的异常恢复、ART 完整兼容 |
 | runtime 补丁流程 | 8 项回归检查；修复静默跳过补丁后，C 与 Zig 真机组合均通过 | robust mutex owner-death 恢复语义 |
 
 本地结果在各项目 `build/`，不是源代码发布包的必备文件：
 
 - [桌面适配器结果](../jvm-jni/build/adapter-tests/summary.json)。
 - [ELF 边界结果](../bionic-dlopen/build/test-results/aud01-elf-route.json)。
-- [删除前 C 对照](../jvm-jni/build/aud01/coverage-c-control-v3/summary.json) 与 [当前默认 Zig 真机结果](../jvm-jni/build/aud01/coverage-default-clean/summary.json)。
+- [删除前 C 对照](../jvm-jni/build/aud01/coverage-c-control-v3/summary.json) 与 [AUD-01 默认 Zig 真机结果](../jvm-jni/build/aud01/coverage-default-clean/summary.json)。
 - [AUD-01 容量与对照汇总](../android-jni/build/aud01/summary.json) 保存当前容量边界、删除前对照及删除后默认回归证据。
+- [AUD-03 验证汇总](../android-jni/build/aud03/summary.json) 及 [真机覆盖](../jvm-jni/build/aud03/coverage-final/summary.json) 记录故障注入、应急 RPC、资源恢复及本轮制品。
 - [审计验证汇总](../android-jni/build/audit-fixes/summary.json) 汇合边界、故障注入、真机和 SDK 检查；[Host 资源管理验证](../android-jni/build/zig-resources/summary.json) 保留先前扩容证据。
 
 旧 runner 产生的历史目录可能保留过期 PASS，不能据此推定当前尝试通过。当前 runner 在任何设备检查前隔离旧制品，发布的 summary 必须与 run-state.json 同为 PASS、run_id 一致，并且 apk_sha256 与 installed_apk_sha256 一致。失败记录为 FAILED/INTERRUPTED；强制终止留下的 RUNNING 不构成通过。目录中存在旧 PASS 文件本身不是证据。
@@ -229,7 +231,7 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 | 记录 | SHA256 |
 | --- | --- |
 | 删除前 C 对照 PASS APK | `98467869d7a1061888fe2831319f3fd7fe5d2da2708122fe19064daf8394e217` |
-| 当前默认 Zig PASS APK | `93e4e50a381fbea8fabcccd1f2420247506bf92ad7be7ba1737ea7a73e6dcf3b` |
+| AUD-01 默认 Zig PASS APK | `93e4e50a381fbea8fabcccd1f2420247506bf92ad7be7ba1737ea7a73e6dcf3b` |
 
 AUD-09 的验证包括真实 runner 的设备发现失败：旧 PASS 在 ABI 查询前已归档，本轮没有成功 summary。结果目录互斥不代替设备级互斥，同一手机仍必须按顺序运行。
 

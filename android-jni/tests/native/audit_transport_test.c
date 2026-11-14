@@ -87,7 +87,8 @@ static const struct JNINativeInterface_ vm = {
     .DeleteLocalRef = delete_local};
 static JNIEnv environment = &vm;
 
-struct host_context *fh_context(JNIEnv *env) {
+struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
+  (void)error;
   context.env = env;
   return &context;
 }

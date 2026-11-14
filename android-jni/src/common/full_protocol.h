@@ -10,6 +10,18 @@
 #define FB_CONTEXTS 16
 #endif
 #define FB_DEPTH 12
+#define FB_RPC_SLOTS (FB_DEPTH + 1)
+/* A reserved slot reports errors and permits exception/cleanup JNI at the
+   nesting limit. It never starts another Guest native invocation. */
+#define FB_RPC_REPORT_FAILURE (-1)
+
+enum fb_failure {
+  FB_FAILURE_MEMORY = 1,
+  FB_FAILURE_DEPTH,
+  FB_FAILURE_ARGUMENT,
+  FB_FAILURE_STATE
+};
+
 _Static_assert(FB_DEPTH == GW_HANDOFF_DEPTH,
                "Diagnostic depth slots must follow the protocol");
 #define FB_ARGS 32
@@ -39,9 +51,9 @@ struct fb_context {
   struct fb_event host_event, guest_event;
   _Atomic int state, closing, host_done, guest_done;
   _Atomic int origin;
-  int host_tid, guest_tid, daemon;
+  int host_tid, guest_tid, daemon, attach_result;
   char name[64];
-  struct fb_rpc rpc[FB_DEPTH];
+  struct fb_rpc rpc[FB_RPC_SLOTS];
   struct fb_call call[FB_DEPTH];
 };
 
@@ -101,7 +113,7 @@ enum {
    capacity. Use idle bootstrap args, preserving shared POD layout. Publish the
    ACK with the existing release/acquire phase-ready edge before any module can
    open. */
-#define FB_LOADER_PROTOCOL 3
+#define FB_LOADER_PROTOCOL 4
 #define FB_LOADER_HELLO 0x47574c48
 #define FB_LOADER_ACK 0x47574c41
 

@@ -72,78 +72,6 @@ static void metrics_connect(struct shared *shared) {
    * this pointer. No request epoch is advanced; this is not an RPC. */
 }
 #endif
-static void fg_pump(void);
-
-static int fg_valid(JNIEnv *env) {
-  return G && gid >= 0 && env == &fg_env;
-}
-
-static jvalue fg_rpc(JNIEnv *env, int api, jvalue *args) {
-  jvalue zero = {0};
-  if (!fg_valid(env) || gdepth >= FB_DEPTH) {
-    if (G) {
-      atomic_fetch_add(&G->errors, 1);
-    }
-    return zero;
-  }
-
-  GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
-#if GW_RPC_PROFILE
-  struct gw_rpc_token metrics = gw_rpc_begin();
-#endif
-
-  GW_RPC_SCOPE(pack, GW_RPC_GUEST_RPC_PACK, -1);
-  atomic_fetch_add(&G->hits[api], 1);
-  struct fb_rpc *r = &G->ctx[gid].rpc[gdepth];
-  memcpy(r->a, args, sizeof r->a);
-  r->module = gmodule;
-  r->api = api;
-  r->error = 0;
-  r->result = zero;
-  int seq = gw_rpc_next_sequence(
-      atomic_load_explicit(&r->request, memory_order_relaxed));
-#if GW_RPC_PROFILE
-  gw_handoff_begin(&gw_rpc_current->handoff, (unsigned)gdepth);
-#endif
-  atomic_store_explicit(&r->request, seq, memory_order_release);
-  GW_RPC_SCOPE_END(pack);
-
-  fb_event_notify(&G->ctx[gid].host_event);
-  for (;;) {
-    uint32_t observed = fb_event_sample(&G->ctx[gid].guest_event);
-    fg_pump();
-    if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
-      break;
-    }
-#if GW_RPC_READY_POLL
-    fb_event_wait_active_response(&G->ctx[gid].guest_event, observed,
-                                  &r->response, seq);
-#else
-    fb_event_wait_active(&G->ctx[gid].guest_event, observed);
-#endif
-  }
-#if GW_RPC_PROFILE
-  gw_handoff_finish(
-      &gw_rpc_current->handoff, (unsigned)gdepth,
-      (struct gw_handoff_record){.module = gmodule,
-                                 .api = (unsigned)api,
-                                 .context = (unsigned)gid,
-                                 .depth = (unsigned)gdepth,
-                                 .host_tid = G->ctx[gid].host_tid,
-                                 .guest_tid = G->ctx[gid].guest_tid,
-                                 .request = (unsigned)seq});
-#endif
-
-  if (r->error) {
-    atomic_fetch_add(&G->errors, 1);
-  }
-#if GW_RPC_PROFILE
-  gw_rpc_end(metrics);
-#endif
-  GW_RPC_SCOPE_END(boundary);
-  return r->result;
-}
-
 #include "generated/guest-jni.inc"
 
 static int version_ok(jint v) {
@@ -177,10 +105,13 @@ static jint fg_attach_common(JavaVM *vm, JNIEnv **env, void *opaque,
   if (G) {
     atomic_fetch_add(&G->hits[daemon ? 234 : 231], 1);
   }
-  if (!env || !G) {
+  if (!env) {
     return JNI_ERR;
   }
   *env = NULL;
+  if (!G) {
+    return JNI_ERR;
+  }
   JavaVMAttachArgs *args = opaque;
   if (args && !version_ok(args->version)) {
     return JNI_EVERSION;
@@ -226,6 +157,7 @@ static jint fg_attach_common(JavaVM *vm, JNIEnv **env, void *opaque,
         break;
       }
       if (attached == FB_ATTACH_FAILED) {
+        jint result = c->attach_result != JNI_OK ? c->attach_result : JNI_ERR;
 #if GW_RPC_PROFILE
         /* Retire the writer before the controller can recycle this
          * slot. The final control wake has no context metrics row. */
@@ -233,7 +165,7 @@ static jint fg_attach_common(JavaVM *vm, JNIEnv **env, void *opaque,
 #endif
         atomic_store_explicit(&c->guest_done, 1, memory_order_release);
         fb_event_notify(&G->host_control);
-        return JNI_ERR;
+        return result; /* guest_done permits immediate slot reuse. */
       }
       fb_event_wait(&c->guest_event, observed);
     }
@@ -331,7 +263,7 @@ static void *fg_worker(void *arg) {
   return NULL;
 }
 
-static void fg_pump(void) {
+void fg_pump(void) {
   if (gid < 0 || gdepth >= FB_DEPTH) {
     return;
   }
@@ -344,6 +276,7 @@ static void fg_pump(void) {
         worker_live[i] = 1;
         if (pthread_create(&workers[i], NULL, fg_worker, (void *)(intptr_t)i)) {
           worker_live[i] = 0;
+          c->attach_result = JNI_ENOMEM;
           atomic_store(&c->state, FB_ATTACH_FAILED);
           atomic_fetch_add(&G->errors, 1);
           fb_event_notify(&c->host_event);

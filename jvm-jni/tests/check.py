@@ -34,7 +34,7 @@ def verify(
         "JRE_CREATE_RESULT=0",
         "distinct=1",
         "JRE_BRIDGE_RESULT=PASS",
-        "LOADER_PROTOCOL version=3 matched=1",
+        "LOADER_PROTOCOL version=4 matched=1",
         "JRE_JAVA_RESUMED",
         "JRE_DESTROY_RESULT=0",
         "JRE_VM_ENUM stage=destroyed rc=0 count=0",
@@ -85,7 +85,7 @@ def verify(
         }
         if any(
             lifecycle.get(key) != 0
-            for key in ("globals", "weak", "locals", "closures", "errors")
+            for key in ("globals", "weak", "locals", "closures")
         ):
             raise ValueError("Bridge resource leak or error: " + str(lifecycle))
         if "loads" not in lifecycle or lifecycle["loads"] != lifecycle.get(
@@ -119,6 +119,24 @@ def verify(
         ]:
             raise ValueError(
                 "Missing complete Zig reference/class capacity cycles"
+            )
+
+    failure_rows = [
+        json.loads(row)
+        for row in re.findall(r"AUDIT_FAILURE_TEST (\{[^\n]+\})", report)
+    ]
+    if group == "coverage":
+        expected_rows = [
+            {"cycle": cycle, "checks": 6, "expected_errors": 3}
+            for cycle in range(3)
+        ]
+        if (
+            failure_rows != expected_rows
+            or lifecycle.get("errors") != 9
+            or lifecycle.get("expected_errors") != 9
+        ):
+            raise ValueError(
+                "Missing or unexpected bridge failure/recovery evidence"
             )
 
     descriptor_rows = [
@@ -217,6 +235,7 @@ def verify(
         "resource_capacity": resource_rows,
         "bridge_lifecycle": lifecycle,
         "descriptor_boundaries": descriptor_rows,
+        "failure_boundaries": failure_rows,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit
         else "strict-checkjni-interpreter",

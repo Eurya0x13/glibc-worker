@@ -68,12 +68,9 @@ static int quarantine(struct gw_loader_error *error, const char *reason) {
 
 jint fh_transport_load(JNIEnv *env, uint64_t id, const char *image,
                        struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
+  struct host_context *c = fh_context(env, error);
   struct load_frame saved;
   if (!c || enter_frame(c, id, &saved, error) != GW_OK) {
-    if (!c) {
-      gw_loader_fail(error, GW_E_BRIDGE, "No Host context available");
-    }
     return JNI_ERR;
   }
 
@@ -123,10 +120,10 @@ jint fh_transport_load(JNIEnv *env, uint64_t id, const char *image,
 
 int fh_transport_close(JNIEnv *env, uint64_t id,
                        struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
+  struct host_context *c = fh_context(env, error);
   struct load_frame saved;
   if (!c) {
-    return gw_loader_fail(error, GW_E_BRIDGE, "No Host context for unload");
+    return GW_ERROR;
   }
   if (enter_frame(c, id, &saved, error) != GW_OK) {
     return GW_ERROR;
@@ -163,10 +160,9 @@ int fh_transport_close(JNIEnv *env, uint64_t id,
 int fh_transport_find(JNIEnv *env, uint64_t id, const char *symbol,
                       const char *descriptor, void **entry,
                       struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
+  struct host_context *c = fh_context(env, error);
   if (!c) {
-    return gw_loader_fail(error, GW_E_BRIDGE,
-                          "No Host context for symbol lookup");
+    return GW_ERROR;
   }
   uint64_t previous = c->module;
   c->module = id;

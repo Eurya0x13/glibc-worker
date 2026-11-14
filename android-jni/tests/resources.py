@@ -77,6 +77,7 @@ def main():
         str(PROJECT / "tests/native/slot_store_test.c"),
         str(PROJECT / "src/host/references.c"),
         str(PROJECT / "src/host/slot_allocator.c"),
+        str(PROJECT / "src/host/failure.c"),
         str(host_obj),
         *ffi,
         "-pthread",

@@ -39,6 +39,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   (void)cif;
   struct binding *b = opaque;
   JNIEnv *env = *(JNIEnv **)values[0];
+  zero_native_result(b, result);
   if (gw_dlopen_is_quarantined()) {
     zero_native_result(b, result);
     if (!(*env)->ExceptionCheck(env)) {
@@ -51,12 +52,14 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
     }
     return; /* Do not reserve a context or start another Guest worker. */
   }
-  struct host_context *c = fh_context(env);
+  struct host_context *c = fh_context(env, NULL);
 
   if (!c) {
-    /* A thread outside bridge management cannot have its call routed or
-       attributed; return a zeroed result instead of throwing. */
-    zero_native_result(b, result);
+    return; /* fh_context left a typed exception. */
+  }
+  if (c->depth >= FB_DEPTH) {
+    fh_throw(env, FB_FAILURE_DEPTH, "Host bridge nesting limit exceeded");
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
     return;
   }
 
@@ -65,10 +68,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
 
   atomic_fetch_add(&b->active, 1);
   if (!gw_loader_enter(b->module)) {
-    jclass ex = (*env)->FindClass(env, "java/lang/UnsatisfiedLinkError");
-    if (ex) {
-      (*env)->ThrowNew(env, ex, "Guest library is retired");
-    }
+    fh_throw(env, FB_FAILURE_STATE, "Guest library is retired or closing");
     atomic_fetch_sub(&b->active, 1);
     GW_RPC_SCOPE_END(pre);
     GW_RPC_SCOPE_END(boundary);
@@ -89,6 +89,8 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   }
 
   c->local_depth++;
+  int previous_marshal_error = c->marshal_error;
+  c->marshal_error = 0;
   /* PushLocalFrame bounds every local created while inside the guest call;
      PopLocalFrame below keeps only the returned object alive. Tokens minted
      here are tagged with local_depth so fh_drop_locals retires exactly this
@@ -128,12 +130,19 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   }
 
   GW_RPC_SCOPE_END(pre);
-  jvalue out = fh_command(c, FB_NATIVE, b->guest, b->sig, a);
+  jvalue out = {0};
+  if (!c->marshal_error) {
+    out = fh_command(c, FB_NATIVE, b->guest, b->sig, a);
+  }
+  if (c->command_error) {
+    out = (jvalue){0};
+  }
   GW_RPC_SCOPE(post, GW_RPC_HOST_TRAMPOLINE_POST, -1);
   jobject ref = b->ret == 'L' ? fh_ref(c, out.l) : NULL;
   ref = (*env)->PopLocalFrame(env, ref);
   fh_drop_locals(c, prior + 1);
   c->local_depth = prior;
+  c->marshal_error = previous_marshal_error;
 
   if (b->ret == 'L') {
     out.l = ref;
@@ -183,11 +192,12 @@ int fh_binding_prepare(struct binding *b, uint64_t module, uintptr_t guest,
   }
 
   b->closure = ffi_closure_alloc(sizeof(ffi_closure), &b->code);
-  if (!b->closure || ffi_prep_closure_loc(b->closure, &b->cif, ffi_native, b,
-                                          b->code) != FFI_OK) {
-    if (b->closure) {
-      ffi_closure_free(b->closure);
-    }
+  if (!b->closure) {
+    return GW_BINDING_MEMORY;
+  }
+  if (ffi_prep_closure_loc(b->closure, &b->cif, ffi_native, b, b->code) !=
+      FFI_OK) {
+    ffi_closure_free(b->closure);
     b->closure = NULL;
     return GW_BINDING_FFI;
   }
@@ -254,13 +264,17 @@ void fh_bindings_finish(void) {
 
 /* One registering library owns a declaring class until its registrations
    retire. Weak refs track ownership without keeping a class loader alive. */
-static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module) {
+static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module,
+                                 enum fb_failure *failure) {
+  *failure = FB_FAILURE_MEMORY;
   pthread_mutex_lock(&registrations_lock);
   for (size_t i = 0; i < gw_slot_capacity(registrations); i++) {
     uint64_t token;
     struct registered_class *record = gw_slot_at(registrations, i, &token);
     if (record && (*env)->IsSameObject(env, record->clazz, cls)) {
       if (record->module != module || record->pending == SIZE_MAX) {
+        *failure =
+            record->module != module ? FB_FAILURE_STATE : FB_FAILURE_MEMORY;
         token = 0;
       } else {
         record->pending++;
@@ -353,8 +367,13 @@ int release_registrations(JNIEnv *env, uint64_t module) {
 static jint register_owned(struct host_context *c, jclass cls,
                            const JNINativeMethod *methods, jint n,
                            uint64_t owner) {
-  uint64_t registration = owner ? own_registration(c->env, cls, owner) : 0;
+  enum fb_failure failure;
+  uint64_t registration = own_registration(c->env, cls, owner, &failure);
   if (!registration) {
+    fh_throw(c->env, failure,
+             failure == FB_FAILURE_MEMORY
+                 ? "Cannot reserve native class registration"
+                 : "Native class belongs to another Guest module");
     return JNI_ERR;
   }
 
@@ -366,7 +385,8 @@ static jint register_owned(struct host_context *c, jclass cls,
     int created = 0, status = GW_BINDING_ARGUMENT;
     const char *sig = methods[i].signature;
     struct binding *b = NULL;
-    if (sig && methods[i].fnPtr && strnlen(sig, FB_SIG) < FB_SIG) {
+    if (sig && methods[i].name && methods[i].name[0] && methods[i].fnPtr &&
+        strnlen(sig, FB_SIG) < FB_SIG) {
       b = binding_get(owner, (uintptr_t)methods[i].fnPtr, sig, &created,
                       &status);
     }
@@ -402,13 +422,21 @@ static jint register_owned(struct host_context *c, jclass cls,
      VM these closures stay owned by the module, even on JNI_ERR. */
   jint result = (*c->env)->RegisterNatives(c->env, cls, copy, n);
   finish_registration(c->env, registration, 1);
+  if (result != JNI_OK) {
+    fh_throw(c->env, FB_FAILURE_STATE, "VM rejected native registration");
+  }
   return result;
 }
 
 jint fh_register(struct host_context *c, jclass cls,
                  const JNINativeMethod *methods, jint n) {
-  if (n < 0 || n > 64) {
+  if (n < 0 || n > 64 || !cls || (n && !methods)) {
+    fh_throw(c->env, FB_FAILURE_ARGUMENT,
+             "RegisterNatives requires a class and 0..64 methods");
     return JNI_ERR;
+  }
+  if (!n) {
+    return JNI_OK;
   }
 
   uint64_t owner = c->module;
@@ -418,6 +446,8 @@ jint fh_register(struct host_context *c, jclass cls,
                 .j;
   }
   if (!owner || !gw_loader_enter(owner)) {
+    fh_throw(c->env, FB_FAILURE_STATE,
+             "No live owning Guest module for native registration");
     return JNI_ERR; /* CLOSING/quarantined modules cannot publish VM entries. */
   }
   jint result = register_owned(c, cls, methods, n, owner);

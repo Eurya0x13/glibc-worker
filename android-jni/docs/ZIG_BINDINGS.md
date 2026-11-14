@@ -43,7 +43,7 @@ binding 的全部模块共用一个存储池；每模块的哈希表索引 Guest
 
 插入先预留块、索引和 owner 向量，再发布对象或令牌。分配失败不发布半成品；已有对象、token 和 owner 成员关系保持有效。初始化预留中途失败会释放已分配的块。失败操作可能保留已增长的空闲容量；它不表示对象已经创建。删除不分配内存；有存活对象时拒绝销毁 store。
 
-存储分配失败后，原始 VM 引用仍由 C 调用方持有。native 参数可能是借用 local，不能由存储层随意删除。生成的 NewGlobalRef/NewWeakGlobalRef 包装会在 token 分配失败后删除刚创建的 VM 引用；ID 插入失败也删除本次 weak class 引用。描述符先检查再完整复制，不以截断键继续。资源耗尽的 Java 异常尚未完全统一，见工作区 AUD-03。
+存储分配失败后，原始 VM 引用仍由 C 调用方持有。native 参数可能是借用 local，不能由存储层随意删除。生成的 local/global/weak 返回值包装会在 token 分配失败后删除刚创建的 VM 引用；ID 插入失败也删除本次 weak class 引用。描述符先检查再完整复制，不以截断键继续。资源分配失败保留已有 Java 异常，否则抛 `OutOfMemoryError`；native 参数打包失败时不进入 Guest。见 [失败处理契约](FAILURES.md)。
 
 RegisterNatives 在交给 VM 前失败会撤回本批新建 binding 与未发布类预留。并发预留使用 pending 计数；VM 返回 JNI_ERR 时可能已发布部分入口，相关记录和 closure 必须保留到模块清理。弱类引用不主动固定 ClassLoader。
 

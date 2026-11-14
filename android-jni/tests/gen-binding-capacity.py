@@ -48,6 +48,8 @@ def main():
         f"  private static {long_type} rejectedField;\n"
         "  private static native boolean descriptorProbe(Object member, boolean field);\n"
         "  public static int descriptorChecks;\n"
+        "  public static native int failureProbe(int kind, int depth);\n"
+        "  public static int recurse(int kind, int depth) { return failureProbe(kind, depth); }\n"
     )
     descriptor_calls = (
         f'    if (!descriptorProbe(ResourceCapacity.class.getDeclaredMethod("accepted", {short_type}.class), false)) throw new AssertionError("255-byte method");\n'
@@ -103,6 +105,8 @@ static int resource_capacity_register(JNIEnv *e) {
   if (!cls) return JNI_ERR;
   JNINativeMethod descriptor = {"descriptorProbe", "(Ljava/lang/Object;Z)Z", (void *)descriptor_probe};
   if ((*e)->RegisterNatives(e, cls, &descriptor, 1) != JNI_OK) return JNI_ERR;
+  JNINativeMethod failure = {"failureProbe", "(II)I", (void *)failure_probe};
+  if ((*e)->RegisterNatives(e, cls, &failure, 1) != JNI_OK) return JNI_ERR;
   jobject *refs = calloc(20000, sizeof *refs);
   if (!refs) { (*e)->DeleteLocalRef(e, cls); return JNI_ERR; }
   int count = 0;

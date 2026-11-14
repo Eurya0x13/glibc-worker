@@ -72,7 +72,7 @@ for i, (ret, name, ts) in enumerate(api):
     g.append(f"static {ret} fg_{name}(" + ",".join(params) + ") {")
     if name == "GetJavaVM":
         g.append(
-            f" if (!fg_valid(env)) {{ return JNI_ERR; }} atomic_fetch_add(&G->hits[{i}],1); if (!a1) {{ return JNI_ERR; }} *a1=&fg_vm; return JNI_OK; }}"
+            f" if(a1){{*a1=NULL;}} if (!fg_valid(env)) {{ return JNI_ERR; }} atomic_fetch_add(&G->hits[{i}],1); if (!a1) {{ return JNI_ERR; }} *a1=&fg_vm; return JNI_OK; }}"
         )
         h.append(f"case {i}: r->error=1; break;")
         continue
@@ -107,36 +107,22 @@ for i, (ret, name, ts) in enumerate(api):
                 '  jclass unsupported=(*env)->FindClass(env,"java/lang/UnsupportedOperationException");',
                 '  if(unsupported){(*env)->ThrowNew(env,unsupported,"Host VM does not expose JNI GetModule");(*env)->DeleteLocalRef(env,unsupported);}',
                 "  break; }",
-                "#if GW_RPC_PROFILE",
                 " jclass rpc_arg0=(jclass)fh_ref(c,r->a[0].l);",
+                " if(c->marshal_error){r->error=2;break;}",
                 f" GW_RPC_SCOPE(jni,GW_RPC_HOST_JNI_EXECUTE,{i});",
                 " jobject value=((jobject (*)(JNIEnv*,jclass))((void **)*env)[233])(env,rpc_arg0);",
                 " GW_RPC_SCOPE_END(jni);",
-                "#else",
-                " jobject value=((jobject (*)(JNIEnv*,jclass))((void **)*env)[233])(env,(jclass)fh_ref(c,r->a[0].l));",
-                "#endif",
-                " r->result.l=fh_add_ref(c,value,H_LOCAL); break; }",
+                " r->result.l=fh_add_ref(c,value,H_LOCAL); if(value&&!r->result.l)(*env)->DeleteLocalRef(env,value); break; }",
             ]
         )
         continue
     if name == "RegisterNatives":
         h.append(
+            " jclass cls=(jclass)fh_ref(c,r->a[0].l);\n"
+            " if(c->marshal_error){r->error=2;break;}\n"
             f" GW_RPC_SCOPE(jni,GW_RPC_HOST_JNI_EXECUTE,{i});\n"
-            " r->result.i=fh_register(c,(jclass)fh_ref(c,r->a[0].l),(const JNINativeMethod*)r->a[1].l,r->a[2].i);\n"
+            " r->result.i=fh_register(c,cls,(const JNINativeMethod*)r->a[1].l,r->a[2].i);\n"
             " GW_RPC_SCOPE_END(jni); break; }"
-        )
-        continue
-    if name == "UnregisterNatives":
-        h.append(
-            "#if GW_RPC_PROFILE\n"
-            " jclass rpc_arg0=(jclass)fh_ref(c,r->a[0].l);\n"
-            f" GW_RPC_SCOPE(jni,GW_RPC_HOST_JNI_EXECUTE,{i});\n"
-            " r->result.i=(*env)->UnregisterNatives(env,rpc_arg0);\n"
-            " GW_RPC_SCOPE_END(jni);\n"
-            "#else\n"
-            " r->result.i=(*env)->UnregisterNatives(env,(jclass)fh_ref(c,r->a[0].l));\n"
-            "#endif\n"
-            " break; }"
         )
         continue
     vals = []
@@ -144,9 +130,9 @@ for i, (ret, name, ts) in enumerate(api):
         if t in refs:
             v = f"({t})fh_ref(c,r->a[{k}].l)"
         elif t == "jmethodID":
-            v = f"(jmethodID)fh_id(r->a[{k}].l,H_METHOD)"
+            v = f"(jmethodID)fh_id(c,r->a[{k}].l,H_METHOD)"
         elif t == "jfieldID":
-            v = f"(jfieldID)fh_id(r->a[{k}].l,H_FIELD)"
+            v = f"(jfieldID)fh_id(c,r->a[{k}].l,H_FIELD)"
         else:
             v = f"({t})r->a[{k}].{field(t)}"
         vals.append(v)
@@ -169,15 +155,14 @@ for i, (ret, name, ts) in enumerate(api):
         if array_elements
         else f"(*env)->{callname}"
     )
-    call = f"{callee}(env" + (" ," + ",".join(vals) if vals else "") + ")"
-    # Resolve bridge tokens before the diagnostic primary-JNI scope. Keep the
-    # original expression path verbatim when profiling is disabled.
-    h.append("#if GW_RPC_PROFILE")
+    # Resolve every token before invoking JNI, so a failed lookup cannot call
+    # the VM with NULL arguments or a newly pending marshalling exception.
     resolved = list(vals)
     for k, t in enumerate(ts):
         if t in refs or t in ("jmethodID", "jfieldID"):
             h.append(f" {t} rpc_arg{k}={vals[k]};")
             resolved[k] = f"rpc_arg{k}"
+    h.append(" if(c->marshal_error){r->error=2;break;}")
     measured = (
         f"{callee}(env" + (" ," + ",".join(resolved) if resolved else "") + ")"
     )
@@ -186,9 +171,6 @@ for i, (ret, name, ts) in enumerate(api):
         " " + measured + ";" if ret == "void" else f" {ret} value={measured};"
     )
     h.append(" GW_RPC_SCOPE_END(jni);")
-    h.append("#else")
-    h.append(" " + call + ";" if ret == "void" else f" {ret} value={call};")
-    h.append("#endif")
     if name == "PushLocalFrame":
         h.append(" if(value==JNI_OK)c->local_depth++;")
     if name == "PopLocalFrame":
@@ -206,17 +188,13 @@ for i, (ret, name, ts) in enumerate(api):
             name, "H_LOCAL"
         )
         h.append(f" r->result.l=fh_add_ref(c,(jobject)value,{kind});")
-        # Only these returned handles are owned here; native parameters may
-        # be borrowed and must never be deleted by the token allocator.
-        if name in ("NewGlobalRef", "NewWeakGlobalRef"):
-            delete = (
-                "DeleteGlobalRef"
-                if name == "NewGlobalRef"
-                else "DeleteWeakGlobalRef"
-            )
-            h.append(
-                f" if(value&&!r->result.l){{(*env)->{delete}(env,value);r->error=2;}}"
-            )
+        delete = {
+            "NewGlobalRef": "DeleteGlobalRef",
+            "NewWeakGlobalRef": "DeleteWeakGlobalRef",
+        }.get(name, "DeleteLocalRef")
+        h.append(
+            f" if(value&&!r->result.l){{(*env)->{delete}(env,value);r->error=2;}}"
+        )
     elif ret in ("jmethodID", "jfieldID"):
         kind = "H_METHOD" if ret == "jmethodID" else "H_FIELD"
         sig = "(const char*)r->a[2].l" if "const char*" in ts else "NULL"
@@ -244,8 +222,65 @@ g.append("static const struct fg_extended_table fg_table={ .base={")
 for ret, name, ts in api[:-1]:
     g.append(f" .{name}=fg_{name},")
 g.append("},.GetModule=fg_GetModule};")
+status_names = {
+    "Throw",
+    "ThrowNew",
+    "PushLocalFrame",
+    "EnsureLocalCapacity",
+    "RegisterNatives",
+    "UnregisterNatives",
+    "MonitorEnter",
+    "MonitorExit",
+    "GetJavaVM",
+}
+emergency_names = {
+    "ExceptionOccurred",
+    "ExceptionDescribe",
+    "ExceptionClear",
+    "ExceptionCheck",
+    "DeleteLocalRef",
+    "DeleteGlobalRef",
+    "DeleteWeakGlobalRef",
+    "ReleaseStringChars",
+    "ReleaseStringUTFChars",
+    "ReleaseStringCritical",
+    "ReleasePrimitiveArrayCritical",
+    "MonitorExit",
+}
+emergency_names.update(
+    "Release" + t + "ArrayElements"
+    for t in (
+        "Boolean",
+        "Byte",
+        "Char",
+        "Short",
+        "Int",
+        "Long",
+        "Float",
+        "Double",
+    )
+)
+policy = [
+    "/* Generated failure and emergency policy. */",
+    "static inline jvalue fg_failure_result(int api) {",
+    " jvalue result={0}; switch(api) {",
+]
+policy += [
+    f" case {i}:" for i, (_, name, _) in enumerate(api) if name in status_names
+]
+policy += [
+    " result.i=JNI_ERR; break; default: break; } return result; }",
+    "static inline int fg_emergency_api(int api) { switch(api) {",
+]
+policy += [
+    f" case {i}:"
+    for i, (_, name, _) in enumerate(api)
+    if name in emergency_names
+]
+policy += [" return 1; default: return 0; }}"]
 out = options.output
 out.mkdir(parents=True, exist_ok=True)
+(out / "guest-policy.inc").write_text("\n".join(policy) + "\n")
 (out / "guest-jni.inc").write_text("\n".join(g) + "\n")
 (out / "host-jni.inc").write_text("\n".join(h) + "\n")
 names = [x[1] for x in api] + [

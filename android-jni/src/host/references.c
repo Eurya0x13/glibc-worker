@@ -30,9 +30,14 @@ static struct handle *insert_handle(int owner, uint64_t *token) {
   return gw_slot_insert(handles, owner, token);
 }
 
-static void handle_error(void) {
+static void handle_error(struct host_context *c, enum fb_failure kind,
+                         const char *message) {
   if (gw_host_bridge) {
     atomic_fetch_add(&gw_host_bridge->errors, 1);
+  }
+  if (c) {
+    c->marshal_error = kind;
+    fh_throw(c->env, kind, message);
   }
 }
 
@@ -59,7 +64,7 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
   }
   if (kind < H_LOCAL || kind > H_WEAK ||
       (kind == H_LOCAL && (!c || c->id < 0 || c->id >= FB_CONTEXTS))) {
-    handle_error();
+    handle_error(c, FB_FAILURE_ARGUMENT, "Invalid JNI reference owner or kind");
     return NULL;
   }
   pthread_mutex_lock(&handles_lock);
@@ -74,7 +79,8 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
   }
   pthread_mutex_unlock(&handles_lock);
   if (!h) {
-    handle_error();
+    handle_error(c, FB_FAILURE_MEMORY,
+                 "Cannot allocate bridge reference token");
   }
   return (jobject)(uintptr_t)token;
 }
@@ -94,7 +100,8 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
   if ((kind != H_METHOD && kind != H_FIELD) ||
       (sig && strnlen(sig, FB_SIG) >= FB_SIG)) {
     pthread_mutex_unlock(&handles_lock);
-    handle_error();
+    handle_error(c, FB_FAILURE_ARGUMENT,
+                 "Invalid bridge ID kind or descriptor");
     return NULL;
   }
   for (size_t i = 0; i < gw_slot_capacity(handles); i++) {
@@ -110,6 +117,7 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
   jweak weak = (*env)->NewWeakGlobalRef(env, clazz);
   if (!weak) {
     pthread_mutex_unlock(&handles_lock);
+    handle_error(c, FB_FAILURE_MEMORY, "Cannot retain declaring class");
     return NULL;
   }
   uint64_t token;
@@ -123,9 +131,11 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
     atomic_fetch_add(&gw_host_bridge->id_cache_weak, 1);
   } else {
     (*env)->DeleteWeakGlobalRef(env, weak);
-    handle_error();
   }
   pthread_mutex_unlock(&handles_lock);
+  if (!h) {
+    handle_error(c, FB_FAILURE_MEMORY, "Cannot allocate bridge ID token");
+  }
   return (jobject)(uintptr_t)token;
 }
 
@@ -177,22 +187,23 @@ jobject fh_ref(struct host_context *c, jobject t) {
   void *v = NULL;
   if (h && h->kind <= H_WEAK && (h->kind != H_LOCAL || h->owner == c->id)) {
     v = h->value;
-  } else {
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
   }
   pthread_mutex_unlock(&handles_lock);
+  if (!v) {
+    handle_error(c, FB_FAILURE_STATE, "Stale or foreign JNI reference token");
+  }
   return v;
 }
 
 /* Token -> interned method/field pointer, requiring the exact kind; a
    mismatched or stale token yields NULL plus an error count. */
-void *fh_id(jobject t, int kind) {
+void *fh_id(struct host_context *c, jobject t, int kind) {
   pthread_mutex_lock(&handles_lock);
   struct handle *h = get_handle(t);
   void *v = h && h->kind == kind ? h->value : NULL;
   pthread_mutex_unlock(&handles_lock);
   if (!v) {
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
+    handle_error(c, FB_FAILURE_STATE, "Stale or mismatched JNI ID token");
   }
   return v;
 }
@@ -213,7 +224,7 @@ void fh_drop_token(jobject token) {
   if (h) {
     retire_handle(h, (uint64_t)(uintptr_t)token);
   } else {
-    handle_error();
+    handle_error(NULL, FB_FAILURE_STATE, "Stale JNI reference release");
   }
   pthread_mutex_unlock(&handles_lock);
 }
@@ -258,12 +269,8 @@ const char *fh_describe(struct host_context *c, jobject member) {
     (*env)->ReleaseStringUTFChars(env, text, p);
     if (length == sizeof sig) {
       (*env)->DeleteLocalRef(env, text);
-      jclass error =
-          (*env)->FindClass(env, "java/lang/IllegalArgumentException");
-      if (error) {
-        (*env)->ThrowNew(env, error, "JNI descriptor exceeds bridge capacity");
-        (*env)->DeleteLocalRef(env, error);
-      }
+      fh_throw(env, FB_FAILURE_ARGUMENT,
+               "JNI descriptor exceeds bridge capacity");
       return sig;
     }
   }
@@ -286,17 +293,23 @@ int fh_decode(struct host_context *c, jobject id, jobject raw, char variant,
   snprintf(sig, sizeof sig, "%s", h && h->kind == H_METHOD ? h->sig : "");
   pthread_mutex_unlock(&handles_lock);
   if (!sig_types(sig, types, &n, &ret)) {
+    handle_error(c, FB_FAILURE_ARGUMENT, "Invalid method token or descriptor");
     return 0;
   }
 
   if (variant == 'A') {
     if (n && !raw) {
+      handle_error(c, FB_FAILURE_ARGUMENT, "Missing JNI argument array");
       return 0;
     }
     if (n) {
       memcpy(out, raw, n * sizeof *out);
     }
   } else {
+    if (!raw) {
+      handle_error(c, FB_FAILURE_ARGUMENT, "Missing JNI varargs");
+      return 0;
+    }
     va_list va;
     va_copy(va, *(va_list *)raw);
 
@@ -340,5 +353,5 @@ int fh_decode(struct host_context *c, jobject id, jobject raw, char variant,
       out[i].l = fh_ref(c, out[i].l);
     }
   }
-  return 1;
+  return !c->marshal_error;
 }

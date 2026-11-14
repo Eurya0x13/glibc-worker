@@ -28,6 +28,10 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
     (*env)->ExceptionClear(env);
     rc = -1;
   }
+  jfieldID expected_field =
+      (*env)->GetStaticFieldID(env, cls, "expectedBridgeErrors", "I");
+  int expected_errors =
+      expected_field ? (*env)->GetStaticIntField(env, cls, expected_field) : -1;
   (*env)->DeleteLocalRef(env, path);
   (*env)->DeleteLocalRef(env, cls);
 
@@ -52,14 +56,15 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
       "FULL_LIFECYCLE loads=%d unloads=%d constructors=%d destructors=%d "
       "calls=%d depth=%d "
       "globals=%d weak=%d locals=%d closures=%d threads=%d errors=%d "
+      "expected_errors=%d "
       "coverage=%d/%d\n",
       atomic_load(&B->loads), atomic_load(&B->unloads),
       atomic_load(&B->constructors), atomic_load(&B->destructors),
       atomic_load(&B->native_calls), atomic_load(&B->max_depth),
       atomic_load(&B->live_global), atomic_load(&B->live_weak),
       atomic_load(&B->live_local), atomic_load(&B->live_closures),
-      atomic_load(&B->live_guest_threads), atomic_load(&B->errors), touched,
-      FB_APIS);
+      atomic_load(&B->live_guest_threads), atomic_load(&B->errors),
+      expected_errors, touched, FB_APIS);
   printf(
       "MULTI_LIFECYCLE active=%d peak=%d failed=%d dependency_constructors=%d "
       "dependency_destructors=%d id_cache_weak=%d\n",
@@ -69,8 +74,9 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
   printf("GUEST_IMAGE_LIFECYCLE opens=%d closes=%d\n",
          atomic_load(&B->image_opens), atomic_load(&B->image_closes));
 
-  B->suite_rc =
-      rc || atomic_load(&B->errors) || atomic_load(&B->active_modules);
+  B->suite_rc = rc || expected_errors < 0 ||
+                atomic_load(&B->errors) != expected_errors ||
+                atomic_load(&B->active_modules);
   printf("FULL_JNI_SUITE_RESULT=%s java_rc=%d\n", B->suite_rc ? "FAIL" : "PASS",
          rc);
   return B->suite_rc;
@@ -133,6 +139,13 @@ static jint bridge_metric(JNIEnv *env, jclass cls, jint which) {
       /* Test diagnostics: the initial GNU owner, not a Java thread ID. */
       return lab_bridge->ctx[0].guest_tid;
 
+    case 18: {
+      int free_slots = 0;
+      for (int i = 1; i < FB_CONTEXTS; i++) {
+        free_slots += atomic_load(&lab_bridge->ctx[i].state) == FB_FREE;
+      }
+      return free_slots;
+    }
     default:
       return -1;
   }

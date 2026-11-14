@@ -78,10 +78,12 @@ def main():
         str(PROJECT / "src/host/bindings.c"),
         str(PROJECT / "src/host/binding_table.c"),
         str(PROJECT / "src/host/slot_allocator.c"),
+        str(PROJECT / "src/host/failure.c"),
         str(host_obj),
         *ffi,
         "-pthread",
         "-Wl,--wrap=ffi_closure_alloc",
+        "-Wl,--wrap=posix_memalign",
         "-o",
         str(executable),
     ]

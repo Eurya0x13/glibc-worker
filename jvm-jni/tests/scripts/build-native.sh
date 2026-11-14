@@ -69,7 +69,7 @@ cp "$core_out/libglibc_bridge.so" "$out/"
 # 4. GNU Guest program and test DSOs. Never pass the bionic sysroot to GNU cc.
 "$GW_GUEST_CC" "${guest_flags[@]}" -I"core/build/ffi-linux/$GW_ABI/include" \
   jvm-jni/tests/native/harness/worker.c jvm-jni/tests/native/harness/jni_proxy.c \
-  android-jni/src/guest/full_guest.c android-jni/src/guest/guest_loader.c \
+  android-jni/src/guest/full_guest.c android-jni/src/guest/rpc.c android-jni/src/guest/guest_loader.c \
   "core/build/ffi-linux/$GW_ABI/lib/libffi.a" -ldl -pthread -o "$out/libguest_worker.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" core/tests/native/guest.c -Icore/tests/native -o "$out/libguest_probe.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" android-jni/tests/native/guest_bench.c \

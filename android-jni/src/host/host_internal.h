@@ -13,7 +13,7 @@ enum { H_LOCAL = 1, H_GLOBAL, H_WEAK, H_METHOD, H_FIELD };
 
 struct host_context {
   JNIEnv *env;
-  int id, depth, local_depth, critical, command_error;
+  int id, depth, local_depth, critical, command_error, marshal_error;
   uint64_t module;
   char diagnostic[512];
 };
@@ -38,7 +38,8 @@ extern jmethodID gw_host_describe_method, gw_host_declaring_method;
 jobject fh_add_ref(struct host_context *, jobject, int);
 jobject fh_add_id(struct host_context *, void *, int, const char *, jclass);
 jobject fh_ref(struct host_context *, jobject);
-void *fh_id(jobject, int);
+void *fh_id(struct host_context *, jobject, int);
+void fh_throw(JNIEnv *, enum fb_failure, const char *);
 void fh_drop_token(jobject);
 void fh_drop_locals(struct host_context *, int);
 void sweep_ids(JNIEnv *, int);
@@ -46,7 +47,7 @@ jclass fh_declaring_class(struct host_context *, jobject);
 const char *fh_describe(struct host_context *, jobject);
 int fh_decode(struct host_context *, jobject, jobject, char, jvalue *);
 void fh_service(struct host_context *, struct fb_rpc *);
-struct host_context *fh_context(JNIEnv *);
+struct host_context *fh_context(JNIEnv *, struct gw_loader_error *);
 jvalue fh_command(struct host_context *, int, uintptr_t, const char *,
                   jvalue *);
 struct binding *make_binding(uint64_t, uintptr_t, const char *,

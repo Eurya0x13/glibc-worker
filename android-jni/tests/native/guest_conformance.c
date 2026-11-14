@@ -45,6 +45,7 @@ JNIEXPORT void conformance_observe_destructor(_Atomic int *p) {
   } while (0)
 #include "fixture_generated.inc"
 #if GW_TEST_BINDING_CAPACITY
+#include "failure_fixture.inc"
 #include "binding_capacity_generated.inc"
 #endif
 

@@ -245,7 +245,9 @@ static jboolean has_exception(JNIEnv *env) {
 
 static jclass error_class(JNIEnv *env, const char *name) {
   (void)env;
-  assert(!strcmp(name, "java/lang/IllegalArgumentException"));
+  assert(!strcmp(name, "java/lang/IllegalArgumentException") ||
+         !strcmp(name, "java/lang/IllegalStateException") ||
+         !strcmp(name, "java/lang/OutOfMemoryError"));
   return (jclass)(uintptr_t)1;
 }
 
@@ -290,7 +292,7 @@ static void references(void) {
   assert(atomic_load(&counters.live_local) == (int)count);
 
   assert(!fh_ref(&contexts[1], tokens[0]));
-  assert(!fh_id(tokens[0], H_METHOD));
+  assert(!fh_id(&contexts[0], tokens[0], H_METHOD));
   fh_drop_token(tokens[123]);
   assert(!fh_ref(&contexts[1], tokens[123]));
   fh_drop_locals(&contexts[0], 2);
@@ -324,7 +326,7 @@ static void references(void) {
       fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_FIELD, "I", (jclass)&a);
   assert(other && other != method && field && field != method &&
          weak_count == 3);
-  assert(fh_id(method, H_METHOD) == (void *)(uintptr_t)17);
+  assert(fh_id(&contexts[0], method, H_METHOD) == (void *)(uintptr_t)17);
   char too_long[FB_SIG + 1];
   memset(too_long, 'I', FB_SIG);
   too_long[FB_SIG] = 0;
@@ -333,11 +335,13 @@ static void references(void) {
   assert(weak_count == 3);
   collected = 1;
   sweep_ids(&env, 0);
-  assert(weak_count == 1 && !fh_id(method, H_METHOD));
-  assert(fh_id(other, H_METHOD) == (void *)(uintptr_t)17);
+  assert(weak_count == 1 && !fh_id(&contexts[0], method, H_METHOD));
+  assert(fh_id(&contexts[0], other, H_METHOD) == (void *)(uintptr_t)17);
   sweep_ids(&env, 1);
   assert(!weak_count && !atomic_load(&counters.id_cache_weak));
   free(tokens);
+  assert(pending_exception);
+  pending_exception = 0;
 }
 
 static void reflection_boundaries(void) {

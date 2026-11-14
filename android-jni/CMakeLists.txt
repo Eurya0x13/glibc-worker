@@ -16,11 +16,14 @@ add_library(glibc_worker::android_ffi STATIC IMPORTED)
 set_target_properties(glibc_worker::android_ffi PROPERTIES IMPORTED_LOCATION "${GW_FFI_LIBRARY}")
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/host-jni.inc
                           ${CMAKE_CURRENT_BINARY_DIR}/generated/guest-jni.inc
+                          ${CMAKE_CURRENT_BINARY_DIR}/generated/guest-policy.inc
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen-jni.py
           --jni-header ${GW_JNI_INCLUDE_DIR}/jni.h
           --output ${CMAKE_CURRENT_BINARY_DIR}/generated
   DEPENDS scripts/gen-jni.py ${GW_JNI_INCLUDE_DIR}/jni.h VERBATIM)
-add_custom_target(jni_tables DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/generated/host-jni.inc)
+add_custom_target(jni_tables DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/generated/host-jni.inc
+                                    ${CMAKE_CURRENT_BINARY_DIR}/generated/guest-jni.inc
+                                    ${CMAKE_CURRENT_BINARY_DIR}/generated/guest-policy.inc)
 set(GW_BINDING_BACKEND "zig" CACHE STRING "Host resource stores (zig only)")
 if(NOT GW_BINDING_BACKEND STREQUAL "zig")
   message(FATAL_ERROR "The C resource backend was removed; use zig or omit GW_BINDING_BACKEND")
@@ -50,7 +53,7 @@ add_custom_target(android_jni_binding_store DEPENDS ${binding_objects})
 install(FILES third_party/zig/LICENSE
         DESTINATION share/licenses/glibc-worker/android-jni RENAME zig-LICENSE.txt)
 add_library(android_jni_objects OBJECT src/host/full_host.c src/host/references.c
-  src/host/bindings.c src/host/slot_allocator.c src/host/loader_transport.c src/host/command.c src/host/binding_table.c src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
+  src/host/bindings.c src/host/failure.c src/host/slot_allocator.c src/host/loader_transport.c src/host/command.c src/host/binding_table.c src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
 add_dependencies(android_jni_objects jni_tables)
 target_include_directories(android_jni_objects PRIVATE include src/common src/host src/guest
   ${CMAKE_CURRENT_BINARY_DIR} ${GW_JNI_INCLUDE_DIR} ${GW_FFI_INCLUDE_DIR})

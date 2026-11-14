@@ -10,5 +10,8 @@ extern __thread uint64_t gmodule;
 extern __thread JNIEnv fg_env;
 extern JavaVM fg_vm;
 void fg_execute(struct fb_call *);
+int fg_valid(JNIEnv *);
+jvalue fg_rpc(JNIEnv *, int, jvalue *);
+void fg_pump(void);
 #pragma GCC visibility pop
 #endif

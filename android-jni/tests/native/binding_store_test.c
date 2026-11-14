@@ -16,7 +16,9 @@ static int exception_pending, register_calls, reject_registration;
 static int closure_failure = -1, weak_failure, local_failure,
            unregister_failure;
 static size_t registration_weaks;
-static int quarantined, context_calls;
+static int quarantined, context_calls, context_failure, frame_failure,
+    reference_failure, rpc_calls, memory_failure;
+static const char *exception_class;
 
 int gw_dlopen_is_quarantined(void) {
   return quarantined;
@@ -24,6 +26,12 @@ int gw_dlopen_is_quarantined(void) {
 
 static size_t allocation_attempts, fail_at = SIZE_MAX, outstanding;
 static size_t injected_failures;
+
+int __real_posix_memalign(void **, size_t, size_t);
+
+int __wrap_posix_memalign(void **p, size_t alignment, size_t size) {
+  return memory_failure ? 12 : __real_posix_memalign(p, alignment, size);
+}
 
 void *__real_ffi_closure_alloc(size_t, void **);
 
@@ -38,8 +46,11 @@ void *__wrap_ffi_closure_alloc(size_t size, void **code) {
 }
 
 static jint push_frame(JNIEnv *env, jint capacity) {
-  (void)env;
   (void)capacity;
+  if (frame_failure) {
+    fh_throw(env, FB_FAILURE_MEMORY, "test frame allocation failure");
+    return JNI_ERR;
+  }
   return JNI_OK;
 }
 
@@ -55,7 +66,7 @@ static jboolean same_object(JNIEnv *env, jobject a, jobject b) {
 
 static jclass find_class(JNIEnv *env, const char *name) {
   (void)env;
-  (void)name;
+  exception_class = name;
   return (jclass)(uintptr_t)1;
 }
 
@@ -133,15 +144,25 @@ static const struct JNINativeInterface_ vm = {
     .UnregisterNatives = unregister_methods};
 static JNIEnv env = &vm;
 
-struct host_context *fh_context(JNIEnv *environment) {
+struct host_context *fh_context(JNIEnv *environment,
+                                struct gw_loader_error *error) {
+  (void)error;
   context_calls++;
+  if (context_failure) {
+    fh_throw(environment, FB_FAILURE_MEMORY, "test context capacity failure");
+    return NULL;
+  }
   context.env = environment;
   return &context;
 }
 
 jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
-  (void)c;
   (void)kind;
+  if (reference_failure && value) {
+    c->marshal_error = FB_FAILURE_MEMORY;
+    fh_throw(c->env, FB_FAILURE_MEMORY, "test token allocation failure");
+    return NULL;
+  }
   return value;
 }
 
@@ -157,6 +178,7 @@ void fh_drop_locals(struct host_context *c, int depth) {
 
 jvalue fh_command(struct host_context *c, int op, uintptr_t guest,
                   const char *signature, jvalue *arguments) {
+  rpc_calls++;
   assert(op == FB_NATIVE && !strcmp(signature, "(J)J"));
   return (jvalue){.j = arguments[1].j + (jlong)guest + (jlong)c->module};
 }
@@ -353,7 +375,7 @@ static void store_failures(void) {
   int created;
   closure_failure = 0;
   assert(gw_binding_store_get(store, 12, 1, "(J)J", 4, &object, &created) ==
-         GW_BINDING_FFI);
+         GW_BINDING_MEMORY);
   closure_failure = -1;
   assert(!object && !created && !atomic_load(&counters.live_closures));
   get(store, 12, 1);
@@ -404,6 +426,33 @@ static void production_backend(void) {
   assert(exception_pending && context_calls == prior_contexts &&
          !atomic_load(&first->active));
   quarantined = exception_pending = 0;
+  frame_failure = 1;
+  int before_rpc = rpc_calls;
+  assert(((native_fn)first->code)(&env, NULL, 5) == 0 && exception_pending);
+  assert(!strcmp(exception_class, "java/lang/OutOfMemoryError") &&
+         rpc_calls == before_rpc);
+  frame_failure = exception_pending = 0;
+  context.depth = FB_DEPTH;
+  assert(((native_fn)first->code)(&env, NULL, 5) == 0 && exception_pending);
+  assert(!strcmp(exception_class, "java/lang/StackOverflowError") &&
+         rpc_calls == before_rpc);
+  context.depth = exception_pending = 0;
+  struct binding *object = make_binding(21, 2, "(Ljava/lang/Object;)J", &error);
+  reference_failure = 1;
+  typedef jlong (*object_fn)(JNIEnv *, jobject, jobject);
+  assert(((object_fn)object->code)(&env, (jobject)(uintptr_t)1,
+                                   (jobject)(uintptr_t)2) == 0 &&
+         exception_pending);
+  assert(!strcmp(exception_class, "java/lang/OutOfMemoryError") &&
+         rpc_calls == before_rpc && !context.marshal_error);
+  reference_failure = exception_pending = 0;
+  struct binding *floating = make_binding(21, 3, "()F", &error);
+  context_failure = 1;
+  typedef jfloat (*float_fn)(JNIEnv *, jobject);
+  assert(((float_fn)floating->code)(&env, NULL) == 0 && exception_pending);
+  assert(!strcmp(exception_class, "java/lang/OutOfMemoryError") &&
+         rpc_calls == before_rpc);
+  context_failure = exception_pending = 0;
   release_bindings(21);
   assert(!atomic_load(&counters.live_closures));
 
@@ -411,6 +460,12 @@ static void production_backend(void) {
   JNINativeMethod methods[] = {{"a", "(J)J", (void *)(uintptr_t)1},
                                {"b", "(J)J", (void *)(uintptr_t)2},
                                {"c", "(J)J", (void *)(uintptr_t)3}};
+  memory_failure = 1;
+  assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR &&
+         exception_pending);
+  assert(!strcmp(exception_class, "java/lang/OutOfMemoryError") &&
+         !registration_weaks && !register_calls);
+  memory_failure = exception_pending = 0;
   weak_failure = 1;
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
   assert(!registration_weaks && exception_pending);
@@ -434,12 +489,19 @@ static void production_backend(void) {
   reject_registration = 1;
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
   assert(atomic_load(&counters.live_closures) == 3);
-  reject_registration = 0;
+  reject_registration = exception_pending = 0;
   const size_t classes = 1024;
   for (size_t i = 1; i < classes; i++) {
     assert(fh_register(&context, (jclass)(uintptr_t)(7 + i), methods, 3) ==
            JNI_OK);
   }
+  memory_failure = 1;
+  assert(fh_register(&context, (jclass)(uintptr_t)9999, methods, 3) ==
+             JNI_ERR &&
+         exception_pending);
+  assert(!strcmp(exception_class, "java/lang/OutOfMemoryError") &&
+         registration_weaks == 1024);
+  memory_failure = exception_pending = 0;
   context.module = 23;
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
   context.module = 22;
@@ -467,7 +529,8 @@ int main(void) {
   store_failures();
   production_backend();
   assert(atomic_load(&counters.errors) ==
-         3); /* Busy rejection, weak promotion OOM, unregister failure. */
+         4); /* Busy rejection, Host depth, weak promotion OOM, unregister
+                failure. */
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\","
       "\"store_bindings\":8192,\"production_bindings\":%d,"

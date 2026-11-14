@@ -298,11 +298,15 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
 #if GW_RPC_PROFILE
   unsigned handoff_depth = (unsigned)(r - gw_host_bridge->ctx[c->id].rpc);
   struct gw_handoff_row *handoff = gw_rpc_peer_handoff((unsigned)c->id);
-  gw_handoff_dispatch(handoff, handoff_depth);
+  if (handoff_depth < FB_DEPTH) {
+    gw_handoff_dispatch(handoff, handoff_depth);
+  }
 #endif
   GW_RPC_SCOPE(glue, GW_RPC_HOST_JNI_GLUE, -1);
 #if GW_RPC_PROFILE
-  gw_rpc_served((unsigned)r->api);
+  if (r->api >= 0) {
+    gw_rpc_served((unsigned)r->api);
+  }
 #endif
 
   uint64_t previous = c->module;
@@ -313,9 +317,27 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
         "calls=%u\n",
         atomic_load(&gw_host_bridge->hits[14]));
   }
+  int previous_marshal_error = c->marshal_error;
+  c->marshal_error = 0;
+  if (r->api == FB_RPC_REPORT_FAILURE) {
+    enum fb_failure kind = r->a[0].i;
+    if (kind < FB_FAILURE_MEMORY || kind > FB_FAILURE_STATE) {
+      kind = FB_FAILURE_STATE;
+    }
+    fh_throw(env, kind,
+             kind == FB_FAILURE_DEPTH ? "Guest bridge nesting limit exceeded"
+                                      : "Guest bridge request rejected");
+    r->error = kind;
+    r->result.i = JNI_ERR;
+  } else {
 #include "generated/host-jni.inc"
-
+  }
+  if (c->marshal_error && !r->error) {
+    r->error = c->marshal_error;
+  }
+  c->marshal_error = previous_marshal_error;
   if (r->error) {
+    fh_throw(env, FB_FAILURE_STATE, "JNI bridge request failed");
     atomic_fetch_add(&gw_host_bridge->errors, 1);
   }
   c->module = previous;
@@ -324,7 +346,9 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
   atomic_store(&r->active, 0);
 
 #if GW_RPC_PROFILE
-  gw_handoff_complete(handoff, handoff_depth);
+  if (handoff_depth < FB_DEPTH) {
+    gw_handoff_complete(handoff, handoff_depth);
+  }
 #endif
   atomic_store_explicit(&r->response, seq, memory_order_release);
   fb_event_notify(&gw_host_bridge->ctx[c->id].guest_event);
@@ -372,11 +396,28 @@ static void context_destructor(void *ptr) {
    The CAS claims the slot; per-use fields are reset but the event epochs
    are preserved (see fb_context). The Guest controller must then spawn the
    matching worker: we wait for FB_RUNNING and fail on FB_ATTACH_FAILED.
-   Exhaustion is counted once and returns NULL; callers translate that into
-   a load failure. */
-struct host_context *fh_context(JNIEnv *env) {
+   Failure preserves any pending exception, otherwise raises a typed Java
+   error; loader callers also receive a structured status. */
+static struct host_context *context_failure(JNIEnv *env,
+                                            struct gw_loader_error *error,
+                                            int code, const char *message) {
+  gw_loader_fail(error, code, message);
+  fh_throw(env, code == GW_E_CAPACITY ? FB_FAILURE_MEMORY : FB_FAILURE_STATE,
+           message);
+  if (gw_host_bridge) {
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+  }
+  return NULL;
+}
+
+struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
   if (gw_dlopen_is_quarantined()) {
-    return NULL;
+    return context_failure(env, error, GW_E_QUARANTINED,
+                           "Guest bridge quarantined; discard process");
+  }
+  if (!gw_host_bridge || !atomic_load(&gw_host_bridge->running)) {
+    return context_failure(env, error, GW_E_NOT_READY,
+                           "JNI bridge is not running");
   }
   if (gw_host_current) {
     gw_host_current->env = env;
@@ -407,7 +448,15 @@ struct host_context *fh_context(JNIEnv *env) {
 #if GW_RPC_PROFILE
     gw_rpc_current = &host_metrics[i];
 #endif
-    pthread_setspecific(context_key, c);
+    if (pthread_setspecific(context_key, c)) {
+      gw_host_current = NULL;
+#if GW_RPC_PROFILE
+      gw_rpc_current = NULL;
+#endif
+      atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
+      return context_failure(env, error, GW_E_CAPACITY,
+                             "Cannot allocate Host thread-local context");
+    }
 
     atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
     fb_event_notify(&gw_host_bridge->ctx[0].guest_event);
@@ -423,19 +472,19 @@ struct host_context *fh_context(JNIEnv *env) {
 #if GW_RPC_PROFILE
         gw_rpc_current = NULL;
 #endif
+        int status = w->attach_result;
         atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
-        return NULL;
+        return context_failure(
+            env, error, status == JNI_ENOMEM ? GW_E_CAPACITY : GW_E_BRIDGE,
+            "Cannot start Guest worker for Host thread");
       }
       fb_event_wait(&w->host_event, observed);
     }
     return c;
   }
 
-  if (atomic_fetch_add(&gw_host_bridge->errors, 1) == 0) {
-    printf("HOST_CONTEXT_EXHAUSTED capacity=%d host_tid=%ld\n", FB_CONTEXTS,
-           syscall(SYS_gettid));
-  }
-  return NULL;
+  return context_failure(env, error, GW_E_CAPACITY,
+                         "JNI bridge context capacity exhausted");
 }
 
 /* Thread body for a Guest-requested context: attach to the VM (as daemon
@@ -463,6 +512,7 @@ static void *attached_helper(void *opaque) {
           : (*gw_host_vm)->AttachCurrentThread(gw_host_vm, &env, &args);
 
   if (rc != JNI_OK) {
+    w->attach_result = rc;
     atomic_store(&w->state, FB_ATTACH_FAILED);
     atomic_store_explicit(&w->host_done, 1, memory_order_release);
     fb_event_notify(&w->guest_event);
@@ -475,7 +525,21 @@ static void *attached_helper(void *opaque) {
 
   c->env = env;
   w->host_tid = (int)syscall(SYS_gettid);
-  (*env)->PushLocalFrame(env, 1024);
+  if ((*env)->PushLocalFrame(env, 1024) != JNI_OK) {
+    if ((*env)->ExceptionCheck(env)) {
+      (*env)->ExceptionClear(env);
+    }
+    (*gw_host_vm)->DetachCurrentThread(gw_host_vm);
+    w->attach_result = JNI_ENOMEM;
+    atomic_store_explicit(&w->state, FB_ATTACH_FAILED, memory_order_release);
+    atomic_store_explicit(&w->host_done, 1, memory_order_release);
+    fb_event_notify(&w->guest_event);
+    gw_host_current = NULL;
+#if GW_RPC_PROFILE
+    gw_rpc_current = NULL;
+#endif
+    return NULL;
+  }
   c->local_depth = 1;
   atomic_store_explicit(&w->state, FB_RUNNING, memory_order_release);
   fb_event_notify(&w->guest_event);
@@ -526,6 +590,7 @@ static void *host_controller(void *unused) {
         if (pthread_create(&helpers[i], NULL, attached_helper,
                            (void *)(intptr_t)i)) {
           helper_live[i] = 0;
+          w->attach_result = JNI_ENOMEM;
           atomic_store(&w->state, FB_ATTACH_FAILED);
           atomic_store_explicit(&w->host_done, 1, memory_order_release);
           atomic_fetch_add(&gw_host_bridge->errors, 1);
@@ -559,7 +624,7 @@ void full_host_poll(void) {
   }
 
   if (gw_host_current) {
-    for (int d = FB_DEPTH - 1; d >= 0; d--) {
+    for (int d = FB_RPC_SLOTS - 1; d >= 0; d--) {
       struct fb_rpc *r = &gw_host_bridge->ctx[gw_host_current->id].rpc[d];
       if (atomic_load_explicit(&r->request, memory_order_acquire) !=
               atomic_load(&r->response) &&
@@ -607,6 +672,8 @@ int full_host_start(struct shared *s, JNIEnv *env,
   gw_host_bridge = mmap(NULL, sizeof *gw_host_bridge, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (gw_host_bridge == MAP_FAILED) {
+    gw_host_bridge = NULL;
+    fh_throw(env, FB_FAILURE_MEMORY, "Cannot map JNI bridge shared state");
     return JNI_ERR;
   }
   s->full_bridge = (uintptr_t)gw_host_bridge;
@@ -622,14 +689,21 @@ int full_host_start(struct shared *s, JNIEnv *env,
   gw_host_bridge->ctx[0].call[0].args[7].j = FB_WAKE_FILTER_HELLO;
 #endif
 
-  if ((*env)->GetJavaVM(env, &gw_host_vm) != JNI_OK ||
-      pthread_key_create(&context_key, context_destructor)) {
+  if ((*env)->GetJavaVM(env, &gw_host_vm) != JNI_OK) {
+    return JNI_ERR;
+  }
+  if (pthread_key_create(&context_key, context_destructor)) {
+    fh_throw(env, FB_FAILURE_MEMORY, "Cannot allocate JNI context TLS key");
     return JNI_ERR;
   }
 
   contexts[0] = (struct host_context){.env = env, .id = 0};
   gw_host_current = &contexts[0];
-  pthread_setspecific(context_key, gw_host_current);
+  if (pthread_setspecific(context_key, gw_host_current)) {
+    gw_host_current = NULL;
+    fh_throw(env, FB_FAILURE_MEMORY, "Cannot bind initial JNI context");
+    return JNI_ERR;
+  }
   gw_host_bridge->ctx[0].host_tid = (int)syscall(SYS_gettid);
   atomic_store(&gw_host_bridge->ctx[0].state, FB_RUNNING);
   atomic_store(&gw_host_bridge->running, 1);

@@ -8,6 +8,7 @@ import java.util.*;
 
 public final class Runner {
   static int failures, checks, unsupported;
+  public static int expectedBridgeErrors;
 
   static synchronized void check(boolean b, String name) {
     checks++;
@@ -49,6 +50,14 @@ public final class Runner {
     }
   }
 
+  static void awaitFreeContexts(int expected) throws Exception {
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    while (NativeBridge.bridgeMetric(18) < expected && System.nanoTime() < deadline)
+      Thread.sleep(2);
+    if (NativeBridge.bridgeMetric(18) < expected)
+      throw new AssertionError("Context cleanup incomplete");
+  }
+
   @SuppressWarnings("unchecked")
   static WeakReference<ClassLoader> cycle(String path, int cycle) throws Exception {
     URLClassLoader l = loader();
@@ -76,6 +85,23 @@ public final class Runner {
       if (classes != 320 || references != 20000) {
         throw new AssertionError("Resource capacity or invocation failure");
       }
+      int beforeFailures = NativeBridge.bridgeMetric(4);
+      Class<?> failureCases = l.loadClass("conformance.FailureCases");
+      int available = NativeBridge.bridgeMetric(18);
+      int failureChecks =
+          (Integer) invoke(failureCases, "verify", new Class<?>[] {int.class}, available);
+      int limit =
+          (Integer) invoke(resources, "failureProbe", new Class<?>[] {int.class, int.class}, 8, 0);
+      awaitFreeContexts(available);
+      if (failureChecks != 5 || !(Boolean) invoke(failureCases, "recovery", new Class<?>[] {}))
+        throw new AssertionError("Failure recovery incomplete");
+      awaitFreeContexts(available);
+      int delta = NativeBridge.bridgeMetric(4) - beforeFailures;
+      if (delta != 3)
+        throw new AssertionError("Unexpected bridge failure count: " + delta);
+      expectedBridgeErrors += delta;
+      System.out.println("AUDIT_FAILURE_TEST {\"cycle\":" + cycle
+          + ",\"checks\":6,\"expected_errors\":" + delta + "}");
       int descriptorChecks = resources.getField("descriptorChecks").getInt(null);
       if (descriptorChecks != 3) {
         throw new AssertionError("Descriptor boundary checks incomplete");

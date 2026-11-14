@@ -18,6 +18,7 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
     c->command_error = GW_E_QUARANTINED;
     snprintf(c->diagnostic, sizeof c->diagnostic,
              "Guest bridge quarantined; discard process");
+    fh_throw(c->env, FB_FAILURE_STATE, c->diagnostic);
     return zero;
   }
 
@@ -26,14 +27,7 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
     snprintf(c->diagnostic, sizeof c->diagnostic,
              "Command descriptor exceeds bridge capacity");
     c->command_error = GW_E_ARGUMENT;
-    if (!(*c->env)->ExceptionCheck(c->env)) {
-      jclass error =
-          (*c->env)->FindClass(c->env, "java/lang/IllegalArgumentException");
-      if (error) {
-        (*c->env)->ThrowNew(c->env, error, c->diagnostic);
-        (*c->env)->DeleteLocalRef(c->env, error);
-      }
-    }
+    fh_throw(c->env, FB_FAILURE_ARGUMENT, c->diagnostic);
     atomic_fetch_add(&gw_host_bridge->errors, 1);
     return zero;
   }
@@ -42,14 +36,7 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
     c->command_error = GW_E_CAPACITY;
     snprintf(c->diagnostic, sizeof c->diagnostic,
              "Host bridge nesting limit exceeded");
-    if (!(*c->env)->ExceptionCheck(c->env)) {
-      jclass error =
-          (*c->env)->FindClass(c->env, "java/lang/StackOverflowError");
-      if (error) {
-        (*c->env)->ThrowNew(c->env, error, c->diagnostic);
-        (*c->env)->DeleteLocalRef(c->env, error);
-      }
-    }
+    fh_throw(c->env, FB_FAILURE_DEPTH, c->diagnostic);
     atomic_fetch_add(&gw_host_bridge->errors, 1);
     return zero;
   }
@@ -122,6 +109,11 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   c->command_error = r->error;
   snprintf(c->diagnostic, sizeof c->diagnostic, "%s", r->diagnostic);
   c->depth--;
+  if (r->error && op == FB_NATIVE) {
+    fh_throw(
+        c->env, FB_FAILURE_STATE,
+        c->diagnostic[0] ? c->diagnostic : "Guest native invocation failed");
+  }
   GW_RPC_SCOPE_END(finish);
 #if GW_RPC_PROFILE
   gw_rpc_end(metrics);
