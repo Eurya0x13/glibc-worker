@@ -42,7 +42,7 @@ void fg_execute(struct fb_call *cmd) {
 #if GW_RPC_PROFILE
   unsigned handoff_depth = (unsigned)gdepth;
   struct gw_handoff_row *handoff = gw_rpc_peer_handoff((unsigned)gid);
-  if (cmd->op == FB_NATIVE) {
+  if (cmd->op == FB_NATIVE && handoff_depth < GW_HANDOFF_DEPTH) {
     gw_handoff_dispatch(handoff, handoff_depth);
   }
 #endif
@@ -132,7 +132,7 @@ void fg_execute(struct fb_call *cmd) {
 
     jint (*load)(JavaVM *, void *) = (void *)dlsym(handle, "JNI_OnLoad");
     /* OnLoad may call back into Java and re-cross the bridge; counting that
-       nesting in gdepth keeps the FB_DEPTH guard working on both sides. */
+       nesting in gdepth selects the matching stable frame on both sides. */
     gdepth++;
     cmd->result.i = load ? load(&fg_vm, NULL) : JNI_VERSION_1_1;
     gdepth--;
@@ -262,7 +262,7 @@ done:
   }
 
 #if GW_RPC_PROFILE
-  if (cmd->op == FB_NATIVE) {
+  if (cmd->op == FB_NATIVE && handoff_depth < GW_HANDOFF_DEPTH) {
     gw_handoff_complete(handoff, handoff_depth);
   }
 #endif
@@ -270,5 +270,5 @@ done:
   /* The release publishes result/error/diagnostic before the wake below can
      make the Host observe the completed sequence number. */
   atomic_store_explicit(&cmd->response, seq, memory_order_release);
-  fb_event_notify(&G->ctx[gid].host_event);
+  fb_event_notify(&fb_context_at(G, gid)->host_event);
 }

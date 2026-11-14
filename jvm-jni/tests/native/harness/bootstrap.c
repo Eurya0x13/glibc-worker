@@ -20,6 +20,14 @@
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+#if GW_RPC_PROFILE
+/* This harness is a separate DSO. Header-only event instrumentation uses its
+   own unassigned TLS, never the runtime DSO's private diagnostic state. */
+_Thread_local struct gw_rpc_row *gw_rpc_current
+    __attribute__((visibility("hidden")));
+_Thread_local struct gw_rpc_scope *gw_rpc_scope_current
+    __attribute__((visibility("hidden")));
+#endif
 extern int app_host_callback(int value);
 extern void app_host_jni_dispatch(struct shared *s);
 extern JNIEnv *app_host_jni_env(void);

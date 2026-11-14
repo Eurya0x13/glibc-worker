@@ -12,6 +12,28 @@ static const char *api_names[FB_APIS] = {
 #include "generated/api-names.inc"
 };
 
+#if GW_RPC_PROFILE
+static int diagnostics_growth(struct full_bridge *bridge) {
+  struct gw_rpc_snapshot totals;
+  struct gw_rpc_breakdown stages;
+  struct gw_handoff_snapshot handoff;
+  unsigned contexts = (unsigned)fb_context_capacity(bridge);
+  if (gw_rpc_diagnostics_snapshot(&totals, sizeof totals) ||
+      gw_rpc_breakdown_snapshot(&stages, sizeof stages) ||
+      gw_rpc_handoff_snapshot(&handoff, sizeof handoff) || !totals.enabled ||
+      !stages.enabled || totals.contexts != contexts ||
+      stages.contexts != contexts || handoff.contexts != contexts ||
+      !totals.host.completed || !totals.guest.completed) {
+    return 1;
+  }
+  printf(
+      "AUDIT_DIAGNOSTICS_TEST {\"result\":\"PASS\",\"contexts\":%u,"
+      "\"profile\":true,\"wake_filter\":%d,\"ready_poll\":%d}\n",
+      contexts, GW_FUTEX_WAKE_FILTER, GW_RPC_READY_POLL);
+  return 0;
+}
+#endif
+
 int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
   jclass cls = (*env)->FindClass(env, "conformance/Runner");
   if (!cls || (*env)->ExceptionCheck(env)) {
@@ -42,6 +64,11 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
     }
     rc = gw_loader_smoke(env, hostpath);
   }
+#if GW_RPC_PROFILE
+  if (!rc) {
+    rc = diagnostics_growth(B);
+  }
+#endif
 
   int touched = 0;
   for (int i = 0; i < FB_APIS; i++) {
@@ -141,11 +168,14 @@ static jint bridge_metric(JNIEnv *env, jclass cls, jint which) {
 
     case 18: {
       int free_slots = 0;
-      for (int i = 1; i < FB_CONTEXTS; i++) {
-        free_slots += atomic_load(&lab_bridge->ctx[i].state) == FB_FREE;
+      for (int i = 1; i < fb_context_capacity(lab_bridge); i++) {
+        free_slots +=
+            atomic_load(&fb_context_at(lab_bridge, i)->state) == FB_FREE;
       }
       return free_slots;
     }
+    case 19:
+      return fb_context_capacity(lab_bridge);
     default:
       return -1;
   }

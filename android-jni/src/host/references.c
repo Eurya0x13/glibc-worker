@@ -63,7 +63,8 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
     return NULL;
   }
   if (kind < H_LOCAL || kind > H_WEAK ||
-      (kind == H_LOCAL && (!c || c->id < 0 || c->id >= FB_CONTEXTS))) {
+      (kind == H_LOCAL &&
+       (!c || c->id < 0 || c->id >= fb_context_capacity(gw_host_bridge)))) {
     handle_error(c, FB_FAILURE_ARGUMENT, "Invalid JNI reference owner or kind");
     return NULL;
   }

@@ -13,7 +13,7 @@ enum { H_LOCAL = 1, H_GLOBAL, H_WEAK, H_METHOD, H_FIELD };
 
 struct host_context {
   JNIEnv *env;
-  int id, depth, local_depth, critical, command_error, marshal_error;
+  int id, depth, local_depth, critical, command_error, marshal_error, emergency;
   uint64_t module;
   char diagnostic[512];
 };
@@ -62,6 +62,7 @@ int fh_transport_close(JNIEnv *, uint64_t, struct gw_loader_error *);
 int fh_transport_find(JNIEnv *, uint64_t, const char *, const char *, void **,
                       struct gw_loader_error *);
 jint fh_register(struct host_context *, jclass, const JNINativeMethod *, jint);
+jint fh_unregister(struct host_context *, jclass);
 void fh_array_copy_start(int);
 void fh_array_copy_finish(void);
 // clang-format off

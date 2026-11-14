@@ -32,7 +32,7 @@ BUSY 是本次关闭未执行的结果，不会自动排队、卸载或安排异
 
 装载层在 transport.find 期间自动持有 scope。JNI 层在 native 跳板执行及注册发布期间持有 scope，涵盖同步 Java 回调和嵌套 Guest 调用；包括 JNI pending exception 在内的返回路径都先归还 scope。当前最内层 module 字段仍用于 RPC/注册归属，不能用它代表整条调用链的借用。
 
-新增 C 符号要求使用包含这些符号的 bionic-dlopen 制品；v1 查询函数表布局和 JNI 共享协议 v4 没有变化。不能只更新头文件并继续链接旧库。
+新增 C 符号要求使用包含这些符号的 bionic-dlopen 制品；本次 scope API 不改变 v1 查询函数表布局。JNI 上层另须成套部署匹配的共享协议。不能只更新头文件并继续链接旧库。
 
 ## 仍需调用方保证
 
@@ -40,7 +40,7 @@ BUSY 是本次关闭未执行的结果，不会自动排队、卸载或安排异
 
 这不证明整个程序无死锁。可转移 pin 没有线程所有者，纯 pin 环仍需调用方避免。transport.close / JNI_OnUnload、用户 mutex、join、任意 RPC 中的等待不属于本次检查；目标 active 为零也不代表其 teardown 不会阻塞。Guest 自建后台线程、缓存函数指针和脱离同步回调链的工作也不会自动登记。
 
-它不解决上下文扩容、注册类所有权、共享依赖归属，也没有 deadline/取消确认机制。宿主仍需同步卸载、停止并 join 后台工作；不能用超时返回释放仍可能被远端访问的栈或 JNI frame。AUD-07 与 AUD-08 因此仍未整体完成。
+上下文扩容、注册类所有权与共享依赖归属由上层 [JNI 交互契约](../../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md) 处理；本层仍没有 deadline/取消确认机制。宿主仍需同步卸载、停止并 join 后台工作；不能用超时返回释放仍可能被远端访问的栈或 JNI frame。任意等待的 deadline/取消仍属于 AUD-08。
 
 ## 研究依据与区别
 

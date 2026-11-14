@@ -64,17 +64,19 @@ AUTO 分类损坏或不支持的 ELF 返回 IMAGE，分类器资源上限返回 
 
 这不替代宿主对缓存入口和原生后台线程的同步，不能据此承诺任意并发卸载安全。桌面故障注入 `python3 android-jni/tests/audit.py` 使用生产 transport/command 和 VM/Guest 替身检查顺序、保留和异常语义；它与真机正常生命周期回归互补。
 
+线程绑定、动态容量、成功注销后的类交接以及无上下文依赖函数的拒绝规则见 [上下文与所有权](CONTEXTS_AND_OWNERSHIP.md)。
+
 ## JNI 能力协商
 
 桥实现 JNI1.6 基础表及 GetModule，最高声明 JNI10。Host 启动时取真实 VM 的 GetVersion，与桥上限协商；在空闲启动槽 10..12 中交换能力并等待 Guest 确认。未确认的 Guest 不能 ready，Host 与 Guest 必须成套部署，即使关闭诊断和通知过滤也不能跳过此握手。
 
-私有装载协议版本为 4：在同一空闲启动槽的 13..18 项确认协议、共享区大小、上下文数及固定模块上限 64，确认后才激活 loader。旧版 Host/Guest 不能混装；v4 新增应急 RPC 槽和线程附着结果字段，改变共享 POD 布局；仍须匹配其他编译配置。
+私有装载协议版本为 5：在同一空闲启动槽的 13..23 项确认协议、共享结构与调用帧大小、初始上下文/帧容量、页宽及固定模块上限 64，确认后才激活 loader。v5 使用动态目录和独立应急 RPC，不能混装 v4 或布局/配置不匹配的 Host/Guest。
 
 Guest GetVersion 返回协商值，GetEnv 和 AttachCurrentThread 拒绝更高或未知的版本并清空输出指针。JNI_OnLoad 的返回值也在提交装载前按同一能力检查，失败走正常回滚。JRE8 宿主最高 JNI1.8，较新 Host 最高 JNI10；这不限制宿主 Java 字节码版本，但不提供 JNI19 及以后新增槽位。
 
 低于 JNI9 的宿主收到 GetModule 请求时抛 UnsupportedOperationException；不会读取宿主 JNI 表的第 233 槽。完整 ART 行为仍需独立验证。
 
-方法/字段描述符最多 255 字节正文。反射、ID 缓存、注册和命令入口检查长度后完整复制，拒绝超长类型信息；反射和命令路径抛 `IllegalArgumentException`。Host/Guest 重入深度耗尽抛 `StackOverflowError`，资源分配失败保留原异常或抛 `OutOfMemoryError`。返回码、回滚和应急槽的完整契约见 [JNI 失败处理](FAILURES.md)。
+方法/字段描述符最多 255 字节正文。反射、ID 缓存、注册和命令入口检查长度后完整复制，拒绝超长类型信息；反射和命令路径抛 `IllegalArgumentException`。上下文和调用帧动态增长，扩容失败保留原异常或抛 `OutOfMemoryError`；实际 VM 的栈溢出异常继续保留。返回码、回滚和应急槽的完整契约见 [JNI 失败处理](FAILURES.md)。
 
 ## 配置和兼容边界
 

@@ -21,13 +21,15 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --reuse-apk
 
 smoke/coverage 都会执行 core 的 GNU mutex 夹具：普通锁/条件变量回归及 12 种 robust 属性组合的 ENOTSUP 拒绝，共 125 项检查；结构化结果必须存在且通过。旧 runtime 的 owner-death 失败复现、支持边界及独立运行方式见 [mutex 契约](../../core/docs/MUTEXES.md)。
 
-当前默认 Zig 存储的 coverage 还运行三个 ClassLoader 周期：每轮 1,024 个不同 JNI 方法、320 个注册类、20,000 个 global 引用及描述符边界检查，退出后要求引用和 closure 为零。每轮另有 6 项失败/恢复检查：Java 捕获 Guest 深度超限、Guest 在上限处查询并清除异常、注册数量拒绝、失败状态码、线程上下文耗尽、释放后复用。`AUDIT_FAILURE_TEST` JSON 每轮明确记录 3 个预期桥错误；三轮原始错误计数必须恰为 9，多出或缺少均失败。
+当前默认 Zig 存储的 coverage 运行三个 ClassLoader 周期：每轮 1,024 个不同 JNI 方法、320 个注册类、20,000 个 global 引用及描述符边界检查。每轮另有重入/注册状态/上下文复用检查；32 个 Host 线程保持绑定时，另有 32 个 Guest 来源线程同时附着，且 32 层重入超过初始 12 层和第一扩展页。`DYNAMIC_CAPACITY_TEST` 必须逐轮存在并证明实际容量增长。`AUDIT_FAILURE_TEST` 逐轮要求零桥错误，最终引用和 closure 为零；分配失败由桌面故障注入覆盖，不能再将超过初始容量当作预期失败。
+
+`AUDIT_OWNERSHIP_TEST` 验证共享依赖函数在已知模块上下文中注册、后台顶层函数逆向归属、无上下文的共享依赖/混合批次拒绝、显式注销交接，以及卸载旧所有者不影响新所有者、最终所有者卸载后入口未绑定。
 
 coverage 另有四个执行 scope 场景：自身关闭、A→B 关闭 A/B、A→B→A 关闭 B、异常展开后继续调用。`AUDIT_SCOPE_TEST` JSON 独立于原 142 项 Java 断言，要求四次 BUSY 拒绝、模块仍 LIVE、无额外资源释放或桥错误；后续真实卸载和最终零资源检查必须继续通过。C 层的线程归属和可转移 pin 对照在 bionic-dlopen CTest 内。
 
 `AUDIT_CLOSE_WAIT_TEST` 要求两个真实 JNI 调用同时回调 Java 并关闭对方模块，均返回 BUSY；两次 close 返回前，两个 native 调用都保持在途。测试核对模块仍 LIVE、无提前释放且随后可继续调用。barrier/join 的测试期限不代表生产 bridge 具有超时取消能力。两/三线程的生产 C loader 对照、目标 pin 和探测后竞态在 bionic-dlopen 的 `close_waits` 内。
 
-桌面故障注入入口为 `python3 android-jni/tests/failures.py`、`bindings.py`、`resources.py` 和 `audit.py`，分别覆盖生产 RPC 失败、libffi/注册、引用存储以及装卸载事务；它们使用 VM/worker 替身，不代表 Android 双 libc 验证。
+桌面故障注入入口为 `python3 android-jni/tests/failures.py`、`bindings.py`、`resources.py` 、`audit.py` 和 `context_pages.py`，分别覆盖生产 RPC 失败、libffi/注册、引用存储、装卸载事务以及共享页扩容/并发领取；它们使用 VM/worker 替身，不代表 Android 双 libc 验证。
 
 严格模式默认使用解释器和 CheckJNI。超时、CheckJNI 违规、错误数据或生命周期不完整均为失败。覆盖为 235 个 JNI/VM 槽位清单及功能触达，正常运行不执行破坏性的 FatalError，不能描述为完整 JNI 规范或源代码分支覆盖。
 
@@ -55,7 +57,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 
 ## 计时与诊断
 
-`--benchmark --benchmark-jit` 运行普通 JIT 的 scalar/callback 基准；`--payload-benchmark host|guest --benchmark-jit` 运行数据量基准。正式计时关闭 CheckJNI 和 RPC 诊断，严格语义检查单独运行。默认值仍为 16 contexts、20µs 主动等待、通知过滤和响应轮询关闭。
+`--benchmark --benchmark-jit` 运行普通 JIT 的 scalar/callback 基准；`--payload-benchmark host|guest --benchmark-jit` 运行数据量基准。正式计时关闭 CheckJNI 和 RPC 诊断，严格语义检查单独运行。默认初始容量为 16 contexts、20µs 主动等待、通知过滤和响应轮询关闭。
 
 `--cpu-mask HEX` 仅对测量宿主及后续线程设置可用 CPU 亲和性，必须核对实际生效；`--array-copy-cache auto|on|off` 控制测试配置，on/auto 都保留大小门槛。产品运行时不读取测试标记。
 

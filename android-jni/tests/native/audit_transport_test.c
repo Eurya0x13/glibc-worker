@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <limits.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,16 @@ static jint load_version = JNI_VERSION_1_8;
 static int operations[32], operation_count, cleanup[32], cleanup_count;
 static const char *exception_type;
 static struct binding binding;
+static int fail_pages;
+void *__real_mmap(void *, size_t, int, int, int, off_t);
+
+void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
+  if (fail_pages) {
+    errno = ENOMEM;
+    return MAP_FAILED;
+  }
+  return __real_mmap(p, n, prot, flags, fd, off);
+}
 
 static jint push_frame(JNIEnv *env, jint capacity) {
   (void)env;
@@ -135,7 +146,7 @@ struct binding *make_binding(uint64_t id, uintptr_t guest, const char *sig,
 }
 
 void full_host_poll(void) {
-  struct fb_call *command = &bridge.ctx[0].call[context.depth - 1];
+  struct fb_call *command = fb_call_at(&bridge.ctx[0], context.depth - 1);
   int sequence = atomic_load_explicit(&command->request, memory_order_acquire);
   assert(sequence != atomic_load(&command->response));
   operations[operation_count++] = command->op;
@@ -214,10 +225,17 @@ static void scenario(unsigned test) {
     assert(!atomic_load(&slot->request) && !operation_count && !context.depth);
     pending = 0;
     context.depth = FB_DEPTH;
+    fail_pages = 1;
     fh_command(&context, FB_NATIVE, 0, "()I", NULL);
     assert(context.command_error == GW_E_CAPACITY &&
-           !strcmp(exception_type, "java/lang/StackOverflowError"));
+           !strcmp(exception_type, "java/lang/OutOfMemoryError"));
+    fail_pages = 0;
     context.depth = pending = 0;
+    context.emergency = 1;
+    fh_command(&context, FB_NATIVE, 0, "()I", NULL);
+    assert(context.command_error == GW_E_CAPACITY &&
+           !atomic_load(&slot->request));
+    context.emergency = pending = 0;
     atomic_store(&slot->request, INT_MAX);
     atomic_store(&slot->response, INT_MAX);
     strcpy(slot->sig, "stale-signature");
@@ -236,7 +254,7 @@ static void scenario(unsigned test) {
     fb_loader_offer(hello);
     assert(!fb_loader_accepted(hello) && fb_loader_acknowledge(hello) &&
            fb_loader_accepted(hello));
-    for (int field = 14; field <= 18; field++) {
+    for (int field = 14; field <= 23; field++) {
       if (field == 15) {
         continue;
       }

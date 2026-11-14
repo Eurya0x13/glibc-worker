@@ -116,6 +116,15 @@ for i, (ret, name, ts) in enumerate(api):
             ]
         )
         continue
+    if name == "UnregisterNatives":
+        h.append(
+            " jclass cls=(jclass)fh_ref(c,r->a[0].l);\n"
+            " if(c->marshal_error){r->error=2;break;}\n"
+            f" GW_RPC_SCOPE(jni,GW_RPC_HOST_JNI_EXECUTE,{i});\n"
+            " r->result.i=fh_unregister(c,cls);\n"
+            " GW_RPC_SCOPE_END(jni); break; }"
+        )
+        continue
     if name == "RegisterNatives":
         h.append(
             " jclass cls=(jclass)fh_ref(c,r->a[0].l);\n"

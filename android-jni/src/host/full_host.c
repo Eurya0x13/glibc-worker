@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -18,11 +19,49 @@ jint gw_host_jni_version;
 static struct shared *jni_shared;
 static _Atomic int jni_accepted;
 __thread struct host_context *gw_host_current;
-static struct host_context contexts[FB_CONTEXTS];
+
+struct host_slot {
+  struct host_context context;
+  pthread_t helper;
+  int helper_live;
+#if GW_RPC_PROFILE
+  struct gw_rpc_row metrics;
+#endif
+};
+
+static struct host_slot *host_slot(int id, int create) {
+  struct fb_context *w = fb_context_at(gw_host_bridge, id);
+  if (!w) {
+    return NULL;
+  }
+  uintptr_t value =
+      atomic_load_explicit(&w->host_private, memory_order_acquire);
+  if (!value && create) {
+    struct host_slot *fresh = calloc(1, sizeof *fresh);
+    if (!fresh) {
+      return NULL;
+    }
+    if (atomic_compare_exchange_strong_explicit(
+            &w->host_private, &value, (uintptr_t)fresh, memory_order_acq_rel,
+            memory_order_acquire)) {
+      value = (uintptr_t)fresh;
+    } else {
+      free(fresh);
+    }
+  }
+  struct host_slot *slot = (void *)value;
+#if GW_RPC_PROFILE
+  if (slot) {
+    atomic_store_explicit(&w->host_metrics, (uintptr_t)&slot->metrics,
+                          memory_order_release);
+  }
+#endif
+  return slot;
+}
+
 static pthread_t controller;
 static pthread_key_t context_key;
-static pthread_t helpers[FB_CONTEXTS];
-static int helper_live[FB_CONTEXTS];
+
 jclass gw_host_helper_class;
 jmethodID gw_host_describe_method, gw_host_declaring_method;
 static struct gw_image_policy image_policy;
@@ -37,7 +76,7 @@ static int jni_prepare(struct shared *shared, JNIEnv *env) {
     return JNI_ERR;
   }
   jni_shared = shared;
-  struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
+  struct fb_call *hello = &fb_context_at(gw_host_bridge, 0)->call[0];
   hello->args[10].j = FB_JNI_HELLO;
   hello->args[11].i = gw_host_jni_version;
   fb_loader_offer(hello);
@@ -53,7 +92,7 @@ static int jni_accept(void) {
 
   if (!gw_host_bridge || !jni_shared ||
       atomic_load_explicit(&jni_shared->phase, memory_order_acquire) != 2 ||
-      gw_host_bridge->ctx[0].call[0].args[12].j != FB_JNI_ACK) {
+      fb_context_at(gw_host_bridge, 0)->call[0].args[12].j != FB_JNI_ACK) {
     fprintf(stderr,
             "JNI_CAPABILITIES_MISMATCH Guest acknowledgement required\n");
     return JNI_ERR;
@@ -89,16 +128,24 @@ _Thread_local struct gw_rpc_row *gw_rpc_current
 _Thread_local struct gw_rpc_scope *gw_rpc_scope_current
     __attribute__((visibility("hidden")));
 /* The extra Host row belongs solely to its controller, not context zero. */
-static struct gw_rpc_row host_metrics[FB_CONTEXTS + 1];
+static struct gw_rpc_row controller_metrics;
 static _Atomic(uintptr_t) guest_metrics;
 static struct shared *metrics_shared;
 static struct gw_rpc_stage_cost host_clock_floor;
 static const struct gw_rpc_stage_cost *guest_clock_floor;
 
+static struct gw_rpc_row *metric_row(int guest, unsigned context) {
+  struct fb_context *w = fb_context_at(gw_host_bridge, (int)context);
+  if (!w) {
+    return NULL;
+  }
+  return (void *)atomic_load_explicit(
+      guest ? &w->guest_metrics : &w->host_metrics, memory_order_acquire);
+}
+
 struct gw_handoff_row *gw_rpc_peer_handoff(unsigned context) {
-  struct gw_rpc_row *rows =
-      (void *)atomic_load_explicit(&guest_metrics, memory_order_acquire);
-  return rows && context < FB_CONTEXTS ? &rows[context].handoff : NULL;
+  struct gw_rpc_row *row = metric_row(1, context);
+  return row ? &row->handoff : NULL;
 }
 
 int gw_rpc_handoff_snapshot(struct gw_handoff_snapshot *out, size_t size) {
@@ -118,15 +165,20 @@ int gw_rpc_handoff_snapshot(struct gw_handoff_snapshot *out, size_t size) {
   memset(out, 0, sizeof *out);
   out->abi_version = GW_HANDOFF_ABI;
   out->struct_size = sizeof *out;
-  out->contexts = FB_CONTEXTS;
+  out->contexts = fb_context_capacity(gw_host_bridge);
   out->sample_shift = GW_HANDOFF_SAMPLE_SHIFT;
   out->monotonic_ns = gw_handoff_clock(CLOCK_MONOTONIC);
 
-  for (int i = 0; i <= FB_CONTEXTS; i++) {
-    gw_handoff_accumulate(&out->host, &host_metrics[i].handoff);
-  }
-  for (int i = 0; i < FB_CONTEXTS; i++) {
-    gw_handoff_accumulate(&out->guest, &guest[i].handoff);
+  gw_handoff_accumulate(&out->host, &controller_metrics.handoff);
+  for (int i = 0; i < fb_context_capacity(gw_host_bridge); i++) {
+    struct gw_rpc_row *h = metric_row(0, (unsigned)i),
+                      *g = metric_row(1, (unsigned)i);
+    if (h) {
+      gw_handoff_accumulate(&out->host, &h->handoff);
+    }
+    if (g) {
+      gw_handoff_accumulate(&out->guest, &g->handoff);
+    }
   }
 
   errno = saved;
@@ -151,15 +203,20 @@ int gw_rpc_diagnostics_snapshot(struct gw_rpc_snapshot *out, size_t size) {
   out->abi_version = GW_RPC_METRICS_ABI;
   out->struct_size = sizeof *out;
   out->enabled = 1;
-  out->contexts = FB_CONTEXTS;
+  out->contexts = fb_context_capacity(gw_host_bridge);
   out->spin_budget_ns = GW_RPC_SPIN_NS;
   out->monotonic_ns = gw_rpc_clock(NULL);
 
-  for (int i = 0; i <= FB_CONTEXTS; i++) {
-    gw_rpc_accumulate(&out->host, &host_metrics[i]);
-  }
-  for (int i = 0; i < FB_CONTEXTS; i++) {
-    gw_rpc_accumulate(&out->guest, &guest[i]);
+  gw_rpc_accumulate(&out->host, &controller_metrics);
+  for (int i = 0; i < fb_context_capacity(gw_host_bridge); i++) {
+    struct gw_rpc_row *h = metric_row(0, (unsigned)i),
+                      *g = metric_row(1, (unsigned)i);
+    if (h) {
+      gw_rpc_accumulate(&out->host, h);
+    }
+    if (g) {
+      gw_rpc_accumulate(&out->guest, g);
+    }
   }
 
   errno = saved;
@@ -184,7 +241,7 @@ int gw_rpc_breakdown_snapshot(struct gw_rpc_breakdown *out, size_t size) {
   out->abi_version = GW_RPC_BREAKDOWN_ABI;
   out->struct_size = sizeof *out;
   out->enabled = 1;
-  out->contexts = FB_CONTEXTS;
+  out->contexts = fb_context_capacity(gw_host_bridge);
   out->sample_shift = GW_RPC_SAMPLE_SHIFT;
   out->stage_count = GW_RPC_STAGE_COUNT;
   out->api_slots = GW_RPC_API_SLOTS;
@@ -194,21 +251,26 @@ int gw_rpc_breakdown_snapshot(struct gw_rpc_breakdown *out, size_t size) {
   out->guest_clock_floor = *guest_clock_floor;
 
   for (int domain = 0; domain < 2; domain++) {
-    const struct gw_rpc_row *rows = domain ? guest : host_metrics;
     struct gw_rpc_stage_cost *stages = domain ? out->guest : out->host;
-    for (int i = 0; i < FB_CONTEXTS + !domain; i++) {
+    int count = fb_context_capacity(gw_host_bridge);
+    for (int i = 0; i < count + !domain; i++) {
+      const struct gw_rpc_row *row =
+          i == count ? &controller_metrics : metric_row(domain, (unsigned)i);
+      if (!row) {
+        continue;
+      }
       for (unsigned stage = 0; stage < GW_RPC_STAGE_COUNT; stage++) {
-        gw_rpc_cost_accumulate(&stages[stage], &rows[i].stage[stage]);
+        gw_rpc_cost_accumulate(&stages[stage], &row->stage[stage]);
       }
       for (unsigned outcome = 0; outcome < GW_RPC_NOTIFY_OUTCOME_COUNT;
            outcome++) {
         gw_rpc_cost_accumulate(
             domain ? &out->guest_notify[outcome] : &out->host_notify[outcome],
-            &rows[i].notify[outcome]);
+            &row->notify[outcome]);
       }
       if (!domain) {
         for (unsigned api = 0; api < GW_RPC_API_SLOTS; api++) {
-          const struct gw_rpc_api_row *in = &rows[i].api[api];
+          const struct gw_rpc_api_row *in = &row->api[api];
           struct gw_rpc_api_cost *cost = &out->api[api];
 #define GW_RPC_API_SUM(name) \
   cost->name += atomic_load_explicit(&in->name, memory_order_relaxed)
@@ -236,9 +298,13 @@ int gw_rpc_breakdown_snapshot(struct gw_rpc_breakdown *out, size_t size) {
 static void metrics_prepare(struct shared *shared) {
   metrics_shared = shared;
   gw_rpc_calibrate(&host_clock_floor);
-  gw_rpc_current = &host_metrics[0];
+  struct host_slot *owner = host_slot(0, 1);
+  if (!owner) {
+    return;
+  }
+  gw_rpc_current = &owner->metrics;
 
-  struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
+  struct fb_call *hello = &fb_context_at(gw_host_bridge, 0)->call[0];
   hello->op = FB_RPC_PROFILE_HELLO;
   hello->args[0].j = GW_RPC_METRICS_ABI;
   hello->args[1].j = sizeof *gw_host_bridge;
@@ -246,7 +312,7 @@ static void metrics_prepare(struct shared *shared) {
   hello->args[3].j = GW_RPC_SPIN_NS;
   hello->args[4].j = sizeof(struct gw_rpc_row);
   hello->args[5].j = GW_RPC_BREAKDOWN_ABI;
-  hello->args[9].j = (jlong)(uintptr_t)host_metrics;
+  hello->args[9].j = (jlong)(uintptr_t)gw_rpc_current;
 }
 
 static int metrics_accept(void) {
@@ -259,7 +325,7 @@ static int metrics_accept(void) {
     return 0;
   }
 
-  struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
+  struct fb_call *hello = &fb_context_at(gw_host_bridge, 0)->call[0];
   if (atomic_load_explicit(&metrics_shared->phase, memory_order_acquire) != 2 ||
       hello->op != FB_RPC_PROFILE_HELLO || hello->error != FB_RPC_PROFILE_ACK ||
       !hello->result.j || !hello->args[6].j) {
@@ -296,9 +362,9 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
 
   int saved = errno;
 #if GW_RPC_PROFILE
-  unsigned handoff_depth = (unsigned)(r - gw_host_bridge->ctx[c->id].rpc);
+  unsigned handoff_depth = (unsigned)r->depth;
   struct gw_handoff_row *handoff = gw_rpc_peer_handoff((unsigned)c->id);
-  if (handoff_depth < FB_DEPTH) {
+  if (handoff_depth < GW_HANDOFF_DEPTH) {
     gw_handoff_dispatch(handoff, handoff_depth);
   }
 #endif
@@ -318,6 +384,10 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
         atomic_load(&gw_host_bridge->hits[14]));
   }
   int previous_marshal_error = c->marshal_error;
+  int previous_emergency = c->emergency;
+  if (r == &fb_context_at(gw_host_bridge, c->id)->emergency) {
+    c->emergency = 1;
+  }
   c->marshal_error = 0;
   if (r->api == FB_RPC_REPORT_FAILURE) {
     enum fb_failure kind = r->a[0].i;
@@ -336,6 +406,7 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
     r->error = c->marshal_error;
   }
   c->marshal_error = previous_marshal_error;
+  c->emergency = previous_emergency;
   if (r->error) {
     fh_throw(env, FB_FAILURE_STATE, "JNI bridge request failed");
     atomic_fetch_add(&gw_host_bridge->errors, 1);
@@ -346,12 +417,12 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
   atomic_store(&r->active, 0);
 
 #if GW_RPC_PROFILE
-  if (handoff_depth < FB_DEPTH) {
+  if (handoff_depth < GW_HANDOFF_DEPTH) {
     gw_handoff_complete(handoff, handoff_depth);
   }
 #endif
   atomic_store_explicit(&r->response, seq, memory_order_release);
-  fb_event_notify(&gw_host_bridge->ctx[c->id].guest_event);
+  fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
 }
 
 /* TLS exit hook for a thread that reserved a context via fh_context: ask
@@ -368,7 +439,7 @@ static void context_destructor(void *ptr) {
     return;
   }
 
-  struct fb_context *w = &gw_host_bridge->ctx[c->id];
+  struct fb_context *w = fb_context_at(gw_host_bridge, c->id);
   if (w->origin) {
     return;
   }
@@ -424,29 +495,27 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
     return gw_host_current;
   }
 
-  for (int i = 1; i < FB_CONTEXTS; i++) {
-    int state = FB_FREE;
-    struct fb_context *w = &gw_host_bridge->ctx[i];
-    if (!atomic_compare_exchange_strong(&w->state, &state, FB_RESERVED)) {
-      continue;
+  int i = fb_reserve_context(gw_host_bridge);
+  if (i >= 0) {
+    struct fb_context *w = fb_context_at(gw_host_bridge, i);
+    struct host_slot *slot = host_slot(i, 1);
+    if (!slot) {
+      atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
+      return context_failure(env, error, GW_E_CAPACITY,
+                             "Cannot allocate Host context");
     }
 
-    atomic_store(&w->closing, 0);
-    atomic_store(&w->host_done, 0);
-    atomic_store(&w->guest_done, 0);
-    atomic_store(&w->origin, 0);
-    size_t payload = offsetof(struct fb_context, host_tid);
-    memset((char *)w + payload, 0, sizeof *w - payload);
+    fb_context_reset(w);
     w->host_tid = (int)syscall(SYS_gettid);
     w->origin = 0;
 
-    struct host_context *c = &contexts[i];
+    struct host_context *c = &host_slot(i, 0)->context;
     memset(c, 0, sizeof *c);
     c->id = i;
     c->env = env;
     gw_host_current = c;
 #if GW_RPC_PROFILE
-    gw_rpc_current = &host_metrics[i];
+    gw_rpc_current = &host_slot(i, 0)->metrics;
 #endif
     if (pthread_setspecific(context_key, c)) {
       gw_host_current = NULL;
@@ -459,7 +528,7 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
     }
 
     atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
-    fb_event_notify(&gw_host_bridge->ctx[0].guest_event);
+    fb_event_notify(&fb_context_at(gw_host_bridge, 0)->guest_event);
     for (;;) {
       uint32_t observed = fb_event_sample(&w->host_event);
       int attached = atomic_load_explicit(&w->state, memory_order_acquire);
@@ -493,13 +562,13 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
    PopLocalFrame(NULL) discards them all before DetachCurrentThread. */
 static void *attached_helper(void *opaque) {
   int i = (int)(intptr_t)opaque;
-  struct fb_context *w = &gw_host_bridge->ctx[i];
-  struct host_context *c = &contexts[i];
+  struct fb_context *w = fb_context_at(gw_host_bridge, i);
+  struct host_context *c = &host_slot(i, 0)->context;
   memset(c, 0, sizeof *c);
   c->id = i;
   gw_host_current = c;
 #if GW_RPC_PROFILE
-  gw_rpc_current = &host_metrics[i];
+  gw_rpc_current = &host_slot(i, 0)->metrics;
 #endif
 
   JNIEnv *env = NULL;
@@ -573,7 +642,7 @@ static void *attached_helper(void *opaque) {
 static void *host_controller(void *unused) {
   (void)unused;
 #if GW_RPC_PROFILE
-  gw_rpc_current = &host_metrics[FB_CONTEXTS];
+  gw_rpc_current = &controller_metrics;
 #endif
 
   for (;;) {
@@ -581,15 +650,20 @@ static void *host_controller(void *unused) {
     if (!atomic_load(&gw_host_bridge->running)) {
       break;
     }
-    for (int i = 1; i < FB_CONTEXTS; i++) {
-      struct fb_context *w = &gw_host_bridge->ctx[i];
+    for (int i = 1; i < fb_context_capacity(gw_host_bridge); i++) {
+      struct fb_context *w = fb_context_at(gw_host_bridge, i);
       int state = FB_GUEST_ATTACH;
       if (atomic_compare_exchange_strong(&w->state, &state,
                                          FB_ATTACH_STARTING)) {
-        helper_live[i] = 1;
-        if (pthread_create(&helpers[i], NULL, attached_helper,
-                           (void *)(intptr_t)i)) {
-          helper_live[i] = 0;
+        struct host_slot *slot = host_slot(i, 1);
+        if (slot) {
+          slot->helper_live = 1;
+        }
+        if (!slot || pthread_create(&slot->helper, NULL, attached_helper,
+                                    (void *)(intptr_t)i)) {
+          if (slot) {
+            slot->helper_live = 0;
+          }
           w->attach_result = JNI_ENOMEM;
           atomic_store(&w->state, FB_ATTACH_FAILED);
           atomic_store_explicit(&w->host_done, 1, memory_order_release);
@@ -599,9 +673,10 @@ static void *host_controller(void *unused) {
       } else if ((state == FB_RUNNING || state == FB_ATTACH_FAILED) &&
                  w->origin && atomic_load(&w->host_done) &&
                  atomic_load(&w->guest_done)) {
-        if (helper_live[i]) {
-          pthread_join(helpers[i], NULL);
-          helper_live[i] = 0;
+        struct host_slot *slot = host_slot(i, 0);
+        if (slot && slot->helper_live) {
+          pthread_join(slot->helper, NULL);
+          slot->helper_live = 0;
         }
         atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
       }
@@ -624,13 +699,20 @@ void full_host_poll(void) {
   }
 
   if (gw_host_current) {
-    for (int d = FB_RPC_SLOTS - 1; d >= 0; d--) {
-      struct fb_rpc *r = &gw_host_bridge->ctx[gw_host_current->id].rpc[d];
-      if (atomic_load_explicit(&r->request, memory_order_acquire) !=
-              atomic_load(&r->response) &&
-          !atomic_load(&r->active)) {
-        fh_service(gw_host_current, r);
-      }
+    struct fb_context *w = fb_context_at(gw_host_bridge, gw_host_current->id);
+    struct fb_rpc *emergency = &w->emergency;
+    if (atomic_load_explicit(&emergency->request, memory_order_acquire) !=
+            atomic_load(&emergency->response) &&
+        !atomic_load(&emergency->active)) {
+      fh_service(gw_host_current, emergency);
+    }
+    int top = atomic_load_explicit(&w->rpc_top, memory_order_acquire);
+    struct fb_rpc *r = fb_rpc_at(w, top);
+    if (r &&
+        atomic_load_explicit(&r->request, memory_order_acquire) !=
+            atomic_load(&r->response) &&
+        !atomic_load(&r->active)) {
+      fh_service(gw_host_current, r);
     }
   }
 }
@@ -686,7 +768,7 @@ int full_host_start(struct shared *s, JNIEnv *env,
 #endif
 #if GW_FUTEX_WAKE_FILTER
   wake_filter_shared = s;
-  gw_host_bridge->ctx[0].call[0].args[7].j = FB_WAKE_FILTER_HELLO;
+  fb_context_at(gw_host_bridge, 0)->call[0].args[7].j = FB_WAKE_FILTER_HELLO;
 #endif
 
   if ((*env)->GetJavaVM(env, &gw_host_vm) != JNI_OK) {
@@ -697,15 +779,21 @@ int full_host_start(struct shared *s, JNIEnv *env,
     return JNI_ERR;
   }
 
-  contexts[0] = (struct host_context){.env = env, .id = 0};
-  gw_host_current = &contexts[0];
+  struct host_slot *owner = host_slot(0, 1);
+  if (!owner) {
+    fh_throw(env, FB_FAILURE_MEMORY, "Cannot allocate initial JNI context");
+    return JNI_ERR;
+  }
+  fb_context_reset(fb_context_at(gw_host_bridge, 0));
+  owner->context = (struct host_context){.env = env, .id = 0};
+  gw_host_current = &owner->context;
   if (pthread_setspecific(context_key, gw_host_current)) {
     gw_host_current = NULL;
     fh_throw(env, FB_FAILURE_MEMORY, "Cannot bind initial JNI context");
     return JNI_ERR;
   }
-  gw_host_bridge->ctx[0].host_tid = (int)syscall(SYS_gettid);
-  atomic_store(&gw_host_bridge->ctx[0].state, FB_RUNNING);
+  fb_context_at(gw_host_bridge, 0)->host_tid = (int)syscall(SYS_gettid);
+  atomic_store(&fb_context_at(gw_host_bridge, 0)->state, FB_RUNNING);
   atomic_store(&gw_host_bridge->running, 1);
 
   jclass cls = (*env)->FindClass(env, "dev/glibc/worker/BridgeTypes");
@@ -778,7 +866,7 @@ int full_host_ready(void) {
   if (jni_accept() != JNI_OK) {
     return JNI_ERR;
   }
-  if (!fb_loader_accepted(&gw_host_bridge->ctx[0].call[0])) {
+  if (!fb_loader_accepted(&fb_context_at(gw_host_bridge, 0)->call[0])) {
     fprintf(stderr,
             "LOADER_PROTOCOL_MISMATCH matching layout/module capacity "
             "acknowledgement "
@@ -791,7 +879,8 @@ int full_host_ready(void) {
     if (!gw_host_bridge || !wake_filter_shared ||
         atomic_load_explicit(&wake_filter_shared->phase,
                              memory_order_acquire) != 2 ||
-        gw_host_bridge->ctx[0].call[0].args[8].j != FB_WAKE_FILTER_ACK) {
+        fb_context_at(gw_host_bridge, 0)->call[0].args[8].j !=
+            FB_WAKE_FILTER_ACK) {
       fprintf(
           stderr,
           "WAKE_FILTER_MISMATCH Host requires matching Guest event encoding\n");
@@ -839,16 +928,17 @@ int full_host_shutdown(void) {
   gw_image_policy_finish(&image_policy, env);
   atomic_store(&gw_host_bridge->running, 0);
   fb_event_notify(&gw_host_bridge->host_control);
-  for (int i = 0; i < FB_CONTEXTS; i++) {
-    fb_event_notify(&gw_host_bridge->ctx[i].host_event);
-    fb_event_notify(&gw_host_bridge->ctx[i].guest_event);
+  for (int i = 0; i < fb_context_capacity(gw_host_bridge); i++) {
+    fb_event_notify(&fb_context_at(gw_host_bridge, i)->host_event);
+    fb_event_notify(&fb_context_at(gw_host_bridge, i)->guest_event);
   }
 
   pthread_join(controller, NULL);
-  for (int i = 1; i < FB_CONTEXTS; i++) {
-    if (helper_live[i]) {
-      pthread_join(helpers[i], NULL);
-      helper_live[i] = 0;
+  for (int i = 1; i < fb_context_capacity(gw_host_bridge); i++) {
+    struct host_slot *slot = host_slot(i, 0);
+    if (slot && slot->helper_live) {
+      pthread_join(slot->helper, NULL);
+      slot->helper_live = 0;
     }
   }
   fh_array_copy_finish();

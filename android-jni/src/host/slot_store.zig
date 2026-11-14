@@ -27,7 +27,7 @@ const Store = struct {
     config: Config,
     chunks: std.ArrayList(*Chunk) = .empty,
     available: std.ArrayList(u32) = .empty,
-    owners: []Owner,
+    owners: std.ArrayList(Owner) = .empty,
     count: usize = 0,
 
     fn allocator(self: *Store) Allocator {
@@ -88,12 +88,12 @@ fn create(config_: ?*const Config) callconv(.c) ?*Store {
         config.initial_capacity > (std.math.maxInt(u32) / width) * width) return null;
     const raw = config.allocate.?(config.context, @sizeOf(Store), @alignOf(Store)) orelse return null;
     const store: *Store = @ptrCast(@alignCast(raw));
-    store.* = .{ .config = config, .owners = &.{} };
-    store.owners = store.allocator().alloc(Owner, config.owner_count) catch {
+    store.* = .{ .config = config };
+    store.owners.resize(store.allocator(), config.owner_count) catch {
         config.deallocate.?(config.context, store);
         return null;
     };
-    for (store.owners) |*owner| owner.* = .empty;
+    for (store.owners.items) |*owner| owner.* = .empty;
     const chunks = std.math.divCeil(usize, config.initial_capacity, width) catch unreachable;
     for (0..chunks) |_| store.grow() catch {
         _ = destroy(store);
@@ -105,9 +105,14 @@ fn create(config_: ?*const Config) callconv(.c) ?*Store {
 fn insert(store_: ?*Store, owner: c_int, token: *u64) callconv(.c) ?*anyopaque {
     token.* = 0;
     const store = store_ orelse return null;
-    if (owner < -1 or (owner >= 0 and @as(usize, @intCast(owner)) >= store.owners.len)) return null;
+    if (owner < -1) return null;
+    if (owner >= 0 and @as(usize, @intCast(owner)) >= store.owners.items.len) {
+        const old = store.owners.items.len;
+        store.owners.resize(store.allocator(), @as(usize, @intCast(owner)) + 1) catch return null;
+        for (store.owners.items[old..]) |*list| list.* = .empty;
+    }
     // Reserve everything before publishing a slot. Erase never allocates.
-    if (owner >= 0) store.owners[@intCast(owner)].ensureUnusedCapacity(store.allocator(), 1) catch return null;
+    if (owner >= 0) store.owners.items[@intCast(owner)].ensureUnusedCapacity(store.allocator(), 1) catch return null;
     if (store.available.items.len == 0) store.grow() catch return null;
     const chunk_id = store.available.items[store.available.items.len - 1];
     const chunk = store.chunks.items[chunk_id];
@@ -117,7 +122,7 @@ fn insert(store_: ?*Store, owner: c_int, token: *u64) callconv(.c) ?*anyopaque {
     token.* = (@as(u64, chunk.generation[slot]) << 32) | (index + 1);
     chunk.owner[slot] = owner;
     if (owner >= 0) {
-        const list = &store.owners[@intCast(owner)];
+        const list = &store.owners.items[@intCast(owner)];
         chunk.position[slot] = list.items.len;
         list.appendAssumeCapacity(token.*);
     }
@@ -146,8 +151,8 @@ fn at(store_: ?*Store, index: usize, token: *u64) callconv(.c) ?*anyopaque {
 fn owned(store_: ?*Store, owner: c_int, position: usize, token: *u64) callconv(.c) ?*anyopaque {
     token.* = 0;
     const store = store_ orelse return null;
-    if (owner < 0 or @as(usize, @intCast(owner)) >= store.owners.len) return null;
-    const list = store.owners[@intCast(owner)].items;
+    if (owner < 0 or @as(usize, @intCast(owner)) >= store.owners.items.len) return null;
+    const list = store.owners.items[@intCast(owner)].items;
     if (position >= list.len) return null;
     token.* = list[position];
     return get(store, token.*);
@@ -162,7 +167,7 @@ fn erase(store_: ?*Store, token: u64) callconv(.c) c_int {
     const slot: u6 = @intCast(index % width);
     const owner = chunk.owner[slot];
     if (owner >= 0) {
-        const list = &store.owners[@intCast(owner)];
+        const list = &store.owners.items[@intCast(owner)];
         const position = chunk.position[slot];
         _ = list.swapRemove(position);
         if (position < list.items.len) {
@@ -188,8 +193,8 @@ fn destroy(store_: ?*Store) callconv(.c) c_int {
     }
     store.chunks.deinit(allocator);
     store.available.deinit(allocator);
-    for (store.owners) |*list| list.deinit(allocator);
-    allocator.free(store.owners);
+    for (store.owners.items) |*list| list.deinit(allocator);
+    store.owners.deinit(allocator);
     config.deallocate.?(config.context, store);
     return 1;
 }

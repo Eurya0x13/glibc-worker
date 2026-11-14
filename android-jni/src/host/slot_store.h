@@ -11,7 +11,8 @@
    object may remain at destroy. Failed insertions publish neither object nor
    owner membership. at/owned pointers remain valid until erase/destroy.
    initial_capacity reserves storage at creation; the store then grows in
-   blocks. */
+   blocks. owner_count is the initial owner-vector reservation; nonnegative
+   owner IDs grow the private owner directory as needed, before publication. */
 struct gw_slot_config {
   size_t object_size, object_alignment, owner_count, initial_capacity;
   uint32_t generation_max;

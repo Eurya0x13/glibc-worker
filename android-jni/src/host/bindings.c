@@ -15,7 +15,7 @@ struct registered_class {
   uint64_t module;
   jweak clazz;
   size_t pending;
-  int published;
+  int published, unregistering;
 };
 
 static struct gw_slot_store *registrations;
@@ -56,11 +56,6 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
 
   if (!c) {
     return; /* fh_context left a typed exception. */
-  }
-  if (c->depth >= FB_DEPTH) {
-    fh_throw(env, FB_FAILURE_DEPTH, "Host bridge nesting limit exceeded");
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
-    return;
   }
 
   GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
@@ -262,27 +257,8 @@ void fh_bindings_finish(void) {
   pthread_mutex_unlock(&registrations_lock);
 }
 
-/* One registering library owns a declaring class until its registrations
-   retire. Weak refs track ownership without keeping a class loader alive. */
-static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module,
-                                 enum fb_failure *failure) {
-  *failure = FB_FAILURE_MEMORY;
-  pthread_mutex_lock(&registrations_lock);
-  for (size_t i = 0; i < gw_slot_capacity(registrations); i++) {
-    uint64_t token;
-    struct registered_class *record = gw_slot_at(registrations, i, &token);
-    if (record && (*env)->IsSameObject(env, record->clazz, cls)) {
-      if (record->module != module || record->pending == SIZE_MAX) {
-        *failure =
-            record->module != module ? FB_FAILURE_STATE : FB_FAILURE_MEMORY;
-        token = 0;
-      } else {
-        record->pending++;
-      }
-      pthread_mutex_unlock(&registrations_lock);
-      return token;
-    }
-  }
+/* Caller holds registrations_lock. Weak ownership must not pin a loader. */
+static uint64_t new_registration(JNIEnv *env, jclass cls, uint64_t module) {
   if (!registrations) {
     registrations = fh_slot_create(sizeof(struct registered_class),
                                    _Alignof(struct registered_class), 0,
@@ -300,12 +276,37 @@ static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module,
       token = 0;
     }
   }
+  return token;
+}
+
+/* One registering library owns a declaring class until its registrations
+   retire. Weak refs track ownership without keeping a class loader alive. */
+static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module,
+                                 enum fb_failure *failure) {
+  *failure = FB_FAILURE_MEMORY;
+  pthread_mutex_lock(&registrations_lock);
+  for (size_t i = 0; i < gw_slot_capacity(registrations); i++) {
+    uint64_t token;
+    struct registered_class *record = gw_slot_at(registrations, i, &token);
+    if (record && (*env)->IsSameObject(env, record->clazz, cls)) {
+      if (record->module != module || record->pending ||
+          record->unregistering) {
+        *failure = FB_FAILURE_STATE;
+        token = 0;
+      } else {
+        record->pending++;
+      }
+      pthread_mutex_unlock(&registrations_lock);
+      return token;
+    }
+  }
+  uint64_t token = new_registration(env, cls, module);
   pthread_mutex_unlock(&registrations_lock);
   return token;
 }
 
-/* A failed preparation must not reserve a class forever. Parallel attempts
-   share a pending count; once any attempt reaches the VM the record stays,
+/* A failed preparation must not reserve a class forever. A class update is
+   exclusive while pending; once the attempt reaches the VM the record stays,
    because RegisterNatives may publish a prefix even when it returns JNI_ERR. */
 static void finish_registration(JNIEnv *env, uint64_t token, int published) {
   pthread_mutex_lock(&registrations_lock);
@@ -331,7 +332,7 @@ int release_registrations(JNIEnv *env, uint64_t module) {
     uint64_t token;
     struct registered_class *record = gw_slot_at(registrations, i, &token);
     if (record && record->module == module) {
-      if (record->pending) {
+      if (record->pending || record->unregistering) {
         result = JNI_ERR;
         break;
       }
@@ -360,10 +361,77 @@ int release_registrations(JNIEnv *env, uint64_t module) {
   return result;
 }
 
+/* Successful explicit unregister releases class ownership, not module-wide
+   closures. Those may still be cached or executing in another class. Class
+   mutation is reserved under the lock, but the VM is called without it. */
+jint fh_unregister(struct host_context *c, jclass cls) {
+  JNIEnv *env = c->env;
+  if (!cls) {
+    fh_throw(env, FB_FAILURE_ARGUMENT, "UnregisterNatives requires a class");
+    return JNI_ERR;
+  }
+  uint64_t token = 0, owner = 0;
+  pthread_mutex_lock(&registrations_lock);
+  for (size_t i = 0; i < gw_slot_capacity(registrations); i++) {
+    uint64_t candidate;
+    struct registered_class *r = gw_slot_at(registrations, i, &candidate);
+    if (!r || !(*env)->IsSameObject(env, r->clazz, cls)) {
+      continue;
+    }
+    if (r->pending || r->unregistering ||
+        (c->module && c->module != r->module) ||
+        !gw_loader_scope_enter(r->module)) {
+      pthread_mutex_unlock(&registrations_lock);
+      fh_throw(env, FB_FAILURE_STATE,
+               "Native class mutation is busy or belongs to another module");
+      return JNI_ERR;
+    }
+    owner = r->module;
+    token = candidate;
+    r->unregistering = 1;
+    break;
+  }
+  if (!token) {
+    token = new_registration(env, cls, 0);
+    struct registered_class *reservation = gw_slot_get(registrations, token);
+    if (!reservation) {
+      pthread_mutex_unlock(&registrations_lock);
+      fh_throw(env, FB_FAILURE_MEMORY,
+               "Cannot reserve native class unregister");
+      return JNI_ERR;
+    }
+    reservation->pending = 0;
+    reservation->unregistering = 1;
+  }
+  pthread_mutex_unlock(&registrations_lock);
+
+  jint result = (*env)->UnregisterNatives(env, cls);
+  int safe = result == JNI_OK && !(*env)->ExceptionCheck(env);
+  pthread_mutex_lock(&registrations_lock);
+  struct registered_class *record = gw_slot_get(registrations, token);
+  if (safe || !owner) {
+    (*env)->DeleteWeakGlobalRef(env, record->clazz);
+    gw_slot_erase(registrations, token);
+  }
+  /* On uncertain failure the record, closures and image remain reachable. */
+  pthread_mutex_unlock(&registrations_lock);
+  if (!safe && owner) {
+    gw_dlopen_quarantine();
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+    fh_throw(env, FB_FAILURE_STATE,
+             "Native unregister failed; discard process");
+    result = JNI_ERR;
+  }
+  if (owner) {
+    gw_loader_scope_leave(owner);
+  }
+  return result;
+}
+
 /* The owning module is the calling guest when known; otherwise the Guest is
    asked which image owns fnPtr (FB_OWNER). fnPtr entries are swapped for
    trampoline addresses in a copy, so the caller's array is left unchanged;
-   per the class-ownership rule above, a class may only register once. */
+   one module owns the class until a successful explicit unregister. */
 static jint register_owned(struct host_context *c, jclass cls,
                            const JNINativeMethod *methods, jint n,
                            uint64_t owner) {
@@ -440,10 +508,19 @@ jint fh_register(struct host_context *c, jclass cls,
   }
 
   uint64_t owner = c->module;
-  if (!owner && n) {
-    owner = (uint64_t)fh_command(c, FB_OWNER, (uintptr_t)methods[0].fnPtr, NULL,
-                                 NULL)
-                .j;
+  if (!owner) {
+    for (int i = 0; i < n; i++) {
+      uint64_t candidate =
+          (uint64_t)fh_command(c, FB_OWNER, (uintptr_t)methods[i].fnPtr, NULL,
+                               NULL)
+              .j;
+      if (c->command_error || !candidate || (owner && candidate != owner)) {
+        fh_throw(c->env, FB_FAILURE_STATE,
+                 "Native registration needs one unambiguous owning module");
+        return JNI_ERR;
+      }
+      owner = candidate;
+    }
   }
   if (!owner || !gw_loader_scope_enter(owner)) {
     fh_throw(c->env, FB_FAILURE_STATE,
@@ -451,6 +528,8 @@ jint fh_register(struct host_context *c, jclass cls,
     return JNI_ERR; /* CLOSING/quarantined modules cannot publish VM entries. */
   }
   jint result = register_owned(c, cls, methods, n, owner);
-  gw_loader_scope_leave(owner);
+  if (owner) {
+    gw_loader_scope_leave(owner);
+  }
   return result;
 }

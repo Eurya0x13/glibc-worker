@@ -34,7 +34,7 @@ def verify(
         "JRE_CREATE_RESULT=0",
         "distinct=1",
         "JRE_BRIDGE_RESULT=PASS",
-        "LOADER_PROTOCOL version=4 matched=1",
+        "LOADER_PROTOCOL version=5 matched=1",
         "JRE_JAVA_RESUMED",
         "JRE_DESTROY_RESULT=0",
         "JRE_VM_ENUM stage=destroyed rc=0 count=0",
@@ -179,17 +179,72 @@ def verify(
         raise ValueError("Missing cross-thread close-wait refusal evidence")
     if group == "coverage":
         expected_rows = [
-            {"cycle": cycle, "checks": 6, "expected_errors": 3}
+            {"cycle": cycle, "checks": 6, "expected_errors": 0}
             for cycle in range(3)
         ]
         if (
             failure_rows != expected_rows
-            or lifecycle.get("errors") != 9
-            or lifecycle.get("expected_errors") != 9
+            or lifecycle.get("errors") != 0
+            or lifecycle.get("expected_errors") != 0
         ):
             raise ValueError(
                 "Missing or unexpected bridge failure/recovery evidence"
             )
+
+    dynamic_rows = [
+        json.loads(row)
+        for row in re.findall(
+            r"^DYNAMIC_CAPACITY_TEST (\{[^\n]+\})$", report, re.MULTILINE
+        )
+    ]
+    if group == "coverage" and (
+        len(dynamic_rows) != 3
+        or any(
+            row.get("cycle") != cycle
+            or row.get("depth") != 32
+            or row.get("guest_threads") != 32
+            or row.get("threads", 0) <= row.get("initial_contexts", 0)
+            or row.get("contexts", 0) < row.get("threads", 0) + 33
+            for cycle, row in enumerate(dynamic_rows)
+        )
+    ):
+        raise ValueError("Missing dynamic context/frame growth evidence")
+    ownership_rows = [
+        json.loads(row)
+        for row in re.findall(
+            r"^AUDIT_OWNERSHIP_TEST (\{[^\n]+\})$", report, re.MULTILINE
+        )
+    ]
+    if group == "coverage" and ownership_rows != [
+        {
+            "result": "PASS",
+            "handoff": True,
+            "dependency_context": True,
+            "background_top": True,
+            "ambiguous_dependency_rejected": True,
+            "mixed_batch_rejected": True,
+            "old_owner_unload_preserved_new": True,
+            "final_owner_unload_unbound": True,
+        }
+    ]:
+        raise ValueError(
+            "Missing native ownership/registration handoff evidence"
+        )
+
+    diagnostics_rows = [
+        json.loads(row)
+        for row in re.findall(
+            r"^AUDIT_DIAGNOSTICS_TEST (\{[^\n]+\})$", report, re.MULTILINE
+        )
+    ]
+    if diagnostics_rows and (
+        len(diagnostics_rows) != 1
+        or diagnostics_rows[0].get("result") != "PASS"
+        or diagnostics_rows[0].get("profile") is not True
+        or not dynamic_rows
+        or diagnostics_rows[0].get("contexts", 0) < dynamic_rows[-1]["contexts"]
+    ):
+        raise ValueError("Dynamic context diagnostic snapshots failed")
 
     descriptor_rows = [
         json.loads(row)
@@ -290,6 +345,9 @@ def verify(
         "failure_boundaries": failure_rows,
         "execution_scopes": scope_rows,
         "close_waits": close_wait_rows,
+        "dynamic_capacity": dynamic_rows,
+        "registration_ownership": ownership_rows,
+        "diagnostics_growth": diagnostics_rows,
         "mutex_contract": mutex_contract,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit

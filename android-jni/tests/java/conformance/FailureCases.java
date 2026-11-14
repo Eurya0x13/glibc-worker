@@ -8,15 +8,8 @@ public final class FailureCases {
   }
 
   public static int verify(int available) throws Exception {
-    boolean overflow = false;
-    try {
-      ResourceCapacity.recurse(0, 32);
-    } catch (StackOverflowError expected) {
-      overflow = true;
-    }
-    require(overflow, "Guest depth failure must reach Java as StackOverflowError");
-    require(ResourceCapacity.recurse(1, 32) == 12345,
-        "Guest must query and clear exceptions at the depth limit");
+    require(ResourceCapacity.recurse(0, 32) == 12345, "Depth grows past 12 and 28");
+    require(ResourceCapacity.recurse(1, 32) == 12345, "Repeated deep recursion");
     boolean rejected = false;
     try {
       ResourceCapacity.failureProbe(2, 0);
@@ -29,9 +22,9 @@ public final class FailureCases {
 
     int contexts = ResourceCapacity.failureProbe(8, 0);
     require(contexts >= 2 && contexts <= 256, "Context configuration");
-    require(available > 0 && available < contexts, "Available context configuration");
-    Thread[] threads = new Thread[available];
-    Throwable[] errors = new Throwable[available + 1];
+    require(available > 0, "Available context configuration");
+    Thread[] threads = new Thread[Math.max(32, contexts + 8)];
+    Throwable[] errors = new Throwable[threads.length];
     require(ResourceCapacity.failureProbe(6, 0) == 0, "Reset context barrier");
     try {
       for (int i = 0; i < threads.length; i++) {
@@ -48,20 +41,10 @@ public final class FailureCases {
       long deadline = System.nanoTime() + 10_000_000_000L;
       while (ResourceCapacity.failureProbe(7, 0) != threads.length && System.nanoTime() < deadline)
         Thread.sleep(2);
-      require(ResourceCapacity.failureProbe(7, 0) == threads.length, "Fill all contexts");
-      Thread extra = new Thread(() -> {
-        try {
-          ResourceCapacity.failureProbe(9, 0);
-          errors[available] = new AssertionError("Exhaustion fabricated a successful call");
-        } catch (OutOfMemoryError expected) {
-          // A new thread owns no bridge context; the Host must throw directly.
-        } catch (Throwable error) {
-          errors[available] = error;
-        }
-      }, "audit-context-overflow");
-      extra.start();
-      extra.join(5000);
-      require(!extra.isAlive(), "Context failure must not hang");
+      require(ResourceCapacity.failureProbe(7, 0) == threads.length, "Grow past initial contexts");
+      require(ResourceCapacity.failureProbe(11, 0) == 32,
+          "32 Guest-origin attachments grow while Host threads remain bound");
+
     } finally {
       ResourceCapacity.failureProbe(5, 0);
       for (Thread thread : threads)

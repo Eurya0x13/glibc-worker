@@ -5,7 +5,7 @@
 
 /* Post one fb_call at the current nesting depth and block for its reply.
    Re-entrant by design: a native call may re-enter Java and issue deeper
-   commands, each on its own call[] slot, bounded by FB_DEPTH. While blocked
+   commands, each on its own stable call slot, growing on demand. While blocked
    the thread pumps its own inbound JNI callbacks via full_host_poll, so the
    Guest is never stalled waiting on this thread. */
 jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
@@ -32,11 +32,13 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
     return zero;
   }
 
-  if (c->depth >= FB_DEPTH) {
+  struct fb_context *w = fb_context_at(gw_host_bridge, c->id);
+  if (c->emergency || c->depth < 0 || c->depth >= INT_MAX - 1 || !w ||
+      !fb_ensure_frame(w, c->depth + 1)) {
     c->command_error = GW_E_CAPACITY;
     snprintf(c->diagnostic, sizeof c->diagnostic,
-             "Host bridge nesting limit exceeded");
-    fh_throw(c->env, FB_FAILURE_DEPTH, c->diagnostic);
+             "Cannot grow Host bridge frames");
+    fh_throw(c->env, FB_FAILURE_MEMORY, c->diagnostic);
     atomic_fetch_add(&gw_host_bridge->errors, 1);
     return zero;
   }
@@ -48,7 +50,7 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
 #endif
 
   GW_RPC_SCOPE(pack, GW_RPC_HOST_COMMAND_PACK, -1);
-  struct fb_call *r = &gw_host_bridge->ctx[c->id].call[c->depth++];
+  struct fb_call *r = fb_call_at(w, c->depth++);
   r->op = op;
   r->module = c->module;
   r->function = fn;
@@ -68,14 +70,14 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   int seq = gw_rpc_next_sequence(atomic_load(&r->request));
 #if GW_RPC_PROFILE
   unsigned handoff_depth = (unsigned)(c->depth - 1);
-  if (op == FB_NATIVE) {
+  if (op == FB_NATIVE && handoff_depth < GW_HANDOFF_DEPTH) {
     gw_handoff_begin(&gw_rpc_current->handoff, handoff_depth);
   }
 #endif
   atomic_store_explicit(&r->request, seq, memory_order_release);
-  struct fb_event *event = &gw_host_bridge->ctx[c->id].host_event;
+  struct fb_event *event = &fb_context_at(gw_host_bridge, c->id)->host_event;
   GW_RPC_SCOPE_END(pack);
-  fb_event_notify(&gw_host_bridge->ctx[c->id].guest_event);
+  fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
 
   for (;;) {
     uint32_t observed = fb_event_sample(event);
@@ -91,17 +93,18 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   }
 
 #if GW_RPC_PROFILE
-  if (op == FB_NATIVE) {
-    gw_handoff_finish(&gw_rpc_current->handoff, handoff_depth,
-                      (struct gw_handoff_record){
-                          .function = fn,
-                          .module = c->module,
-                          .api = UINT64_MAX,
-                          .context = (unsigned)c->id,
-                          .depth = handoff_depth,
-                          .host_tid = gw_host_bridge->ctx[c->id].host_tid,
-                          .guest_tid = gw_host_bridge->ctx[c->id].guest_tid,
-                          .request = (unsigned)seq});
+  if (op == FB_NATIVE && handoff_depth < GW_HANDOFF_DEPTH) {
+    gw_handoff_finish(
+        &gw_rpc_current->handoff, handoff_depth,
+        (struct gw_handoff_record){
+            .function = fn,
+            .module = c->module,
+            .api = UINT64_MAX,
+            .context = (unsigned)c->id,
+            .depth = handoff_depth,
+            .host_tid = fb_context_at(gw_host_bridge, c->id)->host_tid,
+            .guest_tid = fb_context_at(gw_host_bridge, c->id)->guest_tid,
+            .request = (unsigned)seq});
   }
 #endif
 

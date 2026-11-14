@@ -27,25 +27,63 @@ struct fg_extended_table {
 
 static const struct fg_extended_table fg_table;
 __thread JNIEnv fg_env = &fg_table.base;
-static pthread_t workers[FB_CONTEXTS];
-static int worker_live[FB_CONTEXTS];
+
+struct guest_slot {
+  pthread_t worker;
+  int worker_live;
+#if GW_RPC_PROFILE
+  struct gw_rpc_row metrics;
+#endif
+};
+
+static struct guest_slot *guest_slot(int id, int create) {
+  struct fb_context *c = fb_context_at(G, id);
+  if (!c) {
+    return NULL;
+  }
+  uintptr_t value =
+      atomic_load_explicit(&c->guest_private, memory_order_acquire);
+  if (!value && create) {
+    struct guest_slot *fresh = calloc(1, sizeof *fresh);
+    if (!fresh) {
+      return NULL;
+    }
+    if (atomic_compare_exchange_strong_explicit(
+            &c->guest_private, &value, (uintptr_t)fresh, memory_order_acq_rel,
+            memory_order_acquire)) {
+      value = (uintptr_t)fresh;
+    } else {
+      free(fresh);
+    }
+  }
+  struct guest_slot *slot = (void *)value;
+#if GW_RPC_PROFILE
+  if (slot) {
+    atomic_store_explicit(&c->guest_metrics, (uintptr_t)&slot->metrics,
+                          memory_order_release);
+  }
+#endif
+  return slot;
+}
+
 __thread uint64_t gmodule;
 #if GW_RPC_PROFILE
 _Thread_local struct gw_rpc_row *gw_rpc_current
     __attribute__((visibility("hidden")));
 _Thread_local struct gw_rpc_scope *gw_rpc_scope_current
     __attribute__((visibility("hidden")));
-static struct gw_rpc_row guest_metrics[FB_CONTEXTS];
 static struct gw_rpc_stage_cost guest_clock_floor;
-static struct gw_rpc_row *host_metrics;
 
 struct gw_handoff_row *gw_rpc_peer_handoff(unsigned context) {
-  return host_metrics && context < FB_CONTEXTS ? &host_metrics[context].handoff
-                                               : NULL;
+  struct fb_context *c = fb_context_at(G, (int)context);
+  struct gw_rpc_row *row =
+      c ? (void *)atomic_load_explicit(&c->host_metrics, memory_order_acquire)
+        : NULL;
+  return row ? &row->handoff : NULL;
 }
 
 static void metrics_connect(struct shared *shared) {
-  struct fb_call *hello = &G->ctx[0].call[0];
+  struct fb_call *hello = &fb_context_at(G, 0)->call[0];
 
   if (hello->op != FB_RPC_PROFILE_HELLO ||
       hello->args[0].j != GW_RPC_METRICS_ABI ||
@@ -62,11 +100,16 @@ static void metrics_connect(struct shared *shared) {
   }
 
   gw_rpc_calibrate(&guest_clock_floor);
-  host_metrics = (void *)(uintptr_t)hello->args[9].j;
 
   hello->args[6].j = (jlong)(uintptr_t)&guest_clock_floor;
-  gw_rpc_current = &guest_metrics[0];
-  hello->result.j = (jlong)(uintptr_t)guest_metrics;
+  struct guest_slot *owner = guest_slot(0, 1);
+  if (!owner) {
+    atomic_store_explicit(&shared->phase, -1, memory_order_release);
+    syscall(SYS_exit, 93);
+    __builtin_unreachable();
+  }
+  gw_rpc_current = &owner->metrics;
+  hello->result.j = (jlong)(uintptr_t)gw_rpc_current;
   hello->error = FB_RPC_PROFILE_ACK;
   /* The owner's existing release/acquire phase-ready handshake publishes
    * this pointer. No request epoch is advanced; this is not an RPC. */
@@ -125,22 +168,18 @@ static jint fg_attach_common(JavaVM *vm, JNIEnv **env, void *opaque,
     return JNI_ERR; /* Explicitly unsupported non-null ThreadGroup. */
   }
 
-  for (int i = 1; i < FB_CONTEXTS; i++) {
-    int state = FB_FREE;
-    if (!atomic_compare_exchange_strong(&G->ctx[i].state, &state,
-                                        FB_RESERVED)) {
-      continue;
+  int i = fb_reserve_context(G);
+  if (i >= 0) {
+    struct fb_context *c = fb_context_at(G, i);
+    struct guest_slot *slot = guest_slot(i, 1);
+    if (!slot) {
+      atomic_store_explicit(&c->state, FB_FREE, memory_order_release);
+      return JNI_ENOMEM;
     }
-    struct fb_context *c = &G->ctx[i];
 #if GW_RPC_PROFILE
-    gw_rpc_current = &guest_metrics[i];
+    gw_rpc_current = &slot->metrics;
 #endif
-    atomic_store(&c->closing, 0);
-    atomic_store(&c->host_done, 0);
-    atomic_store(&c->guest_done, 0);
-    atomic_store(&c->origin, 0);
-    size_t payload = offsetof(struct fb_context, host_tid);
-    memset((char *)c + payload, 0, sizeof *c - payload);
+    fb_context_reset(c);
     c->origin = 1;
     c->daemon = daemon;
     c->guest_tid = (int)syscall(SYS_gettid);
@@ -194,7 +233,7 @@ static jint fg_detach(JavaVM *vm) {
   if (gid < 0) {
     return JNI_OK;
   }
-  struct fb_context *c = &G->ctx[gid];
+  struct fb_context *c = fb_context_at(G, gid);
   if (!c->origin || gdepth) {
     return JNI_ERR;
   }
@@ -240,9 +279,9 @@ static void *fg_worker(void *arg) {
   gid = (int)(intptr_t)arg;
   gdepth = 0;
 #if GW_RPC_PROFILE
-  gw_rpc_current = &guest_metrics[gid];
+  gw_rpc_current = &guest_slot(gid, 0)->metrics;
 #endif
-  struct fb_context *c = &G->ctx[gid];
+  struct fb_context *c = fb_context_at(G, gid);
   c->guest_tid = (int)syscall(SYS_gettid);
   atomic_fetch_add(&G->live_guest_threads, 1);
 
@@ -259,43 +298,53 @@ static void *fg_worker(void *arg) {
 
   atomic_fetch_sub(&G->live_guest_threads, 1);
   atomic_store_explicit(&c->state, FB_DEAD, memory_order_release);
-  fb_event_notify(&G->ctx[0].guest_event);
+  fb_event_notify(&fb_context_at(G, 0)->guest_event);
   return NULL;
 }
 
 void fg_pump(void) {
-  if (gid < 0 || gdepth >= FB_DEPTH) {
+  if (gid < 0 || gdepth < 0) {
     return;
   }
 
   if (gid == 0) {
-    for (int i = 1; i < FB_CONTEXTS; i++) {
-      struct fb_context *c = &G->ctx[i];
+    for (int i = 1; i < fb_context_capacity(G); i++) {
+      struct fb_context *c = fb_context_at(G, i);
       int state = atomic_load_explicit(&c->state, memory_order_acquire);
-      if (state == FB_HOST_REQUEST && !c->origin && !worker_live[i]) {
-        worker_live[i] = 1;
-        if (pthread_create(&workers[i], NULL, fg_worker, (void *)(intptr_t)i)) {
-          worker_live[i] = 0;
+      struct guest_slot *slot = guest_slot(i, state == FB_HOST_REQUEST);
+      if (state == FB_HOST_REQUEST && !c->origin &&
+          (!slot || !slot->worker_live)) {
+        if (slot) {
+          slot->worker_live = 1;
+        }
+        if (!slot || pthread_create(&slot->worker, NULL, fg_worker,
+                                    (void *)(intptr_t)i)) {
+          if (slot) {
+            slot->worker_live = 0;
+          }
           c->attach_result = JNI_ENOMEM;
           atomic_store(&c->state, FB_ATTACH_FAILED);
           atomic_fetch_add(&G->errors, 1);
           fb_event_notify(&c->host_event);
         }
-      } else if (state == FB_DEAD && !c->origin && worker_live[i]) {
-        pthread_join(workers[i], NULL);
-        worker_live[i] = 0;
+      } else if (state == FB_DEAD && !c->origin && slot && slot->worker_live) {
+        pthread_join(slot->worker, NULL);
+        slot->worker_live = 0;
         atomic_store_explicit(&c->state, FB_JOINED, memory_order_release);
         fb_event_notify(&c->host_event);
       }
     }
   }
 
-  fg_execute(&G->ctx[gid].call[gdepth]);
+  struct fb_call *call = fb_call_at(fb_context_at(G, gid), gdepth);
+  if (call) {
+    fg_execute(call);
+  }
 }
 
 void full_guest_start(struct shared *s) {
   G = (struct full_bridge *)s->full_bridge;
-  struct fb_call *hello = &G->ctx[0].call[0];
+  struct fb_call *hello = &fb_context_at(G, 0)->call[0];
   if (!fb_loader_acknowledge(hello)) {
     dprintf(2, "LOADER_PROTOCOL_MISMATCH matching Host/layout required\n");
     atomic_store_explicit(&s->phase, -1, memory_order_release);
@@ -313,7 +362,7 @@ void full_guest_start(struct shared *s) {
   hello->args[12].j = FB_JNI_ACK;
 
 #if GW_FUTEX_WAKE_FILTER
-  if (G->ctx[0].call[0].args[7].j != FB_WAKE_FILTER_HELLO) {
+  if (fb_context_at(G, 0)->call[0].args[7].j != FB_WAKE_FILTER_HELLO) {
     dprintf(
         2,
         "WAKE_FILTER_MISMATCH Guest requires matching Host event encoding\n");
@@ -321,7 +370,7 @@ void full_guest_start(struct shared *s) {
     syscall(SYS_exit, 94);
     __builtin_unreachable();
   }
-  G->ctx[0].call[0].args[8].j = FB_WAKE_FILTER_ACK;
+  fb_context_at(G, 0)->call[0].args[8].j = FB_WAKE_FILTER_ACK;
 #endif
 #if GW_RPC_PROFILE
   metrics_connect(s);
@@ -329,7 +378,7 @@ void full_guest_start(struct shared *s) {
 
   gid = 0;
   gdepth = 0;
-  G->ctx[0].guest_tid = (int)syscall(SYS_gettid);
+  fb_context_at(G, 0)->guest_tid = (int)syscall(SYS_gettid);
 }
 
 void full_guest_poll(void) {
@@ -337,7 +386,7 @@ void full_guest_poll(void) {
 }
 
 int full_guest_wait(struct shared *s) {
-  struct fb_event *event = &G->ctx[0].guest_event;
+  struct fb_event *event = &fb_context_at(G, 0)->guest_event;
   uint32_t observed = fb_event_sample(event);
   fg_pump();
   if (atomic_load_explicit(&s->stop, memory_order_acquire) ||
@@ -349,17 +398,19 @@ int full_guest_wait(struct shared *s) {
 }
 
 void full_guest_shutdown(void) {
-  for (int i = 1; i < FB_CONTEXTS; i++) {
-    if (worker_live[i]) {
-      atomic_store(&G->ctx[i].closing, 1);
-      fb_event_notify(&G->ctx[i].guest_event);
+  for (int i = 1; i < fb_context_capacity(G); i++) {
+    struct guest_slot *slot = guest_slot(i, 0);
+    if (slot && slot->worker_live) {
+      atomic_store(&fb_context_at(G, i)->closing, 1);
+      fb_event_notify(&fb_context_at(G, i)->guest_event);
     }
   }
 
-  for (int i = 1; i < FB_CONTEXTS; i++) {
-    if (worker_live[i]) {
-      pthread_join(workers[i], NULL);
-      worker_live[i] = 0;
+  for (int i = 1; i < fb_context_capacity(G); i++) {
+    struct guest_slot *slot = guest_slot(i, 0);
+    if (slot && slot->worker_live) {
+      pthread_join(slot->worker, NULL);
+      slot->worker_live = 0;
     }
   }
 

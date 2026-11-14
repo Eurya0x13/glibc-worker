@@ -7,6 +7,49 @@ static pthread_cond_t failure_condition = PTHREAD_COND_INITIALIZER;
 static _Atomic int failure_entered;
 static int failure_released;
 
+struct attachment_group {
+  pthread_mutex_t lock;
+  pthread_cond_t condition;
+  int arrived, successful, released;
+};
+
+static void *attached_growth_worker(void *opaque) {
+  struct attachment_group *group = opaque;
+  JNIEnv *env = NULL;
+  int attached = (*vm)->AttachCurrentThread(vm, &env, NULL) == JNI_OK;
+  int good = attached && (*env)->GetVersion(env) >= JNI_VERSION_1_6;
+  pthread_mutex_lock(&group->lock);
+  group->arrived++;
+  group->successful += good;
+  pthread_cond_broadcast(&group->condition);
+  while (!group->released) pthread_cond_wait(&group->condition, &group->lock);
+  pthread_mutex_unlock(&group->lock);
+  if (attached) (*vm)->DetachCurrentThread(vm);
+  return NULL;
+}
+
+static jint attachment_growth(void) {
+  struct attachment_group group = {.lock = PTHREAD_MUTEX_INITIALIZER,
+                                    .condition = PTHREAD_COND_INITIALIZER};
+  pthread_t threads[32];
+  unsigned created = 0;
+  while (created < 32 && !pthread_create(&threads[created], NULL, attached_growth_worker, &group)) created++;
+  struct timespec until;
+  clock_gettime(CLOCK_REALTIME, &until);
+  until.tv_sec += 15;
+  pthread_mutex_lock(&group.lock);
+  int error = 0;
+  while (group.arrived != (int)created && !error)
+    error = pthread_cond_timedwait(&group.condition, &group.lock, &until);
+  group.released = 1;
+  pthread_cond_broadcast(&group.condition);
+  pthread_mutex_unlock(&group.lock);
+  for (unsigned i = 0; i < created; i++) pthread_join(threads[i], NULL);
+  pthread_cond_destroy(&group.condition);
+  pthread_mutex_destroy(&group.lock);
+  return !error && created == 32 && group.successful == 32 ? 32 : -15;
+}
+
 static jint failure_probe(JNIEnv *e, jclass cls, jint kind, jint depth) {
   if (kind == 0 || kind == 1) {
     if (!depth) {
@@ -69,5 +112,6 @@ static jint failure_probe(JNIEnv *e, jclass cls, jint kind, jint depth) {
   if (kind == 8) {
     return FB_CONTEXTS;
   }
+  if (kind == 11) return attachment_growth();
   return 12345;
 }

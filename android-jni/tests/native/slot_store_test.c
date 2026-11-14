@@ -185,6 +185,23 @@ static void initial_reservations(void) {
   }
 }
 
+static void dynamic_owners(void) {
+  struct gw_slot_store *s = gw_slot_create(&config);
+  uint64_t first, expanded, last;
+  void *stable = gw_slot_insert(s, 1, &first);
+  assert(stable && gw_slot_insert(s, 1024, &expanded));
+  uint64_t found;
+  assert(gw_slot_owned(s, 1024, 0, &found) && found == expanded);
+  fail_at = attempts;
+  assert(!gw_slot_insert(s, 8192, &last) && !last);
+  fail_at = SIZE_MAX;
+  assert(gw_slot_get(s, first) == stable && gw_slot_get(s, expanded));
+  assert(gw_slot_insert(s, 8192, &last));
+  assert(gw_slot_erase(s, expanded) && gw_slot_erase(s, first) &&
+         gw_slot_erase(s, last));
+  assert(gw_slot_destroy(s) && !outstanding);
+}
+
 struct vm_class {
   int identity;
 };
@@ -364,6 +381,7 @@ int main(void) {
   storage_failures();
   generations_and_owners();
   initial_reservations();
+  dynamic_owners();
   references();
   reflection_boundaries();
   printf(

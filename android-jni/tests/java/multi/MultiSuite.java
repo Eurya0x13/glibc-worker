@@ -13,6 +13,61 @@ import java.util.function.IntUnaryOperator;
 public final class MultiSuite {
   static int checks, failures;
 
+  public static final class OwnershipTarget {
+    public static native int probe();
+    public static native int other();
+  }
+
+  static int registerTarget(Loaded module, int kind) throws Exception {
+    return (Integer) module.call(
+        "registerTarget", new Class<?>[] {Class.class, int.class}, OwnershipTarget.class, kind);
+  }
+
+  static void requireUnbound() {
+    boolean probe = false, other = false;
+    try {
+      OwnershipTarget.probe();
+    } catch (UnsatisfiedLinkError expected) {
+      probe = true;
+    }
+    try {
+      OwnershipTarget.other();
+    } catch (UnsatisfiedLinkError expected) {
+      other = true;
+    }
+    requireScope(probe && other);
+  }
+
+  static void registrationOwnership(Loaded a, Loaded b) throws Exception {
+    requireScope(registerTarget(a, 1) == 0 && OwnershipTarget.probe() == 3456);
+    boolean registerDenied = false, unregisterDenied = false;
+    try {
+      registerTarget(b, 0);
+    } catch (IllegalStateException expected) {
+      registerDenied = true;
+    }
+    try {
+      b.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class);
+    } catch (IllegalStateException expected) {
+      unregisterDenied = true;
+    }
+    requireScope(registerDenied && unregisterDenied && OwnershipTarget.probe() == 3456);
+    requireScope(
+        (Integer) a.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class)
+        == 0);
+    requireUnbound();
+    requireScope(registerTarget(a, 3) == -1); // Detached worker: shared dependency is ambiguous.
+    requireUnbound();
+    requireScope(registerTarget(a, 4) == -1); // Every entry must resolve, not just the first.
+    requireUnbound();
+    requireScope(registerTarget(a, 2) == 0 && OwnershipTarget.probe() == 111);
+    requireScope(
+        (Integer) a.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class)
+        == 0);
+    requireUnbound();
+    requireScope(registerTarget(b, 1) == 0 && OwnershipTarget.probe() == 3456);
+  }
+
   public static int checkCount() {
     return checks;
   }
@@ -348,6 +403,7 @@ public final class MultiSuite {
     crossCalls(a, b);
     executionScopes(a, b);
     closeWaits(a, b);
+    registrationOwnership(a, b);
     concurrent(a, b);
     sqlite(directory, a, b);
     rejectedLoad(directory + "/libmulti_reject.so", a, b);
@@ -370,6 +426,7 @@ public final class MultiSuite {
     awaitUnload(neutral, 2, "third_library_unloads_independently");
 
     awaitUnload(a, 1, "first_library_gc_unload");
+    requireScope(OwnershipTarget.probe() == 3456);
     check(metric(14) == depD && b.noarg("named") == 223 && b.integer("cached", 9) == 10009
             && b.noarg("value") == 7,
         "survivor_cache_closure_and_dependency");
@@ -384,6 +441,11 @@ public final class MultiSuite {
         "reload_root_keeps_shared_dependency");
     awaitUnload(again, 1, "reloaded_first_library_unloads");
     awaitUnload(b, 0, "last_owner_unloads");
+    requireUnbound();
+    System.out.println("AUDIT_OWNERSHIP_TEST {\"result\":\"PASS\",\"handoff\":true,"
+        + "\"dependency_context\":true,\"background_top\":true,"
+        + "\"ambiguous_dependency_rejected\":true,\"mixed_batch_rejected\":true,"
+        + "\"old_owner_unload_preserved_new\":true,\"final_owner_unload_unbound\":true}");
     check(metric(14) == depD + 1, "dependency_destroyed_after_last_owner");
 
     Loaded fresh = new Loaded();

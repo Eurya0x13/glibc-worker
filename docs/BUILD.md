@@ -15,7 +15,7 @@ core 的 GNU 运行时在 `core/build/glibc-runtime/<ABI>/`，两侧 libffi 在 
 
 `core`、`bionic-dlopen` 的组合构建只需要 Python、CMake、NDK；不调用 javac，不读取 JNI 头，不构建 libffi/JRE。JNI 以上需要 JDK、匹配的 GNU 工具链、glibc/libffi。NDK 仍由环境变量或工作区 local.properties 中的 sdk.dir 发现，不猜安装路径。
 
-`GW_CONTEXTS` 默认 16（2..256）、`GW_RPC_PROFILE=0`、`GW_RPC_SPIN_NS=20000`、`GW_FUTEX_WAKE_FILTER=0`、`GW_RPC_READY_POLL=0`。每个项目保存自己的 abi-flags，Host/Guest 必须使用同一份布局和配置。
+`GW_CONTEXTS` 是初始上下文容量，默认 16（构建范围 2..256，运行时按 16 项动态增长）、`GW_RPC_PROFILE=0`、`GW_RPC_SPIN_NS=20000`、`GW_FUTEX_WAKE_FILTER=0`、`GW_RPC_READY_POLL=0`。每个项目保存自己的 abi-flags，Host/Guest 必须使用同一份布局和配置。
 
 android-jni 的 Host 资源存储固定使用 Zig 0.16.0，构建机器必须提供该版本；安装后的 C/C++ SDK 使用者无需 Zig。`GW_BINDING_BACKEND` 可以省略，显式 `zig` 仍可用，`c` 被明确拒绝；旧 CMake 缓存若保存了 `c`，需要清除缓存或改为 `zig`。初始存储容量为 512 个 binding、16,384 个引用/ID 槽、256 个注册类记录，耗尽后动态增长；模块上限固定 64。配置与释放约定见 [Host 资源管理](../android-jni/docs/ZIG_BINDINGS.md)。
 

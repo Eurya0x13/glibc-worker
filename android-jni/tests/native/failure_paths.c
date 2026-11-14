@@ -16,7 +16,23 @@ static struct host_context service_context;
 static _Atomic int stop_server, mode;
 static int pending, last_class, globals_created, globals_deleted, weaks_created,
     weaks_deleted;
-static _Atomic int fail_memory, fail_tls, tls_scope;
+static _Atomic int fail_memory, fail_tls, tls_scope, fail_pages, fail_private;
+void *__real_calloc(size_t, size_t);
+
+void *__wrap_calloc(size_t count, size_t size) {
+  return atomic_load(&fail_private) ? NULL : __real_calloc(count, size);
+}
+
+void *__real_mmap(void *, size_t, int, int, int, off_t);
+
+void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
+  if (atomic_load(&fail_pages)) {
+    errno = ENOMEM;
+    return MAP_FAILED;
+  }
+  return __real_mmap(p, n, prot, flags, fd, off);
+}
+
 static unsigned checks;
 #define CHECK(x) \
   do {           \
@@ -132,8 +148,9 @@ static void *server(void *unused) {
       atomic_store_explicit(&w->state, FB_RUNNING, memory_order_release);
       fb_event_notify(&w->host_event);
     }
-    for (int i = 0; i < FB_RPC_SLOTS; i++) {
-      struct fb_rpc *r = &bridge.ctx[0].rpc[i];
+    for (int i = -1; i < fb_frame_capacity(&bridge.ctx[0]); i++) {
+      struct fb_rpc *r =
+          i < 0 ? &bridge.ctx[0].emergency : fb_rpc_at(&bridge.ctx[0], i);
       if (atomic_load_explicit(&r->request, memory_order_acquire) !=
           atomic_load(&r->response)) {
         fh_service(&service_context, r);
@@ -160,16 +177,18 @@ int main(void) {
   JNIEnv *guest = &fg_env;
   CHECK((*guest)->GetVersion(guest) == 0x00010008);
 
-  /* A status-returning API must never fabricate JNI_OK at the depth limit. */
+  /* Failed frame growth uses an allocation-independent emergency RPC. */
   gdepth = FB_DEPTH;
+  atomic_store(&fail_pages, 1);
   CHECK((*guest)->RegisterNatives(guest, NULL, NULL, 0) == JNI_ERR);
-  CHECK((*guest)->ExceptionCheck(guest) && pending == FB_FAILURE_DEPTH);
+  CHECK((*guest)->ExceptionCheck(guest) && pending == FB_FAILURE_MEMORY);
   jthrowable token = (*guest)->ExceptionOccurred(guest);
   CHECK(token);
   (*guest)->ExceptionClear(guest);
   (*guest)->DeleteLocalRef(guest, token);
   CHECK(!(*guest)->ExceptionCheck(guest));
   gdepth = 0;
+  atomic_store(&fail_pages, 0);
   CHECK((*guest)->GetVersion(guest) == 0x00010008);
 
   /* Fill the reserve, fail growth after VM NewGlobalRef, and verify rollback.
@@ -212,10 +231,18 @@ int main(void) {
     atomic_store(&bridge.ctx[i].state, FB_RUNNING);
   }
   struct gw_loader_error error = {0};
+  atomic_store(&fail_pages, 1);
   CHECK(!fh_context(&environment, &error) && error.code == GW_E_CAPACITY &&
         pending == FB_FAILURE_MEMORY);
   pending = 0;
+  atomic_store(&fail_pages, 0);
   atomic_store(&bridge.ctx[1].state, FB_FREE);
+  atomic_store(&fail_private, 1);
+  CHECK(!fh_context(&environment, &error) && error.code == GW_E_CAPACITY &&
+        pending == FB_FAILURE_MEMORY &&
+        atomic_load(&bridge.ctx[1].state) == FB_FREE);
+  pending = 0;
+  atomic_store(&fail_private, 0);
   atomic_store(&fail_tls, 1);
   CHECK(!fh_context(&environment, &error) && error.code == GW_E_CAPACITY &&
         pending == FB_FAILURE_MEMORY);
@@ -231,6 +258,10 @@ int main(void) {
   atomic_store(&mode, 1);
   gid = -1;
   JNIEnv *attached = (void *)(uintptr_t)1;
+  atomic_store(&fail_private, 1);
+  CHECK(fg_vm->AttachCurrentThread(&fg_vm, &attached, NULL) == JNI_ENOMEM &&
+        !attached && gid == -1 && atomic_load(&bridge.ctx[1].state) == FB_FREE);
+  atomic_store(&fail_private, 0);
   CHECK(fg_vm->AttachCurrentThread(&fg_vm, &attached, NULL) == JNI_ENOMEM &&
         !attached && gid == -1);
   atomic_store(&mode, 0);

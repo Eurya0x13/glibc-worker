@@ -29,6 +29,7 @@ command = [
     "-pthread",
     "-D_GNU_SOURCE",
     "-Wno-macro-redefined",
+    "-Wl,--wrap=mmap",
     *(
         "-I" + str(p)
         for p in (

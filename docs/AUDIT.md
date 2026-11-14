@@ -8,18 +8,18 @@
 
 - [x] AUD-01：模块固定 64 槽；binding、引用/ID、注册类记录初始容量为 512 / 16,384 / 256，统一使用 Zig 稳定分块扩容；完成 C 对照后删除定容后端。
 - [x] AUD-02：反射、ID、注册、查找和命令路径检查描述符长度后完整复制；超长明确拒绝。
-- [x] AUD-03：资源耗尽与 Host/Guest 重入超限使用明确异常或结构化错误；保留已有异常，回滚未发布资源，深度耗尽仍可查询/清除异常及释放资源。
+- [x] AUD-03：资源/调用帧扩容失败使用明确异常或结构化错误；保留已有异常，回滚未发布资源，扩容失败仍可查询/清除异常及释放资源。
 - [x] AUD-04：启动栈写入前校验 argc、地址、参数、固定环境和完整帧空间；保护页/哨兵回归通过。
 - [x] AUD-05：RPC 序号明确无溢出回绕；引用/ID 代数耗尽永久退役；现行 Zig 及已删除 C 对照均有边界验证。
 - [x] AUD-06：复现关闭 robust-list 后的假成功与 owner-death 超时；robust mutex 初始化明确返回 ENOTSUP，普通锁/条件变量及真机组合回归通过。
-- [ ] AUD-07：审定 JNI 上下文容量、重入深度、注册所有权和跨依赖库的归属规则。
+- [x] AUD-07：上下文/重入帧稳定分块增长，保留线程身份与应急失败通道；完成类注册交接、严格依赖归属及执行 scope 关闭规则，默认/诊断真机组合通过。
 - [ ] AUD-08：审定卡死时的 deadline、取消、关闭及进程处置策略。
 - [x] AUD-09：runner 独占结果目录，先归档旧制品再检查设备，原子记录本轮状态与 run_id，并核对安装 APK 散列。
 - [ ] AUD-10：按具体 Android JRE 制品扩展验证，不把桌面适配器测试当作 Android 双 libc 通过。
 - [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
 - [x] AUD-12：清理结果不确定时永久隔离桥、保留可能仍被使用的资源，由宿主丢弃进程；不自动杀应用。
 
-AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验证，具体契约见 [JNI 失败处理](../android-jni/docs/FAILURES.md)。AUD-07 已补注册期间模块借用、CLOSING 后拒绝发布，以及执行 scope 关闭保护：拒绝关闭本线程持有的模块，也拒绝持有任意 scope 时等待目标借用；上下文、重入容量及注册/依赖归属仍待审。AUD-08 已确定不可恢复清理的进程处置方式，尚无通用 deadline 或取消协议。
+AUD-03 的错误映射和故障回滚保持有效；AUD-07 将原固定深度/上下文耗尽替换为动态增长，扩容失败继续保留异常、撤回未发布资源并使用独立应急 RPC。AUD-07 的线程、类交接、依赖归属及容量规则见 [JNI 交互契约](../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md)。AUD-08 仍没有通用 deadline 或取消确认协议，不能因 AUD-07 完成而将任意在途调用当作可安全撤销。
 
 ## 1. 装载与 JNI 资源
 
@@ -32,9 +32,9 @@ AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验
 | 注册类所有权记录 | 初始共用 256 槽，按 64 槽增长 | 所有模块共享；分配失败使 `RegisterNatives` 返回 `JNI_ERR` 并保留或抛出 OOM | AUD-01、AUD-07 |
 | 同一 Java 类的注册所有者 | 一个 Guest 模块 | 其他模块不能同时持有该类的 native 注册 | AUD-07 |
 | 单次 `RegisterNatives` | 最多 64 个方法 | 非法数量返回 `JNI_ERR` 并抛 `IllegalArgumentException`；分批仍受共享跳板和注册记录容量约束 | AUD-01、AUD-03 |
-| JNI 上下文 | 默认及当前 ARM64 构建为 16 个 | 包含 owner 上下文，额外剩 15 个；Host 调用线程与 Guest 附着线程共享；耗尽分别为 OOM / `JNI_ENOMEM` | AUD-07 |
-| 上下文构建范围 | `GW_CONTEXTS=2..256` | 组合脚本允许的构建范围；不是运行时热调整参数 | AUD-07 |
-| 调用协议深度 | 12 个普通调用槽，另有 1 个应急 RPC 槽 | Host/Guest 超深抛 `StackOverflowError`；应急槽只允许报告失败、异常处理和必要释放，不增加 native 重入容量 | AUD-03、AUD-07 |
+| JNI 上下文 | 默认初始 16 个，按 16 项动态增长 | 包含 owner；Host/Guest 共享目录、保留线程绑定；系统资源或索引边界不足分别为 OOM / `JNI_ENOMEM`，不等待其他绑定归还 | AUD-07 |
+| 上下文初始容量构建范围 | `GW_CONTEXTS=2..256` | 仅配置初始内联容量，不是运行时最大上下文数 | AUD-07 |
+| 调用协议深度 | 初始 12 层，按 16 层动态增长；独立应急 RPC | 分配/索引边界不足抛 OOM；应急通道不依赖扩容，并禁止在应急处理内再次发 Guest 命令；VM/线程栈仍是实际边界 | AUD-03、AUD-07 |
 | native 显式参数 | 最多 32 个 | 不含隐含的 `JNIEnv*` 和对象/类参数；每个 long/double 仍只占一个 `jvalue` 参数项 | AUD-07 |
 
 64 个槽限制的是本项目管理的顶层库，不是进程中所有 `.so` 的数量：
@@ -43,8 +43,8 @@ AUD-03 的错误映射、故障回滚和真机深度/上下文耗尽恢复已验
 - `DT_NEEDED` 自动加载的依赖及 Guest 内部自行 `dlopen` 的库不逐个占用这些槽位。
 - Guest 内部自行加载的库不会自动得到独立的桥接模块句柄和完整生命周期管理。
 - Host 的普通 bionic 库不占 Guest 模块槽；一个模组也可能加载多个顶层 JNI 库。
-- `UnregisterNatives` 当前不会单独清空模块的所有跳板和注册所有权记录；主要清理点是模块卸载。512 现为初始存储容量，既不是活跃 Java 方法数，也不是硬上限。
-- 不经过 JNI 桥的 Guest pthread 不逐个占用 JNI 上下文；线程需要附着桥时才受上下文容量限制。它不是所有 Guest 线程的总数上限。
+- 显式 `UnregisterNatives` 成功且无 pending exception 后释放类所有权，可交接给其他模块；旧模块跳板保留到卸载，防止影响其他类/在途调用。512 是初始存储容量，既不是活跃 Java 方法数，也不是硬上限。
+- 不经过 JNI 桥的 Guest pthread 不占 JNI 上下文；附着桥才需要上下文/Host helper。动态目录不保证任意线程数成功，仍受 VM、线程栈、内存和系统限制。
 
 源码位置：
 
@@ -139,8 +139,8 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | Guest `DestroyJavaVM` | 返回 `JNI_ERR`，由 Host 管理真实 VM 生命周期 |
 | Guest `DetachCurrentThread` | 不能分离 Host 来源上下文，不能在嵌套调用中分离 |
 | JNI 重载推断 | 多个重载只提供一个短 JNI 符号时，不能唯一确定描述符 |
-| 注册函数的自动归属 | 无当前模块上下文时，主要按已记录顶层 DSO 的 `link_map` 推断；依赖库函数归属需要专项审阅 |
-| 同类注册所有权 | 一个类的 native 注册只归属一个 Guest 模块；`UnregisterNatives` 后的所有权释放策略仍需审定 |
+| 注册函数归属 | 有当前模块时归该逻辑模块，可使用其依赖函数；无上下文时逐个函数严格匹配同一顶层 `link_map`，共享依赖/未知/混合所有者整批拒绝 |
+| 同类注册所有权 | 一个类一个模块；更新在途时互斥拒绝；显式注销成功释放记录，旧模块卸载不注销新所有者的注册；不确定失败隔离并保留资源 |
 | 停止 | 有加载中、活跃或关闭中模块时拒绝停止；quarantine 后也拒绝停止/重配以保留资源 |
 | 不确定清理失败 | UnregisterNatives、弱类提升 OOM、在途注册或 Guest 提交/清理失败时永久隔离桥，保留仍可能被引用的资源；宿主丢弃进程 |
 | 同线程回调中关闭祖先模块 | native/查找/注册持有执行 scope；关闭当前线程仍持有的任意祖先返回 BUSY，不进入 CLOSING；可跨线程归还的 pin 单独记账 |
@@ -149,7 +149,7 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | 等待和取消 | 无通用 deadline / 超时取消协议；对端卡住可能无限等待 |
 | 跨 libc 对象 | 不可自由混用 allocator、`FILE`、pthread 对象、C++ 对象及异常；Guest 内部使用 C++ 不因此被禁止 |
 | 进程故障隔离 | 同进程执行；Guest 原生崩溃和进程级 `exit` 没有进程隔离 |
-| Host/Guest 协议 | 配置必须匹配并成套部署；JNI 能力与装载协议 v4 均要求 Guest 确认；核对共享区大小、上下文数和模块上限后才 ready |
+| Host/Guest 协议 | 配置必须匹配并成套部署；JNI 能力与装载协议 v5 均要求 Guest 确认；核对共享区大小、上下文数和模块上限后才 ready |
 | runtime 组合 | 模块化 DSOs 与兼容单 DSO 二选一，不能在同一进程重复装入两套单例状态 |
 
 存储初始容量集中在 [resource_limits.h](../android-jni/src/host/resource_limits.h)。超过初始容量时按块增长，已有地址和 token 不移动；空块保留并复用至 store 销毁。初始容量不能防止无限资源请求或保证扩容后的性能，ID/类身份路径仍扫描已分配容量。
@@ -160,17 +160,17 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 
 源码与契约位置：[jni_capabilities.h](../android-jni/src/common/jni_capabilities.h)、[full_guest.c](../android-jni/src/guest/full_guest.c)、[guest_loader.c](../android-jni/src/guest/guest_loader.c)、[full_host.c](../android-jni/src/host/full_host.c)、[bindings.c](../android-jni/src/host/bindings.c)、[JvmAdapter.java](../jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java)、[LOADER_BACKEND.md](../android-jni/docs/LOADER_BACKEND.md)。
 
-### AUD-07 / AUD-08 待审决策
+### AUD-07 已审定规则 / AUD-08 待审问题
 
-以下列明局部修复和仍待审定的结构问题；两项保持未勾选。
+AUD-07 的规则和边界已实现并验证；任意等待/取消仍由 AUD-08 单独审理。
 
 | 问题 | 当前实现与风险 | 待审方向 |
 | --- | --- | --- |
-| 上下文生命周期 | Host 首次调用即绑定一对 Host/Guest 上下文，通常到 Host 线程退出才释放；16 是长期绑定槽数，不只是瞬时并发调用数 | 保留线程绑定以维持 JNI 线程语义；审定是否按块扩容及资源预算，不仅增大默认常量 |
-| 重入深度 | 12 个普通调用槽，另有应急 RPC；超限已由 AUD-03 明确报错 | 是否保留固定值或增加构建配置；不可只扩大数组而忽略对称协议和诊断 |
+| 上下文生命周期 | Host 绑定至线程退出，Guest 附着至 detach；初始 16、按 16 项增长，退出后槽可复用，已发布页保留到进程退出 | 已完成；不改变线程 JNI/TLS 身份，不保证无限资源或自动发现后台工作 |
+| 重入深度 | 初始 12、按 16 层增长，帧地址稳定；独立应急 RPC 及禁止应急重入保护；v5 握手验证布局 | 已完成；实际 VM 栈/原生栈与索引溢出边界仍存在；诊断 handoff 只记录前 12 层 |
 | 执行 scope 与关闭等待 | 连续 TLS 表按模块代数记录当前线程持有的全部模块和递归次数；关闭祖先，或持有 scope 时关闭有活跃借用的其他模块，均在 CLOSING 前返回 BUSY；借用归还的正常等待保留 | 已登记 scope 与 loader 借用等待构成的环被保守拒绝；纯 pin 环、OnUnload/transport、用户锁/join/RPC 和未登记后台工作仍需宿主管理；完整规则见执行借用契约 |
-| 类注册所有权 | 一个类只允许一个模块；UnregisterNatives 后记录保留到卸载，其他模块无法接管 | 类级独占与成功注销后的交接规则一起审定，不能单独放开多 owner 后让一个模块卸载时注销别人的方法 |
-| 依赖库归属 | 有调用上下文时归当前逻辑模块；无上下文时 FB_OWNER 仅匹配顶层 link_map；共享依赖地址不能唯一确定 owner | 以装载/调用所有权为准，审定无上下文的依赖函数注册策略，不按单个地址猜测唯一归属 |
+| 类注册所有权 | 一个类一个模块；注册/注销预留排斥其他更新，成功显式注销释放所有权；有主类注销不确定失败隔离桥 | 已完成；交接后旧模块卸载不能注销新所有者的类；未假设任意 VM/缓存入口并发卸载安全 |
+| 依赖库归属 | 当前调用/装载上下文决定逻辑所有者；无上下文须逐项得到同一顶层模块，拒绝共享依赖和混合批次 | 已完成；无上下文共享依赖注册明确不支持；Guest 自行管理的任意映像/函数指针寿命不自动推断 |
 | 发布后的 RPC 超时 | 命令仍可能访问 caller 栈上的参数、Guest 地址或 JNI frame；隔离 registry 不会延长这些借用对象的寿命 | deadline 检测、取消请求、对端确认和进程处置分开定义；未确认停止访问前不能直接超时返回并释放栈/上下文 |
 | 关闭与退出 | active 借用、事件等待、pthread join 均可能无期限阻塞；不能强制结束任意 Guest 函数并保证资源安全 | 分开审定优雅关闭期限与不可恢复处置；继续由宿主决定丢弃进程，不把 watchdog 警报等同于安全取消 |
 
@@ -224,7 +224,7 @@ AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配�
 
 ## 9. 已有证据与未完成验证
 
-当前 ARM64 组合构建配置：16 contexts、profiling 关闭、主动等待 20 μs、通知过滤关闭、ready polling 关闭。可核对本地 [build.properties](../jvm-jni/build/tests/runtime/arm64-v8a/build.properties)。这些值不代表外部 Pojav 历史测试包的配置。
+默认 ARM64 组合配置为初始 16 contexts、profiling/通知过滤/ready polling 关闭、主动等待 20 μs；运行时允许扩容。AUD-07 另验证 profiling/过滤/polling 同时开启的组合。两份独立 APK 和 run_id 证据见下，不将可变构建目录或外部 Pojav 历史包当作本轮制品。
 
 | 验证 | 已有证据 | 尚不能证明 |
 | --- | --- | --- |
@@ -233,8 +233,8 @@ AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配�
 | ELF 分类三态与边界 | 49 项 ASan/UBSan 检查、C 装载检查和当前 Android 组合回归通过 | 真实 GNU loader 的完整 ELF 验证 |
 | Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 所有资源上限已取消、任意并发卸载安全或性能提升 |
 | 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消 |
-| AUD-03 失败语义 | ASan/UBSan 的生产 RPC/引用/ID/上下文故障注入、libffi/注册回滚检查及真机三轮各 6 项失败/恢复检查通过；9 个预期桥错误逐轮核对，最终引用和 closure 为 0 | 全系统 OOM 行为、任意第三方模组的异常恢复、ART 完整兼容 |
-| AUD-07 执行 scope | ASan/UBSan 的 CTest 7/7；64 模块、递归计数、正常跨线程关闭、两/三线程 scope 关闭环拒绝、pin 隔离通过；真实 Android JRE 四例嵌套/异常、两线程互关及既有 142 Java / 26 装载检查通过 | 通用死锁检测、纯 pin 或用户代码等待环、任意后台线程/缓存入口追踪、上下文扩容或注册/依赖所有权审定 |
+| AUD-03 失败语义 | 生产 RPC/引用/ID/上下文/帧、私有记录/TLS/worker 故障注入和 libffi/注册回滚检查通过；动态扩容后真机不再把 12 层/16 上下文当作预期错误，要求三轮零桥错误及最终零引用/closure | 全系统 OOM 行为、任意第三方模组的异常恢复、ART 完整兼容 |
+| AUD-07 交互规则 | scope 的 CTest 7/7；共享页 48 线程/96 层/五处映射失败恢复；Zig owner 扩容；类更新互斥、交接、歧义归属和注销失败隔离；默认与诊断真机均通过 Host/Guest 各 32 线程、容量 16→80、三轮 32 层重入、142 Java / 26 装载及最终零资源 | 通用死锁检测、用户代码等待、任意后台入口追踪或安全取消；这些不是 AUD-07 完成的结论 |
 | runtime 补丁流程 | 8 项回归检查；新 robust 拒绝补丁已核对源码、匹配 loader/libc 与 APK 内散列；ARM64 coverage 通过 | robust mutex 恢复能力（本 runtime 明确拒绝）、所有 pthread 属性 |
 
 本地结果在各项目 `build/`，不是源代码发布包的必备文件：
@@ -257,3 +257,9 @@ AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配�
 AUD-09 的验证包括真实 runner 的设备发现失败：旧 PASS 在 ABI 查询前已归档，本轮没有成功 summary。结果目录互斥不代替设备级互斥，同一手机仍必须按顺序运行。
 
 原始兼容性和复现命令继续维护在各项目契约及 [测试手册](../jvm-jni/tests/README.md) 中。修复本清单条目时，应同步更新对应状态、限制值和验证范围，不将源码检查或单项测试自动升级为完整兼容性声明。
+
+AUD-07 当前可复现证据：
+
+- [共享页并发/OOM 结果](../android-jni/build/context-page-tests/summary.json)。
+- [默认组合 coverage](../jvm-jni/build/aud07-final/coverage-final/summary.json) 与 [诊断/过滤/polling 组合](../jvm-jni/build/aud07-final/coverage-profile-final/summary.json)。
+- [本轮汇总](../android-jni/build/aud07-final/summary.json)，包含具体制品散列、run_id、桌面替身与真机验证的区别。

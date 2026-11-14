@@ -74,6 +74,8 @@ cmd = [
     "-fdata-sections",
     "-Wl,--gc-sections",
     "-Wl,--wrap=posix_memalign",
+    "-Wl,--wrap=mmap",
+    "-Wl,--wrap=calloc",
     "-Wl,--wrap=pthread_setspecific",
     "-I" + str(out),
     *("-I" + str(root / p) for p in includes),
