@@ -95,7 +95,8 @@ int main(int argc, char **argv) {
       assert(api->close(NULL, retained_id, &error) == GW_ERROR);
       assert(closes == 1 && error.code == GW_E_QUARANTINED);
     } else {
-      assert(gw_dlopen_enter(retained_id));
+      assert(phase == 3 ? gw_dlopen_scope_enter(retained_id)
+                        : gw_dlopen_enter(retained_id));
       pthread_t thread;
       assert(!pthread_create(&thread, NULL, closer, NULL));
       while (api->module_state(retained_id) != GW_MODULE_CLOSING) {
@@ -106,7 +107,11 @@ int main(int argc, char **argv) {
       assert(!pthread_join(thread, NULL));
       assert(close_result == GW_ERROR && close_error.code == GW_E_QUARANTINED &&
              !closes);
-      gw_dlopen_leave(retained_id);
+      if (phase == 3) {
+        assert(gw_dlopen_scope_leave(retained_id));
+      } else {
+        gw_dlopen_leave(retained_id);
+      }
     }
     assert(api->module_state(retained_id) == GW_MODULE_CLOSING);
   }

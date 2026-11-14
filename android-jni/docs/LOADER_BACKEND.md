@@ -48,7 +48,9 @@ AUTO 分类损坏或不支持的 ELF 返回 IMAGE，分类器资源上限返回 
 5. 开放模组加载。ready 前的 GNU 操作返回 NOT_READY；普通 bionic 操作仍可按原平台规则处理。
 6. 关闭所有 Guest 模块后调用 `full_host_shutdown`，停止后端、恢复可选适配器、释放 Host helper 与引用缓存；宿主随后确认 raw thread 退出，Guest pthread 由 Guest 自己 join。
 
-加载中、活动中或关闭中的模块会阻止停止。从自身活跃回调关闭同一模块返回 BUSY，避免等待自身。借用计数不代表任意原生后台线程，模组必须自行停止并 join 后台工作。
+加载中、活动中或关闭中的模块会阻止停止。native 跳板、查找和注册发布持有当前 Host 线程的执行 scope；同步重入时记录全部祖先模块及递归次数，正常返回和异常展开都配对归还。从回调关闭当前线程仍持有的任意祖先模块返回 BUSY，且不进入 CLOSING。当前最内层 module 字段只表示调用归属，不替代执行借用记录。
+
+其他线程关闭仍等待在途 scope/pin 归还；不同线程间的循环等待尚无通用检测。借用计数不代表任意原生后台线程，模组必须自行停止并 join 后台工作。两类借用及限制见 [执行借用规则](../../bionic-dlopen/docs/EXECUTION_SCOPES.md)。
 
 当前进程只支持一次配置、一套 Guest 和一个目标 VM。初始化失败后的完整重试、GNU loader/libc 映射销毁与重建尚无通用 API；失败无法安全恢复时应结束隔离的宿主进程。shutdown 不替宿主调用 DestroyJavaVM。
 

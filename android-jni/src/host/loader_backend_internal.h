@@ -34,6 +34,8 @@ int gw_loader_activate(struct gw_loader_error *);
 int gw_loader_stop(struct gw_loader_error *);
 int gw_loader_enter(uint64_t handle);
 void gw_loader_leave(uint64_t handle);
+int gw_loader_scope_enter(uint64_t handle);
+int gw_loader_scope_leave(uint64_t handle);
 uint64_t gw_loader_last_handle(void);
 int gw_loader_version_supported(jint version);
 int gw_loader_fail(struct gw_loader_error *, int code, const char *message);

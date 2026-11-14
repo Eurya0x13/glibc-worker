@@ -104,6 +104,14 @@ void gw_loader_leave(uint64_t id) {
   gw_dlopen_leave(id);
 }
 
+int gw_loader_scope_enter(uint64_t id) {
+  return gw_dlopen_scope_enter(id);
+}
+
+int gw_loader_scope_leave(uint64_t id) {
+  return gw_dlopen_scope_leave(id);
+}
+
 uint64_t gw_loader_last_handle(void) {
   return gw_dlopen_last_handle();
 }

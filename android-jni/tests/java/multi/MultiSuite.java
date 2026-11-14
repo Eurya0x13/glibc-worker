@@ -166,6 +166,66 @@ public final class MultiSuite {
     check(errors.isEmpty(), "concurrent_two_libraries_" + errors);
   }
 
+  static void requireScope(boolean good) {
+    if (!good)
+      throw new AssertionError("Execution scope contract");
+  }
+
+  static int closeBusy(Loaded target) {
+    requireScope(NativeBridge.bridgeTryClose(target.handle) == 9);
+    requireScope(NativeBridge.bridgeHandleState(target.handle) == 2);
+    return 0;
+  }
+
+  static IntUnaryOperator routeTo(Loaded module) {
+    return depth -> {
+      try {
+        return module.integer("route", depth);
+      } catch (RuntimeException failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new RuntimeException(failure);
+      }
+    };
+  }
+
+  static void executionScopes(Loaded a, Loaded b) throws Exception {
+    int closures = metric(5), unloads = metric(2), errors = metric(4);
+    try {
+      a.type.getField("peer").set(null, (IntUnaryOperator) depth -> closeBusy(a));
+      requireScope(a.integer("route", 1) == 111);
+      a.type.getField("peer").set(null, routeTo(b));
+      b.type.getField("peer").set(null, (IntUnaryOperator) depth -> {
+        closeBusy(a); // A -> Java -> B -> Java -> close(A).
+        return closeBusy(b);
+      });
+      requireScope(a.integer("route", 2) == 333);
+      a.type.getField("peer").set(null, (IntUnaryOperator) depth -> {
+        if (depth == 0)
+          return closeBusy(b);
+        return routeTo(b).applyAsInt(depth);
+      });
+      b.type.getField("peer").set(null, routeTo(a));
+      requireScope(a.integer("route", 3) == 444); // A -> B -> A -> close(B).
+      a.type.getField("peer").set(null, routeTo(b));
+      b.type.getField("peer").set(
+          null, (IntUnaryOperator) depth -> { throw new IllegalStateException("scope-unwind"); });
+      boolean unwound = false;
+      try {
+        a.integer("route", 2);
+      } catch (IllegalStateException expected) {
+        unwound = "scope-unwind".equals(expected.getMessage());
+      }
+      requireScope(unwound && a.integer("cached", 7) == 10007 && b.integer("cached", 8) == 10008);
+      requireScope(metric(5) == closures && metric(2) == unloads && metric(4) == errors);
+    } finally {
+      a.type.getField("peer").set(null, null);
+      b.type.getField("peer").set(null, null);
+    }
+    System.out.println("AUDIT_SCOPE_TEST {\"result\":\"PASS\",\"cases\":4,"
+        + "\"busy_refusals\":4,\"exception_unwind\":true,\"resources_preserved\":true}");
+  }
+
   static void rejectedLoad(String path, Loaded a, Loaded b) throws Exception {
     Loaded rejected = new Loaded();
     int closures = metric(5), failed = metric(12);
@@ -233,6 +293,7 @@ public final class MultiSuite {
         "per_class_method_cache");
 
     crossCalls(a, b);
+    executionScopes(a, b);
     concurrent(a, b);
     sqlite(directory, a, b);
     rejectedLoad(directory + "/libmulti_reject.so", a, b);

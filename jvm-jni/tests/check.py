@@ -146,6 +146,22 @@ def verify(
         json.loads(row)
         for row in re.findall(r"AUDIT_FAILURE_TEST (\{[^\n]+\})", report)
     ]
+    scope_rows = [
+        json.loads(row)
+        for row in re.findall(
+            r"^AUDIT_SCOPE_TEST (\{[^\n]+\})$", report, re.MULTILINE
+        )
+    ]
+    if group == "coverage" and scope_rows != [
+        {
+            "result": "PASS",
+            "cases": 4,
+            "busy_refusals": 4,
+            "exception_unwind": True,
+            "resources_preserved": True,
+        }
+    ]:
+        raise ValueError("Missing execution-scope and nested-close evidence")
     if group == "coverage":
         expected_rows = [
             {"cycle": cycle, "checks": 6, "expected_errors": 3}
@@ -257,6 +273,7 @@ def verify(
         "bridge_lifecycle": lifecycle,
         "descriptor_boundaries": descriptor_rows,
         "failure_boundaries": failure_rows,
+        "execution_scopes": scope_rows,
         "mutex_contract": mutex_contract,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit

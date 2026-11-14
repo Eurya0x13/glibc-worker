@@ -183,13 +183,14 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t guest,
   return (jvalue){.j = arguments[1].j + (jlong)guest + (jlong)c->module};
 }
 
-int gw_loader_enter(uint64_t module) {
+int gw_loader_scope_enter(uint64_t module) {
   assert(module);
   return 1;
 }
 
-void gw_loader_leave(uint64_t module) {
+int gw_loader_scope_leave(uint64_t module) {
   assert(module);
+  return 1;
 }
 
 int gw_loader_fail(struct gw_loader_error *error, int code, const char *text) {

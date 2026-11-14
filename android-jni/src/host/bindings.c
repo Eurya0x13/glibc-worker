@@ -32,7 +32,7 @@ static void zero_native_result(const struct binding *binding, void *result) {
 /* The trampoline the VM actually calls for a registered native method: it
    translates one JNI call into an FB_NATIVE bridge command. jobject
    arguments are re-issued as Host handle tokens (H_LOCAL) so the Guest never
-   holds a raw VM reference. "active" plus gw_loader_enter keep the module
+   holds a raw VM reference. "active" plus gw_loader_scope_enter keep the module
    and its closure from being retired while the call is in flight. */
 static void ffi_native(ffi_cif *cif, void *result, void **values,
                        void *opaque) {
@@ -67,7 +67,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   GW_RPC_SCOPE(pre, GW_RPC_HOST_TRAMPOLINE_PRE, -1);
 
   atomic_fetch_add(&b->active, 1);
-  if (!gw_loader_enter(b->module)) {
+  if (!gw_loader_scope_enter(b->module)) {
     fh_throw(env, FB_FAILURE_STATE, "Guest library is retired or closing");
     atomic_fetch_sub(&b->active, 1);
     GW_RPC_SCOPE_END(pre);
@@ -82,7 +82,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
     c->module = previous;
     uint64_t module = b->module;
     atomic_fetch_sub(&b->active, 1);
-    gw_loader_leave(module);
+    gw_loader_scope_leave(module);
     GW_RPC_SCOPE_END(pre);
     GW_RPC_SCOPE_END(boundary);
     return;
@@ -159,7 +159,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   c->module = previous;
   uint64_t module = b->module;
   atomic_fetch_sub(&b->active, 1);
-  gw_loader_leave(module);
+  gw_loader_scope_leave(module);
   GW_RPC_SCOPE_END(post);
   GW_RPC_SCOPE_END(boundary);
 }
@@ -445,12 +445,12 @@ jint fh_register(struct host_context *c, jclass cls,
                                  NULL)
                 .j;
   }
-  if (!owner || !gw_loader_enter(owner)) {
+  if (!owner || !gw_loader_scope_enter(owner)) {
     fh_throw(c->env, FB_FAILURE_STATE,
              "No live owning Guest module for native registration");
     return JNI_ERR; /* CLOSING/quarantined modules cannot publish VM entries. */
   }
   jint result = register_owned(c, cls, methods, n, owner);
-  gw_loader_leave(owner);
+  gw_loader_scope_leave(owner);
   return result;
 }

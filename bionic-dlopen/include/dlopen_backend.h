@@ -89,13 +89,21 @@ int gw_dlopen_stop(struct gw_loader_error *);
    process or attempt to repair an unknown VM/Guest state. */
 void gw_dlopen_quarantine(void);
 int gw_dlopen_is_quarantined(void);
-/* Borrows a module for direct callers (e.g. an adapter callback).
+/* Pins a module, permitting a matching leave on another thread.
    Succeeds only while READY on a LOADING/LIVE module; on 0 nothing was
    borrowed and the matching leave must be skipped. */
 int gw_dlopen_enter(uint64_t);
 /* Returns one borrow; the final leave of a CLOSING module lets the closer
    proceed. Must pair 1:1 with a successful enter. */
 void gw_dlopen_leave(uint64_t);
+/* Executing scope: pins the module and records it on the calling Host thread.
+   Includes recursive/ancestor scopes. Close on any locally held module returns
+   BUSY before changing its state. Successful enters must be balanced on the
+   same thread before thread exit; scopes cannot be transferred or cancelled.
+   Enter returns 0 on refusal; leave returns 0 for a stale, unheld or foreign
+   scope without consuming another thread's scope or a transferable pin. */
+int gw_dlopen_scope_enter(uint64_t);
+int gw_dlopen_scope_leave(uint64_t);
 /* Id of the most recently committed open, 0 if none. A snapshot for
    diagnostics only: it pins nothing and proves nothing about state. */
 uint64_t gw_dlopen_last_handle(void);

@@ -164,6 +164,17 @@ static jint bridge_state(JNIEnv *env, jclass cls, jlong id) {
       ->module_state((uint64_t)id);
 }
 
+/* Negative-test hook: attempts actual production close from a Java callback.
+   A scope refusal must leave the module and VM registrations untouched. */
+static jint bridge_try_close(JNIEnv *env, jclass cls, jlong id) {
+  (void)cls;
+  struct gw_loader_error error = {0};
+  int result =
+      gw_loader_query(GW_LOADER_ABI_V1, sizeof(struct gw_loader_api_v1))
+          ->close(env, (uint64_t)id, &error);
+  return result == GW_ERROR ? error.code : -100 - result;
+}
+
 static void payload_phase(JNIEnv *env, jclass cls, jint stage, jint operation,
                           jint bytes) {
   (void)env;
@@ -197,10 +208,12 @@ int gw_lab_prepare(struct full_bridge *bridge, JNIEnv *env,
       {"bridgeMetric", "(I)I", (void *)bridge_metric},
       {"bridgeLastHandle", "()J", (void *)bridge_last},
       {"bridgeHandleState", "(J)I", (void *)bridge_state},
+      {"bridgeTryClose", "(J)I", (void *)bridge_try_close},
       {"processCpuNanos", "()J", (void *)process_cpu_nanos},
       {"payloadPhase", "(III)V", (void *)payload_phase}};
 
-  int rc = (*env)->RegisterNatives(env, cls, metrics, 5);
+  int rc = (*env)->RegisterNatives(env, cls, metrics,
+                                   sizeof metrics / sizeof *metrics);
   (*env)->DeleteLocalRef(env, cls);
   return rc != JNI_OK || gw_loader_smoke_not_ready(env, directory);
 }

@@ -24,7 +24,7 @@ enum backend_state { UNCONFIGURED, CONFIGURED, READY, STOPPED };
 struct module {
   uint64_t id;
   unsigned generation;
-  int state, active;
+  int state, active, pins;
   dev_t device;
   ino_t inode;
   char requested[GW_LOADER_PATH];
@@ -43,6 +43,20 @@ static uint64_t last_handle;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 /* Entirely bionic-owned; this condition variable never crosses the bridge. */
 static pthread_cond_t quiescent = PTHREAD_COND_INITIALIZER;
+
+/* Executing scopes belong to the calling Host thread. Module slots are fixed
+   at 64; per-slot counts record every held ancestor and recursive occurrence
+   without allocating or imposing another call-depth limit. General pins may
+   move between threads and deliberately do not participate in this record. */
+static _Thread_local struct {
+  uint64_t id;
+  unsigned count;
+} scopes[FB_MODULES];
+
+static int scope_held(uint64_t id) {
+  int index = fb_module_index(id);
+  return index >= 0 && scopes[index].id == id && scopes[index].count;
+}
 
 void gw_dlopen_quarantine(void) {
   pthread_mutex_lock(&lock);
@@ -130,9 +144,11 @@ int gw_dlopen_enter(uint64_t id) {
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
   int ok = !quarantined && state == READY && m &&
-           (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE);
+           (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE) &&
+           m->active < INT_MAX;
   if (ok) {
     m->active++;
+    m->pins++;
   }
   pthread_mutex_unlock(&lock);
   return ok;
@@ -143,13 +159,54 @@ int gw_dlopen_enter(uint64_t id) {
 void gw_dlopen_leave(uint64_t id) {
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
-  if (m && m->active > 0) {
+  if (m && m->pins > 0) {
+    m->pins--;
     m->active--;
     if (!m->active && m->state == GW_MODULE_CLOSING) {
       pthread_cond_broadcast(&quiescent);
     }
   }
   pthread_mutex_unlock(&lock);
+}
+
+int gw_dlopen_scope_enter(uint64_t id) {
+  pthread_mutex_lock(&lock);
+  struct module *m = get_module(id);
+  int ok = !quarantined && state == READY && m &&
+           (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE) &&
+           m->active < INT_MAX;
+  if (ok) {
+    int index = fb_module_index(id);
+    /* A live scope prevents this module slot from being reused. */
+    if (scopes[index].count && scopes[index].id != id) {
+      ok = 0;
+    } else {
+      scopes[index].id = id;
+      scopes[index].count++;
+      m->active++;
+    }
+  }
+  pthread_mutex_unlock(&lock);
+  return ok;
+}
+
+int gw_dlopen_scope_leave(uint64_t id) {
+  pthread_mutex_lock(&lock);
+  struct module *m = get_module(id);
+  int ok = m && scope_held(id);
+  if (ok) {
+    int index = fb_module_index(id);
+    scopes[index].count--;
+    if (!scopes[index].count) {
+      scopes[index].id = 0;
+    }
+    m->active--;
+    if (!m->active && m->state == GW_MODULE_CLOSING) {
+      pthread_cond_broadcast(&quiescent);
+    }
+  }
+  pthread_mutex_unlock(&lock);
+  return ok;
 }
 
 /* Installs transport, image resolver and observer exactly once
@@ -286,6 +343,7 @@ static uint64_t reserve(const char *path, const char *image,
       m->id = id;
       m->state = GW_MODULE_LOADING;
       m->active = 0;
+      m->pins = 0;
       m->device = st.st_dev;
       m->inode = st.st_ino;
       snprintf(m->requested, sizeof m->requested, "%s", path);
@@ -426,13 +484,13 @@ static int loader_find(void *context, uint64_t id, const char *symbol,
     return gw_dlopen_fail(error, GW_E_ARGUMENT,
                           "Valid symbol and output are required");
   }
-  if (!gw_dlopen_enter(id)) {
+  if (!gw_dlopen_scope_enter(id)) {
     return gw_dlopen_fail(error, GW_E_HANDLE,
                           "Guest library handle is stale or closing");
   }
 
   int rc = config.transport.find(context, id, symbol, descriptor, entry, error);
-  gw_dlopen_leave(id);
+  gw_dlopen_scope_leave(id);
   return rc;
 }
 
@@ -459,6 +517,12 @@ static int loader_close(void *context, uint64_t id,
     return gw_dlopen_fail(error, GW_E_HANDLE,
                           "Guest library handle is stale or closing");
   }
+  if (scope_held(id)) {
+    pthread_mutex_unlock(&lock);
+    return gw_dlopen_fail(
+        error, GW_E_BUSY,
+        "Cannot close a module held by this thread's execution scope");
+  }
   pthread_mutex_unlock(&lock);
 
   /* Self-unload guard: closing from the image's own active callback would
@@ -481,6 +545,12 @@ static int loader_close(void *context, uint64_t id,
     pthread_mutex_unlock(&lock);
     return gw_dlopen_fail(error, GW_E_HANDLE,
                           "Guest library handle is stale or closing");
+  }
+  if (scope_held(id)) {
+    pthread_mutex_unlock(&lock);
+    return gw_dlopen_fail(
+        error, GW_E_BUSY,
+        "Cannot close a module held by this thread's execution scope");
   }
   m->state = GW_MODULE_CLOSING;
   /* Active borrowers finish before transport teardown. The adapter services

@@ -33,4 +33,6 @@ AUTO 路由只在 ELF 元数据成功解析、没有 GNU 标记时返回 `GW_PAS
 
 `tests/loader_contract.c` 使用普通 C transport 验证 NULL 上下文、非 JNI metadata、查找/调用、重复映像、失败回滚、旧句柄、忙碌关闭和停止约束。它验证 Host 契约，不宣称单独建立双 libc。
 
+`tests/execution_scopes.c` 验证祖先/递归 scope、线程归属和正常跨线程关闭，`loader_quarantine.c` 覆盖四种隔离场景。执行借用与可转移保活 pin 的区别见 [执行借用规则](docs/EXECUTION_SCOPES.md)。
+
 `tests/elf_route.py` 在 ASan/UBSan 下检查 49 项真实 Android/GNU ELF、无标记映像、损坏和资源上限条件，同时核对分类与错误码；该集成夹具可消费上层测试产生的 DSOs。C contract 另外确保 AUTO 分类失败不会返回 PASS 或调用 Guest transport。真实双 libc 生命周期由 jvm-jni 的集成测试覆盖。

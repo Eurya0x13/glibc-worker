@@ -5,6 +5,7 @@ public final class NativeBridge {
   public static native int bridgeMetric(int which);
   public static native long bridgeLastHandle();
   public static native int bridgeHandleState(long handle);
+  public static native int bridgeTryClose(long handle);
   public static native long processCpuNanos();
   public static native void payloadPhase(int stage, int operation, int bytes);
   private static Thread owner;
