@@ -5,6 +5,7 @@
 #include "jni_signature.h"
 #include "binding_table.h"
 #include "slot_store.h"
+#include "resource_limits.h"
 #include "dlopen_backend.h"
 
 static pthread_mutex_t bindings_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -154,7 +155,7 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   GW_RPC_SCOPE_END(boundary);
 }
 
-/* Shared by the C control and Zig pilot. The registry supplies stable,
+/* Called by the Zig Host store. The registry supplies stable,
    zero-initialized storage and publishes it only after preparation succeeds. */
 int fh_binding_prepare(struct binding *b, uint64_t module, uintptr_t guest,
                        const char *sig) {
@@ -270,7 +271,8 @@ static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module) {
   }
   if (!registrations) {
     registrations = fh_slot_create(sizeof(struct registered_class),
-                                   _Alignof(struct registered_class), 0, 256);
+                                   _Alignof(struct registered_class), 0,
+                                   GW_REGISTRATION_INITIAL_CAPACITY);
   }
   uint64_t token = 0;
   struct registered_class *record = gw_slot_insert(registrations, -1, &token);

@@ -97,10 +97,11 @@ enum {
  * is mandatory even when diagnostic profiling and wake filtering are off. */
 #define FB_JNI_HELLO 0x47574a48
 #define FB_JNI_ACK 0x47574a41
-/* Mandatory private loader protocol: v2 splits OnUnload and final dlclose.
-   Use idle bootstrap args, preserving shared POD layout. Publish the ACK with
-   the existing release/acquire phase-ready edge before any module can open. */
-#define FB_LOADER_PROTOCOL 2
+/* Mandatory private loader protocol: transactional unload, layout and module
+   capacity. Use idle bootstrap args, preserving shared POD layout. Publish the
+   ACK with the existing release/acquire phase-ready edge before any module can
+   open. */
+#define FB_LOADER_PROTOCOL 3
 #define FB_LOADER_HELLO 0x47574c48
 #define FB_LOADER_ACK 0x47574c41
 
@@ -110,13 +111,14 @@ static inline void fb_loader_offer(struct fb_call *hello) {
   hello->args[15].j = 0;
   hello->args[16].j = sizeof(struct full_bridge);
   hello->args[17].j = FB_CONTEXTS;
+  hello->args[18].j = FB_MODULES;
 }
 
 static inline int fb_loader_matches(const struct fb_call *hello) {
   return hello->args[13].j == FB_LOADER_HELLO &&
          hello->args[14].j == FB_LOADER_PROTOCOL &&
          hello->args[16].j == sizeof(struct full_bridge) &&
-         hello->args[17].j == FB_CONTEXTS;
+         hello->args[17].j == FB_CONTEXTS && hello->args[18].j == FB_MODULES;
 }
 
 static inline int fb_loader_acknowledge(struct fb_call *hello) {

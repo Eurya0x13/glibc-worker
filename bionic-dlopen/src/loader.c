@@ -29,7 +29,7 @@ struct module {
   ino_t inode;
   char requested[GW_LOADER_PATH];
 };
-/* Capacity is a hard 32 slots; exhaustion fails with GW_E_CAPACITY rather
+/* Capacity is a hard 64 slots; exhaustion fails with GW_E_CAPACITY rather
    than queueing or evicting. */
 static struct module modules[FB_MODULES];
 static struct gw_dlopen_config config;

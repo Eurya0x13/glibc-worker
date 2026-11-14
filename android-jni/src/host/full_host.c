@@ -706,7 +706,8 @@ int full_host_ready(void) {
   }
   if (!fb_loader_accepted(&gw_host_bridge->ctx[0].call[0])) {
     fprintf(stderr,
-            "LOADER_PROTOCOL_MISMATCH transactional unload acknowledgement "
+            "LOADER_PROTOCOL_MISMATCH matching layout/module capacity "
+            "acknowledgement "
             "required\n");
     return JNI_ERR;
   }

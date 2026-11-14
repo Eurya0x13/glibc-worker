@@ -17,7 +17,7 @@ core 的 GNU 运行时在 `core/build/glibc-runtime/<ABI>/`，两侧 libffi 在 
 
 `GW_CONTEXTS` 默认 16（2..256）、`GW_RPC_PROFILE=0`、`GW_RPC_SPIN_NS=20000`、`GW_FUTEX_WAKE_FILTER=0`、`GW_RPC_READY_POLL=0`。每个项目保存自己的 abi-flags，Host/Guest 必须使用同一份布局和配置。
 
-`GW_BINDING_BACKEND=c|zig` 选择 android-jni 的 Host 资源管理后端（binding、引用/ID、注册类记录），默认 `c`。`zig` 需要固定的 Zig 0.16.0；只替换 Host 存储与索引，不改变共享协议。组合制品的 `build.properties` 记录所选后端。构建与测试约定见 [Zig Host 资源管理](../android-jni/docs/ZIG_BINDINGS.md)。
+android-jni 的 Host 资源存储固定使用 Zig 0.16.0，构建机器必须提供该版本；安装后的 C/C++ SDK 使用者无需 Zig。`GW_BINDING_BACKEND` 可以省略，显式 `zig` 仍可用，`c` 被明确拒绝；旧 CMake 缓存若保存了 `c`，需要清除缓存或改为 `zig`。初始存储容量为 512 个 binding、16,384 个引用/ID 槽、256 个注册类记录，耗尽后动态增长；模块上限固定 64。配置与释放约定见 [Host 资源管理](../android-jni/docs/ZIG_BINDINGS.md)。
 
 `GW_JRE_ADAPTER_HEADER` 仅用于 jvm-jni，必须显式选择匹配运行中 libjava 的 profile。未配置不能请求私有钩子。`GW_RUNTIME_OUT` 仅重定向上层兼容制品，不改变各项目自己的编译/安装目录。
 

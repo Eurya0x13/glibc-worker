@@ -4,7 +4,7 @@
 #include <stdint.h>
 #pragma GCC visibility push(hidden)
 
-/* Private C ABI for the Zig pilot. The caller serializes all operations.
+/* Private C ABI for the Host store. The caller serializes all operations.
    Objects and their embedded NUL-terminated signatures never move. prepare
    initializes an unpublished object, copies its signature to the configured
    offset and cleans up its own failure. retire destroys owned resources only
@@ -20,6 +20,7 @@ enum gw_binding_result {
 
 struct gw_binding_callbacks {
   size_t object_size, object_alignment, signature_offset, signature_capacity;
+  size_t initial_capacity;
   void *context;
   void *(*allocate)(void *, size_t, size_t);
   void (*deallocate)(void *, void *);
@@ -30,6 +31,7 @@ struct gw_binding_callbacks {
 struct gw_binding_store;
 struct gw_binding_store *gw_binding_store_create(
     const struct gw_binding_callbacks *);
+size_t gw_binding_store_capacity(struct gw_binding_store *);
 int gw_binding_store_get(struct gw_binding_store *, uint64_t, uintptr_t,
                          const char *, size_t, void **, int *);
 int gw_binding_store_discard(struct gw_binding_store *, uint64_t, uintptr_t,

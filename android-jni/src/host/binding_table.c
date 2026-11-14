@@ -1,53 +1,78 @@
+#include <stdlib.h>
 #include <string.h>
 #include "binding_table.h"
+#include "resource_limits.h"
 
-/* Retained C control backend for the experiment. */
-static struct binding bindings[512];
+static struct gw_binding_store *store;
 
 const char *fh_binding_backend(void) {
-  return "c";
+  return "zig";
+}
+
+static void *allocate(void *context, size_t size, size_t alignment) {
+  (void)context;
+  void *memory = NULL;
+  if (alignment < sizeof(void *)) {
+    alignment = sizeof(void *);
+  }
+  return posix_memalign(&memory, alignment, size) ? NULL : memory;
+}
+
+static void deallocate(void *context, void *memory) {
+  (void)context;
+  free(memory);
+}
+
+static int prepare(void *context, void *object, uint64_t module,
+                   uintptr_t guest, const char *signature) {
+  (void)context;
+  return fh_binding_prepare(object, module, guest, signature);
+}
+
+static int retire(void *context, void *object) {
+  (void)context;
+  return fh_binding_retire(object);
 }
 
 struct binding *binding_get(uint64_t module, uintptr_t guest, const char *sig,
                             int *created, int *status) {
-  *created = 0;
-  *status = GW_BINDING_OK;
-  for (size_t i = 0; i < 512; i++) {
-    struct binding *b = &bindings[i];
-    if (b->used && b->module == module && b->guest == guest &&
-        !strcmp(b->sig, sig)) {
-      return b;
-    }
+  if (!store) {
+    const struct gw_binding_callbacks callbacks = {
+        .object_size = sizeof(struct binding),
+        .object_alignment = _Alignof(struct binding),
+        .signature_offset = offsetof(struct binding, sig),
+        .signature_capacity = FB_SIG,
+        .initial_capacity = GW_BINDING_INITIAL_CAPACITY,
+        .allocate = allocate,
+        .deallocate = deallocate,
+        .prepare = prepare,
+        .retire = retire,
+    };
+    store = gw_binding_store_create(&callbacks);
   }
-  for (size_t i = 0; i < 512; i++) {
-    struct binding *b = &bindings[i];
-    if (!b->used) {
-      *status = fh_binding_prepare(b, module, guest, sig);
-      if (*status != GW_BINDING_OK) {
-        memset(b, 0, sizeof *b);
-        return NULL;
-      }
-      b->used = 1;
-      *created = 1;
-      return b;
-    }
+  if (!store) {
+    *created = 0;
+    *status = GW_BINDING_MEMORY;
+    return NULL;
   }
-  *status = GW_BINDING_MEMORY;
-  return NULL;
+  void *object = NULL;
+  *status = gw_binding_store_get(store, module, guest, sig,
+                                 strnlen(sig, FB_SIG), &object, created);
+  return object;
 }
 
 void binding_discard(struct binding *b) {
-  if (fh_binding_retire(b)) {
-    memset(b, 0, sizeof *b);
-  }
+  gw_binding_store_discard(store, b->module, b->guest, b->sig, strlen(b->sig));
 }
 
 void binding_release(uint64_t module) {
-  for (size_t i = 0; i < 512; i++) {
-    if (bindings[i].used && bindings[i].module == module) {
-      binding_discard(&bindings[i]);
-    }
+  if (store) {
+    gw_binding_store_release(store, module);
   }
 }
 
-void binding_finish(void) {}
+void binding_finish(void) {
+  if (store && gw_binding_store_destroy(store) == GW_BINDING_OK) {
+    store = NULL;
+  }
+}

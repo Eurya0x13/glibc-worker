@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "binding_table.h"
+#include "resource_limits.h"
 
 static struct full_bridge counters;
 struct full_bridge *gw_host_bridge = &counters;
@@ -226,6 +227,7 @@ static const struct gw_binding_callbacks callbacks = {
     .object_alignment = _Alignof(struct binding),
     .signature_offset = offsetof(struct binding, sig),
     .signature_capacity = FB_SIG,
+    .initial_capacity = GW_BINDING_INITIAL_CAPACITY,
     .allocate = allocate,
     .deallocate = deallocate,
     .prepare = prepare,
@@ -238,6 +240,46 @@ static struct binding *get(struct gw_binding_store *store, uint64_t module,
   assert(gw_binding_store_get(store, module, guest, "(J)J", 4, &object,
                               &created) == GW_BINDING_OK);
   return object;
+}
+
+static void initial_pool(void) {
+  struct gw_binding_store *store = gw_binding_store_create(&callbacks);
+  assert(store && gw_binding_store_capacity(store) == 512);
+  assert(!atomic_load(&counters.live_closures));
+  struct binding *first = NULL;
+  for (uint64_t module = 1; module <= 64; module++) {
+    for (uintptr_t guest = 1; guest <= 8; guest++) {
+      struct binding *b = get(store, module, guest);
+      if (!first) {
+        first = b;
+      }
+    }
+    assert(gw_binding_store_capacity(store) == 512);
+  }
+  assert(atomic_load(&counters.live_closures) == 512);
+  assert(get(store, 1, 1) == first);
+  invoke(first);
+  get(store, 64, 9);
+  assert(gw_binding_store_capacity(store) == 576);
+  invoke(first);
+  assert(gw_binding_store_release(store, 2) == GW_BINDING_OK);
+  for (uintptr_t guest = 1; guest <= 8; guest++) {
+    get(store, 65, guest);
+  }
+  assert(gw_binding_store_capacity(store) == 576);
+  for (uint64_t module = 1; module <= 65; module++) {
+    assert(gw_binding_store_release(store, module) == GW_BINDING_OK);
+  }
+  assert(gw_binding_store_destroy(store) == GW_BINDING_OK && !outstanding);
+  for (size_t failure = 0; failure < 24; failure++) {
+    fail_at = allocation_attempts + failure;
+    store = gw_binding_store_create(&callbacks);
+    fail_at = SIZE_MAX;
+    if (store) {
+      assert(gw_binding_store_destroy(store) == GW_BINDING_OK);
+    }
+    assert(!outstanding && !atomic_load(&counters.live_closures));
+  }
 }
 
 static void store_stress(void) {
@@ -348,7 +390,7 @@ static void production_backend(void) {
   assert(first);
   pthread_t thread;
   assert(!pthread_create(&thread, NULL, caller, first));
-  const size_t limit = GW_TEST_ZIG ? 4096 : 512;
+  const size_t limit = 4096;
   for (size_t i = 2; i <= limit; i++) {
     assert(make_binding(21, i, "(J)J", &error));
   }
@@ -362,10 +404,6 @@ static void production_backend(void) {
   assert(exception_pending && context_calls == prior_contexts &&
          !atomic_load(&first->active));
   quarantined = exception_pending = 0;
-  if (!GW_TEST_ZIG) {
-    assert(!make_binding(21, 513, "(J)J", &error));
-    assert(error.code == GW_E_CAPACITY);
-  }
   release_bindings(21);
   assert(!atomic_load(&counters.live_closures));
 
@@ -397,14 +435,10 @@ static void production_backend(void) {
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
   assert(atomic_load(&counters.live_closures) == 3);
   reject_registration = 0;
-  const size_t classes = GW_TEST_ZIG ? 1024 : 256;
+  const size_t classes = 1024;
   for (size_t i = 1; i < classes; i++) {
     assert(fh_register(&context, (jclass)(uintptr_t)(7 + i), methods, 3) ==
            JNI_OK);
-  }
-  if (!GW_TEST_ZIG) {
-    assert(fh_register(&context, (jclass)(uintptr_t)9999, methods, 3) ==
-           JNI_ERR);
   }
   context.module = 23;
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
@@ -428,6 +462,7 @@ static void production_backend(void) {
 
 int main(void) {
   assert(!gw_binding_store_create(NULL));
+  initial_pool();
   store_stress();
   store_failures();
   production_backend();
@@ -438,8 +473,8 @@ int main(void) {
       "\"store_bindings\":8192,\"production_bindings\":%d,"
       "\"registered_classes\":%d,\"concurrent_calls\":10000,\"oom_cases\":40,"
       "\"injected_failures\":%zu,\"live_closures\":0,"
+      "\"initial_capacity\":512,\"shared_modules\":64,\"initial_oom_cases\":24,"
       "\"outstanding_allocations\":0}\n",
-      GW_TEST_ZIG ? "zig" : "c", GW_TEST_ZIG ? 4096 : 512,
-      GW_TEST_ZIG ? 1024 : 256, injected_failures);
+      "zig", 4096, 1024, injected_failures);
   return 0;
 }

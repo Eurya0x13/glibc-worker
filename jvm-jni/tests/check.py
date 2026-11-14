@@ -34,7 +34,7 @@ def verify(
         "JRE_CREATE_RESULT=0",
         "distinct=1",
         "JRE_BRIDGE_RESULT=PASS",
-        "LOADER_PROTOCOL version=2 matched=1",
+        "LOADER_PROTOCOL version=3 matched=1",
         "JRE_JAVA_RESUMED",
         "JRE_DESTROY_RESULT=0",
         "JRE_VM_ENUM stage=destroyed rc=0 count=0",

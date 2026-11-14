@@ -14,7 +14,7 @@ transport 的 load/close/find/current-module 不规定 JavaVM、JNIEnv 或 JNI �
 
 AUTO 根据 ELF GNU 标记分类；显式 GUEST 需要调用者确认 ABI。GW_PASS 允许原平台继续；GW_ERROR 表示 Guest 操作失败，不得用同一 GNU 文件盲目尝试 bionic loader。已经退休的 Guest tag 仍由 owns_handle 识别，避免错误 fallback。
 
-同一设备/inode 不能重复活跃打开。安全完成的加载失败回滚模块状态；代数让旧句柄在槽位重用后仍被拒绝。固定槽容量是 32，不是无限运行时命名空间。
+同一设备/inode 不能重复活跃打开。安全完成的加载失败回滚模块状态；代数让旧句柄在槽位重用后仍被拒绝。固定槽容量是 64，不是无限运行时命名空间。
 
 ## 并发和关闭
 

@@ -23,6 +23,4 @@ cp "$project/include/"*.h "$out/include/"
 cp "$project/src/common/"*.h "$out/include/internal/"
 cp "$GW_CORE_PROJECT/build/ffi-android/$GW_ABI/share/licenses/libffi/LICENSE" \
   "$out/licenses/libffi-LICENSE.txt"
-if [[ ${GW_BINDING_BACKEND:-c} == zig ]]; then
-  cp "$project/third_party/zig/LICENSE" "$out/licenses/zig-LICENSE.txt"
-fi
+cp "$project/third_party/zig/LICENSE" "$out/licenses/zig-LICENSE.txt"

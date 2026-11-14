@@ -19,6 +19,8 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --reuse-apk
 | smoke | 普通应用 UID、真实 JRE、同 PID/不同线程、POD/指针、malloc、errno/TLS、pthread、JNI 回调、Guest 退出、VM 恢复及销毁 |
 | coverage | smoke，加 142 项 Java/JNI 断言、26 项装载契约、引用/异常/线程/重入/卸载/回滚、SQLite/zstd、11 项 JNI 名称回归与 49 项 ELF 元数据检查 |
 
+当前默认 Zig 存储的 coverage 还运行三个 ClassLoader 周期：每轮 1,024 个不同 JNI 方法、320 个注册类、20,000 个 global 引用及描述符边界检查，退出后要求引用和 closure 为零。
+
 严格模式默认使用解释器和 CheckJNI。超时、CheckJNI 违规、错误数据或生命周期不完整均为失败。覆盖为 235 个 JNI/VM 槽位清单及功能触达，正常运行不执行破坏性的 FatalError，不能描述为完整 JNI 规范或源代码分支覆盖。
 
 `--output DIR` 指定证据目录，默认 `jvm-jni/build/test-results/<group>/`。保存报告、结构化核对结果、APK 散列和调度状态。每轮在设备/ABI 检查前取得目录独占锁，将旧 runner 制品移入 `history/<run_id>/`，原子写入 `run-state.json`。状态为 RUNNING、PASS、FAILED 或 INTERRUPTED；只有本轮全部检查通过才发布带相同 run_id 的 PASS summary。强制终止可能留下 RUNNING，不能将其当作通过；未知用户文件不会被归档。

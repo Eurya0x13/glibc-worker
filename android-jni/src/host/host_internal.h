@@ -26,7 +26,7 @@ struct binding {
   uintptr_t guest;
   uint64_t module;
   char sig[FB_SIG], types[FB_ARGS], ret;
-  int nargs, used;
+  int nargs;
   _Atomic int active;
 };
 extern struct full_bridge *gw_host_bridge;

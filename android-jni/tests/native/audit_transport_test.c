@@ -235,7 +235,7 @@ static void scenario(unsigned test) {
     fb_loader_offer(hello);
     assert(!fb_loader_accepted(hello) && fb_loader_acknowledge(hello) &&
            fb_loader_accepted(hello));
-    for (int field = 14; field <= 17; field++) {
+    for (int field = 14; field <= 18; field++) {
       if (field == 15) {
         continue;
       }

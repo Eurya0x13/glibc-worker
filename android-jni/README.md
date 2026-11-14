@@ -36,4 +36,4 @@ GNU 侧由本项目 `build-guest.sh` 单独构建，通过环境变量显式指�
 
 已有真实覆盖使用 Android HotSpot；ART 完整 JNI 桥尚未验证，不能把“使用公开 JNI”当作 ART 兼容证明。设计与使用约束见 [装载接口](docs/LOADER_BACKEND.md)，数组副本缓存见 [ARRAY_COPY_CACHE](docs/ARRAY_COPY_CACHE.md)。
 
-Host binding 管理提供可选的 [Zig 试点](docs/ZIG_BINDINGS.md)：默认 `GW_BINDING_BACKEND=c` 保留 512 槽控制后端；`zig` 使用固定地址的分块存储及动态哈希索引。公共 ABI、Guest 协议和 libffi 调用执行继续由原有 C 层维护。
+Host binding、引用/ID 和注册类记录使用 [Zig 存储](docs/ZIG_BINDINGS.md)，构建需要 Zig 0.16.0。初始容量分别为 512、16,384、256，按 64 槽稳定分块扩容；旧 C 定容后端已移除。模块固定上限为 64。公共 ABI 和 libffi/JNI 执行由 C 薄层维护，Host/Guest 必须成套部署。

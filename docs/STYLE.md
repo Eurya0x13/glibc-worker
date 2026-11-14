@@ -12,7 +12,7 @@
 | JSON | 2 空格，与生成工具一致 |
 | Zig | 固定 Zig 0.16.0 的 `zig fmt`，4 空格 |
 
-维护 Zig 试点源码还需要 Zig 0.16.0；格式脚本会调用 `zig fmt`，普通 C 后端构建不依赖 Zig。
+维护 Host 存储源码及构建 android-jni 需要 Zig 0.16.0；格式脚本调用 `zig fmt`。core 和 bionic-dlopen 自身的构建不依赖 Zig。
 
 C / 头文件 / Java 的函数、类型定义之间保留一个空行，由
 `SeparateDefinitionBlocks: Always` 自动维护。函数内部按逻辑阶段留空行，避免把检查、分配、调用与清理挤在一起；Python、Bash 与 Kotlin 同样遵守这一分块约定。

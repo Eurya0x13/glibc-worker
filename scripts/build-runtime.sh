@@ -6,9 +6,9 @@ eval "$(python3 scripts/target.py --shell)"
 ndk=$(python3 scripts/target.py --ndk)
 ccndk="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${GW_NDK_TRIPLET}29-clang"
 contexts=${GW_CONTEXTS:-16}
-binding_backend=${GW_BINDING_BACKEND:-c}
-[[ $binding_backend == c || $binding_backend == zig ]] || {
-  echo 'GW_BINDING_BACKEND must be c or zig' >&2
+binding_backend=${GW_BINDING_BACKEND:-zig}
+[[ $binding_backend == zig ]] || {
+  echo 'The C resource backend was removed; GW_BINDING_BACKEND must be zig' >&2
   exit 2
 }
 

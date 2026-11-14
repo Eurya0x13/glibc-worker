@@ -4,6 +4,7 @@
 #include "host_internal.h"
 #include "jni_signature.h"
 #include "slot_store.h"
+#include "resource_limits.h"
 
 /* C owns VM references and signatures; the backend owns stable slots and
    dense per-context local indexes. All accesses hold handles_lock. Tokens
@@ -24,7 +25,7 @@ static struct handle *get_handle(jobject token) {
 static struct handle *insert_handle(int owner, uint64_t *token) {
   if (!handles) {
     handles = fh_slot_create(sizeof(struct handle), _Alignof(struct handle),
-                             FB_CONTEXTS, 16384);
+                             FB_CONTEXTS, GW_HANDLE_INITIAL_CAPACITY);
   }
   return gw_slot_insert(handles, owner, token);
 }

@@ -42,8 +42,6 @@ def main():
         raise SystemExit(
             "Provide --dlopen-include with installed loader headers"
         )
-    obj = output / "binding_store.o"
-    build(obj, scope="bindings")
     host_obj = output / "host_store.o"
     build(host_obj)
     ffi = shlex.split(
@@ -52,66 +50,59 @@ def main():
         )
     )
     rows = []
-    for backend in ("c", "zig"):
-        executable = output / ("resources-" + backend)
-        command = [
-            os.environ.get("SANITIZER_CC", "clang"),
-            "-std=gnu17",
-            "-O1",
-            "-g",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-fsanitize=address,undefined",
-            "-fno-omit-frame-pointer",
-            "-DGW_TEST_ZIG=" + str(int(backend == "zig")),
-            *(
-                "-I" + str(p)
-                for p in (
-                    PROJECT / "src/host",
-                    PROJECT / "include",
-                    PROJECT / "src/common",
-                    args.dlopen_include,
-                    args.core_include,
-                    jdk / "include",
-                    jdk / "include/linux",
-                )
-            ),
-            str(PROJECT / "tests/native/slot_store_test.c"),
-            str(PROJECT / "src/host/references.c"),
-            str(PROJECT / "src/host/slot_allocator.c"),
-            *(
-                [str(PROJECT / "src/host/slot_store.c"), str(obj)]
-                if backend == "c"
-                else [str(host_obj)]
-            ),
-            *ffi,
-            "-pthread",
-            "-o",
-            str(executable),
-        ]
-        subprocess.run(command, check=True)
-        run = subprocess.run(
-            [str(executable)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env={
-                **os.environ,
-                "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
-                "UBSAN_OPTIONS": "halt_on_error=1",
-            },
-        )
-        (output / (backend + ".log")).write_text(run.stdout + run.stderr)
-        if run.returncode:
-            raise SystemExit(
-                f"Resource test failed: {output / (backend + '.log')}"
+    backend = "zig"
+    executable = output / ("resources-" + backend)
+    command = [
+        os.environ.get("SANITIZER_CC", "clang"),
+        "-std=gnu17",
+        "-O1",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        *(
+            "-I" + str(p)
+            for p in (
+                PROJECT / "src/host",
+                PROJECT / "include",
+                PROJECT / "src/common",
+                args.dlopen_include,
+                args.core_include,
+                jdk / "include",
+                jdk / "include/linux",
             )
-        result = json.loads(run.stdout)
-        assert result["result"] == "PASS" and result["backend"] == backend
-        assert result["references"] == (32768 if backend == "zig" else 16384)
-        assert result["weak_refs"] == result["outstanding_allocations"] == 0
-        rows.append(result)
+        ),
+        str(PROJECT / "tests/native/slot_store_test.c"),
+        str(PROJECT / "src/host/references.c"),
+        str(PROJECT / "src/host/slot_allocator.c"),
+        str(host_obj),
+        *ffi,
+        "-pthread",
+        "-o",
+        str(executable),
+    ]
+    subprocess.run(command, check=True)
+    run = subprocess.run(
+        [str(executable)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={
+            **os.environ,
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "UBSAN_OPTIONS": "halt_on_error=1",
+        },
+    )
+    (output / (backend + ".log")).write_text(run.stdout + run.stderr)
+    if run.returncode:
+        raise SystemExit(f"Resource test failed: {output / (backend + '.log')}")
+    result = json.loads(run.stdout)
+    assert result["result"] == "PASS" and result["backend"] == backend
+    assert result["references"] == 32768
+    assert result["weak_refs"] == result["outstanding_allocations"] == 0
+    rows.append(result)
     summary.write_text(
         json.dumps(
             {
@@ -124,7 +115,7 @@ def main():
                     ).hexdigest()
                     for name in (
                         "src/host/slot_store.zig",
-                        "src/host/slot_store.c",
+                        "src/host/resource_limits.h",
                         "src/host/references.c",
                         "tests/native/slot_store_test.c",
                     )
@@ -134,7 +125,7 @@ def main():
         )
         + "\n"
     )
-    print("Resource stores and C control passed: " + str(summary))
+    print("Host resource checks passed: " + str(summary))
 
 
 if __name__ == "__main__":

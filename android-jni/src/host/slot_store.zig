@@ -8,7 +8,7 @@ const Config = extern struct {
     object_size: usize,
     object_alignment: usize,
     owner_count: usize,
-    control_limit: usize,
+    initial_capacity: usize,
     generation_max: u32,
     context: ?*anyopaque,
     allocate: ?*const fn (?*anyopaque, usize, usize) callconv(.c) ?*anyopaque,
@@ -84,7 +84,8 @@ fn create(config_: ?*const Config) callconv(.c) ?*Store {
     const config = (config_ orelse return null).*;
     if (config.allocate == null or config.deallocate == null or config.object_size == 0 or
         !std.math.isPowerOfTwo(config.object_alignment) or config.object_size % config.object_alignment != 0 or
-        config.owner_count > std.math.maxInt(i32) or config.generation_max == 0) return null;
+        config.owner_count > std.math.maxInt(i32) or config.generation_max == 0 or
+        config.initial_capacity > (std.math.maxInt(u32) / width) * width) return null;
     const raw = config.allocate.?(config.context, @sizeOf(Store), @alignOf(Store)) orelse return null;
     const store: *Store = @ptrCast(@alignCast(raw));
     store.* = .{ .config = config, .owners = &.{} };
@@ -93,6 +94,11 @@ fn create(config_: ?*const Config) callconv(.c) ?*Store {
         return null;
     };
     for (store.owners) |*owner| owner.* = .empty;
+    const chunks = std.math.divCeil(usize, config.initial_capacity, width) catch unreachable;
+    for (0..chunks) |_| store.grow() catch {
+        _ = destroy(store);
+        return null;
+    };
     return store;
 }
 

@@ -8,12 +8,12 @@ import subprocess
 PROJECT = Path(__file__).resolve().parents[1]
 
 
-def build(output, target="native", scope="host"):
+def build(output, target="native"):
     compiler = shutil.which(os.environ.get("ZIG", "zig"))
     if not compiler:
         raise SystemExit("Install Zig 0.16.0 for Host resource tests")
     output = Path(output).resolve()
-    prefix = output.parent / ("stage-" + scope + "-" + target)
+    prefix = output.parent / ("stage-host-" + target)
     command = [
         compiler,
         "build",
@@ -27,12 +27,8 @@ def build(output, target="native", scope="host"):
         str(PROJECT / "build/zig-global-cache"),
         "host-store",
         "-Dcpu=baseline",
-        "-Dbindings-only=" + str(scope == "bindings").lower(),
     ]
     if target != "native":
         command.append("-Dtarget=" + target)
     subprocess.run(command, check=True)
-    shutil.copyfile(
-        prefix / ("binding_store.o" if scope == "bindings" else "host_store.o"),
-        output,
-    )
+    shutil.copyfile(prefix / "host_store.o", output)

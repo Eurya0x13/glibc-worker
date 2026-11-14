@@ -7,6 +7,7 @@
 #include <string.h>
 #include "host_internal.h"
 #include "slot_store.h"
+#include "resource_limits.h"
 
 static struct full_bridge counters;
 struct full_bridge *gw_host_bridge = &counters;
@@ -42,7 +43,7 @@ static void deallocate(void *context, void *memory) {
 static struct gw_slot_config config = {.object_size = 32,
                                        .object_alignment = 16,
                                        .owner_count = 3,
-                                       .control_limit = 192,
+                                       .initial_capacity = 192,
                                        .generation_max = UINT32_MAX,
                                        .allocate = allocate,
                                        .deallocate = deallocate};
@@ -87,7 +88,7 @@ static void storage_failures(void) {
 static void generations_and_owners(void) {
   struct gw_slot_config c = config;
   c.generation_max = 2;
-  c.control_limit = 64;
+  c.initial_capacity = 64;
   struct gw_slot_store *s = gw_slot_create(&c);
   assert(s);
   uint64_t stale[128];
@@ -100,12 +101,8 @@ static void generations_and_owners(void) {
   }
   uint64_t token;
   void *p = gw_slot_insert(s, 1, &token);
-  if (GW_TEST_ZIG) {
-    assert(p && (uint32_t)token > 64);
-    assert(gw_slot_erase(s, token));
-  } else {
-    assert(!p && !token);
-  }
+  assert(p && (uint32_t)token > 64);
+  assert(gw_slot_erase(s, token));
   assert(gw_slot_destroy(s) && !outstanding);
 
   s = gw_slot_create(&config);
@@ -141,6 +138,51 @@ static void generations_and_owners(void) {
     assert(gw_slot_destroy(s));
   }
   assert(!outstanding);
+}
+
+static void initial_reservations(void) {
+  const size_t sizes[] = {GW_HANDLE_INITIAL_CAPACITY,
+                          GW_REGISTRATION_INITIAL_CAPACITY};
+  for (size_t variant = 0; variant < 2; variant++) {
+    struct gw_slot_config c = config;
+    c.initial_capacity = sizes[variant];
+    struct gw_slot_store *s = gw_slot_create(&c);
+    assert(s && gw_slot_capacity(s) == sizes[variant]);
+    uint64_t *tokens = calloc(sizes[variant] + 1, sizeof *tokens);
+    assert(tokens);
+    size_t before = attempts;
+    void *first = NULL;
+    for (size_t i = 0; i < sizes[variant]; i++) {
+      void *p = gw_slot_insert(s, -1, &tokens[i]);
+      assert(p);
+      if (!i) {
+        first = p;
+      }
+    }
+    assert(attempts == before); /* No allocation while the reserve has room. */
+    assert(gw_slot_insert(s, -1, &tokens[sizes[variant]]));
+    assert(attempts > before && gw_slot_capacity(s) == sizes[variant] + 64);
+    assert(gw_slot_get(s, tokens[0]) == first);
+    for (size_t i = 0; i <= sizes[variant]; i++) {
+      assert(gw_slot_erase(s, tokens[i]));
+    }
+    size_t peak = gw_slot_capacity(s);
+    before = attempts;
+    uint64_t reused;
+    assert(gw_slot_insert(s, -1, &reused) && gw_slot_capacity(s) == peak &&
+           attempts == before);
+    assert(gw_slot_erase(s, reused) && gw_slot_destroy(s) && !outstanding);
+    free(tokens);
+    if (!variant) {
+      const size_t faults[] = {0, 1, 128, 256, 512};
+      for (size_t i = 0; i < sizeof faults / sizeof *faults; i++) {
+        fail_at = attempts + faults[i];
+        s = gw_slot_create(&c);
+        fail_at = SIZE_MAX;
+        assert(!s && !outstanding);
+      }
+    }
+  }
 }
 
 struct vm_class {
@@ -235,7 +277,7 @@ static JNIEnv env = &vm;
 static void references(void) {
   struct host_context contexts[2] = {{.env = &env, .id = 0},
                                      {.env = &env, .id = 1}};
-  size_t count = GW_TEST_ZIG ? 32768 : 16384;
+  size_t count = 32768;
   jobject *tokens = calloc(count, sizeof *tokens);
   assert(tokens);
   for (size_t i = 0; i < count; i++) {
@@ -246,9 +288,7 @@ static void references(void) {
     assert(fh_ref(c, tokens[i]) == (jobject)(uintptr_t)(i + 1));
   }
   assert(atomic_load(&counters.live_local) == (int)count);
-  if (!GW_TEST_ZIG) {
-    assert(!fh_add_ref(&contexts[0], (jobject)(uintptr_t)1, H_LOCAL));
-  }
+
   assert(!fh_ref(&contexts[1], tokens[0]));
   assert(!fh_id(tokens[0], H_METHOD));
   fh_drop_token(tokens[123]);
@@ -319,15 +359,16 @@ static void reflection_boundaries(void) {
 int main(void) {
   storage_failures();
   generations_and_owners();
+  initial_reservations();
   references();
   reflection_boundaries();
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\",\"references\":%u,"
       "\"oom_cases\":48,\"injected_failures\":%zu,\"generation_exhaustion\":"
-      "true,"
+      "true,\"initial_handles\":16384,\"initial_registrations\":256,"
+      "\"initial_oom_cases\":5,"
       "\"owner_swap_remove\":true,\"outstanding_allocations\":%zu,\"weak_"
       "refs\":%zu}\n",
-      GW_TEST_ZIG ? "zig" : "c", GW_TEST_ZIG ? 32768u : 16384u, failures,
-      outstanding, weak_count);
+      "zig", 32768u, failures, outstanding, weak_count);
   return 0;
 }

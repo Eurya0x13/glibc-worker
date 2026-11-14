@@ -16,12 +16,12 @@ static void deallocate(void *context, void *memory) {
 }
 
 struct gw_slot_store *fh_slot_create(size_t size, size_t alignment,
-                                     size_t owners, size_t control_limit) {
+                                     size_t owners, size_t initial_capacity) {
   const struct gw_slot_config config = {
       .object_size = size,
       .object_alignment = alignment,
       .owner_count = owners,
-      .control_limit = control_limit,
+      .initial_capacity = initial_capacity,
       .generation_max = UINT32_MAX,
       .allocate = allocate,
       .deallocate = deallocate,

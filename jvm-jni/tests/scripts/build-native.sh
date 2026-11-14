@@ -30,10 +30,8 @@ python3 jvm-jni/tests/scripts/prepare-native-jars.py
 core/scripts/build-ffi.sh "$ccndk"
 cp "core/build/ffi-android/$GW_ABI/share/licenses/libffi/LICENSE" \
   jvm-jni/build/tests/android/assets/runtime/libffi-LICENSE.txt
-if [[ ${GW_BINDING_BACKEND:-c} == zig ]]; then
-  cp android-jni/third_party/zig/LICENSE \
-    jvm-jni/build/tests/android/assets/runtime/zig-LICENSE.txt
-fi
+cp android-jni/third_party/zig/LICENSE \
+  jvm-jni/build/tests/android/assets/runtime/zig-LICENSE.txt
 python3 android-jni/scripts/gen-jni.py
 python3 jvm-jni/tests/scripts/prepare-sqlite.py
 
@@ -43,9 +41,7 @@ includes=(-Iandroid-jni/include -Icore/include -Iandroid-jni/src/common -Ibionic
 warnings=(-Wall -Wextra -Werror)
 host_flags=(-fPIC -fno-emulated-tls -O1 -g "${warnings[@]}" "${includes[@]}")
 guest_flags=(-fPIC -O1 -g "${warnings[@]}" "${includes[@]}" -Iandroid-jni/build/jni-include)
-if [[ ${GW_BINDING_BACKEND:-c} == zig ]]; then
-  guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1)
-fi
+guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1)
 lab_sources=(jvm-jni/tests/native/harness/bootstrap.c
   jvm-jni/tests/native/harness/jni.c jvm-jni/tests/native/harness/jni_dispatch.c jvm-jni/tests/native/harness/jre_host.c
   jvm-jni/tests/native/harness/jre_layout_spike.c jvm-jni/tests/native/harness/loader_smoke.c

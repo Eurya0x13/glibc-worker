@@ -10,9 +10,10 @@
    reaching generation_max is permanently retired, never wrapped. No live
    object may remain at destroy. Failed insertions publish neither object nor
    owner membership. at/owned pointers remain valid until erase/destroy.
-   The fixed C control uses control_limit; the Zig backend grows in blocks. */
+   initial_capacity reserves storage at creation; the store then grows in
+   blocks. */
 struct gw_slot_config {
-  size_t object_size, object_alignment, owner_count, control_limit;
+  size_t object_size, object_alignment, owner_count, initial_capacity;
   uint32_t generation_max;
   void *context;
   void *(*allocate)(void *, size_t, size_t);
@@ -31,6 +32,6 @@ int gw_slot_destroy(struct gw_slot_store *);
 
 /* Production adapters supply the Host allocator and generation width. */
 struct gw_slot_store *fh_slot_create(size_t size, size_t alignment,
-                                     size_t owners, size_t control_limit);
+                                     size_t owners, size_t initial_capacity);
 #pragma GCC visibility pop
 #endif

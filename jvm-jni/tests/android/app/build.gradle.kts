@@ -49,7 +49,7 @@ val prepareNative by tasks.registering(Exec::class) {
 
     inputs.property("workerAbi", workerAbi)
     inputs.property("workerContexts", providers.environmentVariable("GW_CONTEXTS").orElse("16"))
-    inputs.property("bindingBackend", providers.environmentVariable("GW_BINDING_BACKEND").orElse("c"))
+    inputs.property("bindingBackend", providers.environmentVariable("GW_BINDING_BACKEND").orElse("zig"))
     inputs.property("rpcProfile", providers.environmentVariable("GW_RPC_PROFILE").orElse("0"))
     inputs.property("rpcSpinNs", providers.environmentVariable("GW_RPC_SPIN_NS").orElse("20000"))
     inputs.property("rpcReadyPoll", providers.environmentVariable("GW_RPC_READY_POLL").orElse("0"))
