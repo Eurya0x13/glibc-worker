@@ -18,7 +18,9 @@ public final class NativeBridge {
     System.out.println("JRE_IDENTITY java.version=" + System.getProperty("java.version"));
     System.out.println("JRE_IDENTITY java.home=" + System.getProperty("java.home"));
     System.out.println("JRE_IDENTITY classloader=" + NativeBridge.class.getClassLoader());
-    return System.getProperty("java.vm.name", "").contains("OpenJDK") ? 17 : -1;
+    String version = System.getProperty("java.specification.version");
+    int major = Integer.parseInt(version.startsWith("1.") ? version.substring(2) : version);
+    return System.getProperty("java.vm.name", "").contains("OpenJDK") ? major : -1;
   }
 
   private static void checkThread() {
@@ -49,6 +51,6 @@ public final class NativeBridge {
     checkThread();
     System.gc();
     System.out.println("JRE_JAVA_RESUMED thread=" + Thread.currentThread().getName());
-    return 17;
+    return 913;
   }
 }

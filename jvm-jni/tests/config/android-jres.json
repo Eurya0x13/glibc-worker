@@ -1,0 +1,184 @@
+[
+  {
+    "id": "pojav-17-ec28559-x86_64",
+    "abi": "x86_64",
+    "major": 17,
+    "family": 4,
+    "url": "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559/jre17-x86_64-20210825-release.tar.xz",
+    "archive": "jre17-x86_64-20210825-release.tar.xz",
+    "archive_sha256": "ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71",
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "6d075ce61eb514493f09196fc2d388d74e086bf35898ad09d0573e8d08ccdb54"
+    },
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "bacb1a55b6633cec1d02c6bdc8ada8e15261e47ae37f31509a2cf855b267e88c"
+    },
+    "startup": "saved-jvm-path",
+    "boot_library_path": "lib",
+    "jni_capability": 655360
+  },
+  {
+    "id": "pojav-17-ec28559-arm64-v8a",
+    "abi": "arm64-v8a",
+    "major": 17,
+    "family": 4,
+    "url": "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559/jre17-arm64-20210825-release.tar.xz",
+    "archive": "jre17-arm64-20210825-release.tar.xz",
+    "archive_sha256": "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "e340425f9ef8d4280c9d64786d488d5699131b9d62333a2b990a47c0ca34b2de"
+    },
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "a837701c8406adeac8c9b01c531045d21c816c6ba18ae251410f7b0f5ecea5b1"
+    },
+    "startup": "saved-jvm-path",
+    "boot_library_path": "lib",
+    "jni_capability": 655360
+  },
+  {
+    "id": "angelaura-8-arm64",
+    "abi": "arm64-v8a",
+    "major": 8,
+    "family": 1,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre8/jre8-android-arm64.tar.xz",
+    "archive": "jre8-android-arm64.tar.xz",
+    "archive_sha256": "9a59124d9791957d55c68be664ab76831f336cf2e1e1cd4414220c6fdbf0e06d",
+    "libjvm": {
+      "path": "lib/aarch64/server/libjvm.so",
+      "sha256": "f54272d9888c94a37afcf756c7c074152b8f5d50d870a1682237bd68e40f728b"
+    },
+    "libjava": {
+      "path": "lib/aarch64/libjava.so",
+      "sha256": "bfc35d8fc9fe94792419e568f2409ef048c7a714b3fc23ec9217907f765eaa48"
+    },
+    "startup": "pojav-layout",
+    "boot_library_path": "lib/aarch64",
+    "jni_capability": 65544,
+    "deployment": "private-readonly",
+    "launcher_jni_baseline": true
+  },
+  {
+    "id": "angelaura-21-arm64",
+    "abi": "arm64-v8a",
+    "major": 21,
+    "family": 6,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre21/jre21-android-arm64.tar.xz",
+    "archive": "jre21-android-arm64.tar.xz",
+    "archive_sha256": "8d41ec401ee59f7722df60ed991f81ad146e130452804bfdd8a05d3436f7bbfe",
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "df8665c98bc26493cc529896e2f493ed0a78500fe527667cd35f804b3abb749c"
+    },
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "d3a81966293689f61a896f3b39637d8070e1b39f4e3580628e39539a76087217"
+    },
+    "startup": "pojav-layout",
+    "boot_library_path": "lib",
+    "jni_capability": 655360,
+    "deployment": "private-readonly"
+  },
+  {
+    "id": "angelaura-25-arm64",
+    "abi": "arm64-v8a",
+    "major": 25,
+    "family": 6,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre25/jre25-android-arm64.tar.xz",
+    "archive": "jre25-android-arm64.tar.xz",
+    "archive_sha256": "d3eb7afe2240c26728a1bb440502c5f18ac3883e932d202dd7f0c9bcbbce4c37",
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "5e1edd62f3162e12191f31730bf48cd8f256493ad4d4caef4b4dc398e8510818"
+    },
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "5619356d4fbb9893a7f38ac8679d5d7419ee17672f307f4bf5a699c504af5785"
+    },
+    "startup": "pojav-layout",
+    "boot_library_path": "lib",
+    "jni_capability": 655360,
+    "ndk_libraries": [
+      {
+        "path": "toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so",
+        "name": "libc++_shared.so",
+        "sha256": "7466ed097631a564ed6bff0b47768caa76bf03270d2047b5a65c03f497b824df"
+      }
+    ],
+    "deployment": "private-readonly"
+  },
+  {
+    "id": "angelaura-8-x86_64",
+    "abi": "x86_64",
+    "major": 8,
+    "family": 1,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre8/jre8-android-x86_64.tar.xz",
+    "archive": "jre8-android-x86_64.tar.xz",
+    "archive_sha256": "b1fbcef4965c17925894febe8216d089c6dd47b37950b5f945a89616443c1d0e",
+    "libjava": {
+      "path": "lib/amd64/libjava.so",
+      "sha256": "670dfca5188e0c53b7ae17190f1fb184f573989cf0a0a0fa34f63fdaf302bcca"
+    },
+    "libjvm": {
+      "path": "lib/amd64/server/libjvm.so",
+      "sha256": "37411c5aeb5e35c277d7be3c05da5b27625a4104d496895debd9a72165d14150"
+    },
+    "startup": "pojav-layout",
+    "deployment": "private-readonly",
+    "boot_library_path": "lib/amd64",
+    "jni_capability": 65544,
+    "launcher_jni_baseline": true
+  },
+  {
+    "id": "angelaura-21-x86_64",
+    "abi": "x86_64",
+    "major": 21,
+    "family": 6,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre21/jre21-android-x86_64.tar.xz",
+    "archive": "jre21-android-x86_64.tar.xz",
+    "archive_sha256": "cb88723961f5f9ad63afa1f212eb199816c27cabfd7dc66567bde1d8fb69713b",
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "20b2dc21c872ffe0c3f2e37f42eb6542af605fbaa1b59613aa3749e5b7d61abd"
+    },
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "ee05851ef050bc1ac67cd58a2646c14a0c17e811fa22d36c41ed6e66e1d46241"
+    },
+    "startup": "pojav-layout",
+    "deployment": "private-readonly",
+    "boot_library_path": "lib",
+    "jni_capability": 655360
+  },
+  {
+    "id": "angelaura-25-x86_64",
+    "abi": "x86_64",
+    "major": 25,
+    "family": 6,
+    "url": "https://github.com/AngelAuraMC/angelauramc-openjdk-build/releases/download/download_jre25/jre25-android-x86_64.tar.xz",
+    "archive": "jre25-android-x86_64.tar.xz",
+    "archive_sha256": "7fca862ee1b2d5fe23cd9c9c3d9b7ad3c241947ad1a6cc9464ef2e674867105d",
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "516e0540c0baa5b622a1e597539b92a88173d17abcdd161e52bc6319f5f89b47"
+    },
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "1d910f86df9a6ef8cdd487f4f516390bb8c4f695f6621292fff889421ab44d52"
+    },
+    "startup": "pojav-layout",
+    "deployment": "private-readonly",
+    "boot_library_path": "lib",
+    "jni_capability": 655360,
+    "ndk_libraries": [
+      {
+        "path": "toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so",
+        "name": "libc++_shared.so",
+        "sha256": "7918ebd0b8074c312d0c610205d49760b98c008026e6b817cd92103a3e12241b"
+      }
+    ]
+  }
+]

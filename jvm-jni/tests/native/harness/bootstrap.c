@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include "full_bridge.h"
 #include "lab_suite.h"
+#include "jre-layout.h"
 #include "loader_image.h"
 #include <elf.h>
 #include <errno.h>
@@ -88,12 +89,17 @@ int worker_host_main(int argc, char **argv) {
   require(snprintf(catalog, sizeof catalog, "%s/guest-images.tsv", argv[6]) <
               (int)sizeof catalog,
           "lab image policy paths");
+  char actual_libjava[PATH_MAX];
+  require(snprintf(actual_libjava, sizeof actual_libjava, "%s/%s", argv[6],
+                   JRE_LIBJAVA_PATH) < (int)sizeof actual_libjava,
+          "actual JRE libjava path");
   struct gw_host_bridge_config config = {
-      .abi_version = GW_HOST_BRIDGE_CONFIG_V1,
+      .abi_version = GW_HOST_BRIDGE_CONFIG_V2,
       .struct_size = sizeof config,
-      .flags = GW_HOST_LEGACY_JRE17,
+      .flags = GW_HOST_VM_ADAPTER,
       .native_directory = argv[2],
-      .image_catalog = catalog};
+      .image_catalog = catalog,
+      .jre_library_path = actual_libjava};
   char copy_marker[PATH_MAX];
   require(
       snprintf(copy_marker, sizeof copy_marker, "%s/array-copy-cache-enabled",

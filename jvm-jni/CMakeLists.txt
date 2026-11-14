@@ -14,6 +14,7 @@ else()
   file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/jre-adapter-profile.h [=[
 #define GW_JVM_PROFILE_NAME "unconfigured"
 #define GW_JVM_LIBJAVA_SHA256 ""
+#define GW_JVM_LIBJVM_SHA256 ""
 #define GW_JVM_PROFILE_FAMILY GW_JVM_NATIVE_LIBRARIES_15
 ]=])
 endif()
@@ -34,19 +35,19 @@ find_file(GW_ANDROID_JNI_HELPERS android-jni-helpers.jar
   HINTS ${CMAKE_PREFIX_PATH}
   PATH_SUFFIXES share/glibc-worker/android-jni NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/jvm-jni-helpers.jar
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/classes
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/classes
   COMMAND ${Java_JAVAC_EXECUTABLE} --release 8 -cp ${GW_ANDROID_JNI_HELPERS} -d ${CMAKE_CURRENT_BINARY_DIR}/classes
           ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/JvmAdapter.java
-          ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/Jre17Adapter.java
   COMMAND ${Java_JAR_EXECUTABLE} cf ${CMAKE_CURRENT_BINARY_DIR}/jvm-jni-helpers.jar
           -C ${CMAKE_CURRENT_BINARY_DIR}/classes .
-  DEPENDS src/java/dev/glibc/worker/JvmAdapter.java src/java/dev/glibc/worker/Jre17Adapter.java ${GW_ANDROID_JNI_HELPERS} VERBATIM)
+  DEPENDS src/java/dev/glibc/worker/JvmAdapter.java ${GW_ANDROID_JNI_HELPERS} VERBATIM)
 add_custom_target(jvm_jni_helpers ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/jvm-jni-helpers.jar)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/jvm-jni-helpers.jar DESTINATION share/glibc-worker/jvm-jni)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
-install(FILES include/jvm_adapter.h include/jre17_adapter.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/jvm-jni)
+install(FILES include/jvm_adapter.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/jvm-jni)
 install(TARGETS jvm_jni jvm_jni_static EXPORT GlibcWorkerJvmJniTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

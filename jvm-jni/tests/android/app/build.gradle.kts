@@ -48,6 +48,7 @@ val prepareNative by tasks.registering(Exec::class) {
     commandLine("bash", "jvm-jni/tests/scripts/build-native.sh")
 
     inputs.property("workerAbi", workerAbi)
+    inputs.property("jreArtifact", providers.environmentVariable("GW_JRE_ARTIFACT").orElse("pojav-17-ec28559-$workerAbi"))
     inputs.property("workerContexts", providers.environmentVariable("GW_CONTEXTS").orElse("16"))
     inputs.property("bindingBackend", providers.environmentVariable("GW_BINDING_BACKEND").orElse("zig"))
     inputs.property("rpcProfile", providers.environmentVariable("GW_RPC_PROFILE").orElse("0"))
@@ -56,10 +57,15 @@ val prepareNative by tasks.registering(Exec::class) {
     inputs.property("nativeJars", providers.environmentVariable("GW_NATIVE_JARS").orElse("0"))
     inputs.property("wakeFilter", providers.environmentVariable("GW_FUTEX_WAKE_FILTER").orElse("0"))
 
+    inputs.file(workspaceRoot.resolve("jvm-jni/CMakeLists.txt"))
+    inputs.file(workspaceRoot.resolve("jvm-jni/build.sh"))
+
     val sourceDirectories = listOf(
         "core",
         "bionic-dlopen",
         "android-jni",
+        "jvm-jni/include",
+        "jvm-jni/cmake",
         "jvm-jni/src/native",
         "jvm-jni/src/java",
         "jvm-jni/tests/native",

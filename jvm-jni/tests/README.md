@@ -73,7 +73,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 
 ## 真实桌面 VM 的装载适配测试
 
-需要 Linux x86_64、C 编译器及 JDK17+。以下命令下载或复用 SHA256 固定的 Temurin JRE8/21/25；本机 11u、17u 的目录由调用方显式提供，不能假设示例路径存在：
+需要 Linux x86_64、C 编译器及 JDK17+。桌面契约测试使用普通 JIT 和 CheckJNI；双散列重复校验不在解释器内进行性能测量。以下命令下载或复用 SHA256 固定的 Temurin JRE8/21/25；本机 11u、17u 的目录由调用方显式提供，不能假设示例路径存在：
 
 ```sh
 python3 jvm-jni/tests/scripts/test-adapters.py --pinned \
@@ -85,7 +85,7 @@ python3 jvm-jni/tests/scripts/test-adapters.py --runtime 6:/path/to/reviewed-jre
 
 `--runtime FAMILY:HOME` 的数字对应 `gw_jvm_loader_family`。不能把 11 GA 的族 2 与带回移植参数的 11u 族 3 混用，也不能把旧 Android JRE17 的族 4 与本轮本机 17u 的族 5 混用。接口族选择须审阅，不由测试脚本猜测。
 
-本测试链接生产适配器及 C loader，在真实 VM 内通过 System.load 触发钩子，但测试 transport 直接调用主机 dlopen；它不创建双 libc。每个 VM 的普通进程验证 27 项条件，包括制品/族拒绝、部分注册失败的恢复、JNI_OnLoad 回调和拒绝、普通库回退、符号重载、不同 ClassLoader 所有权、两轮回收/自动卸载/再加载及原钩子恢复。另开一个 VM 进程注入注册和恢复同时失败，验证 3 项丢弃进程条件，不复用该进程。
+本测试链接生产适配器及 C loader，在真实 VM 内通过 System.load 触发钩子，但测试 transport 直接调用主机 dlopen；它不创建双 libc。每个 VM 的普通进程验证 31 项条件，包括制品/族拒绝、部分注册失败的恢复、JNI_OnLoad 回调和拒绝、普通库回退、符号重载、不同 ClassLoader 所有权、两轮回收/自动卸载/再加载及原钩子恢复。另开一个 VM 进程注入注册和恢复同时失败，验证 3 项丢弃进程条件，不复用该进程。
 
 故障注入只在测试中临时替换当前线程 JNI 表的 RegisterNatives，其余函数和 CheckJNI 保持原样；生产适配器没有此开关。每次运行先启动同参数、未加载适配器的空白程序作为启动对照。部分 JRE8 launcher 会在进入 main 前按参数数目产生 JNI 告警，必须与该对照逐字匹配；main 之后的任何 JNI 告警都判失败。ClassLoader 回收使用 GC 和有界等待，不通过 System.runFinalization 引入该旧 VM 的额外告警。
 
@@ -94,3 +94,46 @@ python3 jvm-jni/tests/scripts/test-adapters.py --runtime 6:/path/to/reviewed-jre
 ## 单 Runtime 生命周期
 
 smoke/coverage 必须各输出唯一且通过的 `RUNTIME_LIFECYCLE_TEST`：一进程一次启动、错误线程关闭拒绝、正常 STOPPED、重复关闭和重启拒绝。后续 Guest 线程退出及 VM 销毁仍独立验证。桌面 `android-jni/tests/lifecycle.py` 覆盖初始化/关闭故障和资源保留；`audit.py` 覆盖隔离后在途调用保留、迟到响应及由外部测试父进程处置永久停滞子进程。见 [生命周期契约](../../android-jni/docs/LIFECYCLE.md)。
+
+## 多 Android JRE 制品
+
+默认使用固定 Pojav17；其他候选必须显式选择 ID。提取缓存和安装结果都检查 libjava/libjvm 配对；未知、混用、架构不符和摘要不符均拒绝。JRE25 额外固定测试用 NDK libc++_shared 散列，不从任意搜索路径补库；需要匹配清单的 NDK 支持文件。
+
+```sh
+python3 jvm-jni/tests/scripts/test-jre-artifacts.py
+python3 jvm-jni/tests/scripts/jre_artifacts.py --abi arm64-v8a --home /path/to/jre
+GW_DEPS_READY=1 python3 jvm-jni/tests/scripts/test-android-jres.py \
+  --device SERIAL --artifact angelaura-8-arm64 \
+  --artifact angelaura-21-arm64 --artifact angelaura-25-arm64 \
+  --artifact pojav-17-ec28559-arm64-v8a
+```
+
+首次构建依赖未准备时省略 `GW_DEPS_READY=1`。矩阵先构建并固定全部 APK，再在同一设备顺序安装，保留每个 APK、构建 manifest、散列和运行报告；smoke 通过才继续 coverage。任一失败使整个命令失败，启动受阻单独标注，不能用“识别成功”代替运行验证。单项也可设置 `GW_JRE_ARTIFACT=ID` 后使用上面的构建/运行入口。支持边界见 [JRE 契约](../docs/JRE_COMPATIBILITY.md)。
+
+模拟器使用 `--abi x86_64 --device emulator-5554 --emulator AVD_NAME`，并选择清单中的 x86_64 制品 ID。此模式在构建前关闭指定 AVD，构建结束后停止 Gradle，确认进程退出后才启动 AVD；运行结束关闭 AVD。真机模式不自动管理其他模拟器，执行前应先关闭它们。
+
+AngelAura 测试夹具按原始 JRE 目录部署只读库，复用 Pojav 的预加载与 `JLI_Launch` 路径。来源 commit 与文件散列见 `config/pojav-startup.json`，适配代码只属于测试应用。部署后分别尝试直接运行 `bin/java -version` 和 `/system/bin/linker64 bin/java -version`，记录 `JRE_EXEC_PROBE`；代理探针是子进程，真正的桥测试在应用进程内运行的 HotSpot 中执行。
+
+ARM64 应用通过 manifest 关闭堆指针标记。exec 子进程不继承该声明，因此其环境额外预加载测试库 `libjre_exec_compat.so`，在 Android 12 及以上使用 bionic `mallopt` 关闭本子进程的堆标记；不修改系统设置，也不向 ART 或 glibc Guest 预加载该库。未设置时，固定 JRE8 的独立版本查询可在 `assembler_aarch64.hpp` 触发 `Field too big for insn`，即使不加载任何桥也会失败。此兼容设置是测试启动条件，不属于 core 或装载适配器 API。
+
+JRE8 额外以相同参数启动不加载桥的 `JreBaseline`。进入 main 前的 CheckJNI 告警必须与独立对照逐行匹配，main 后的告警一律失败，致命 JNI 诊断也不能由对照豁免。`scripts/test-jre-report.py --group coverage REPORT` 对制品、执行探针和存在的启动对照执行破坏性输入验证；它只修改报告副本。
+
+固定 JRE8 的严格 coverage 当前会在 VM 的 CheckJNI 数组提交路径失败；矩阵如包含它，整体仍返回失败。独立 JNI 最小复现不加载 glibc-worker：
+
+```sh
+python3 jvm-jni/tests/scripts/test-array-commit.py --device SERIAL
+```
+
+该命令使用已安装测试 App 的 UID，部署独立的固定 JRE8 与最小 JNI 库，验证不开启 CheckJNI 时回写成功、开启后退出 134。它的 PASS 表示复现了已知 VM 缺陷，结果包含 `strict_jni_supported=false`；正常/严格日志分开保存，随后清理本次手机临时目录。
+
+正常 JIT 模式的完整 JRE8 回归可复用保留的 ARM64 JRE8 APK：
+
+```sh
+GW_JRE_ARTIFACT=angelaura-8-arm64 jvm-jni/tests/coverage/run.sh \
+  --device SERIAL --reuse-apk --apk /path/to/retained-jre8.apk \
+  --benchmark --benchmark-jit --output jvm-jni/build/jre8-normal
+```
+
+此入口保留全部功能覆盖，同时执行既有的附加基准。它不是严格组的替代品，也不能凭单次结果下性能结论。制品支持模式见 [兼容性契约](../docs/JRE_COMPATIBILITY.md)。
+
+已保留的 ARM64 制品/模式结果、APK 与原始报告摘要、独立 VM 反例及校验器反例见 [android-jres-arm64.json](results/android-jres-arm64.json)。其中严格矩阵整体为 FAIL，原因是上述 JRE8 VM 缺陷；每项结果和正常模式证据独立列出。新的运行由 runner 生成新的 run_id，不能沿用这份记录作为新制品通过证明。

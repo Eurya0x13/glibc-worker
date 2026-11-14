@@ -7,7 +7,6 @@ struct shared;
 
 enum gw_host_bridge_flags {
   GW_HOST_VM_ADAPTER = 1,
-  GW_HOST_LEGACY_JRE17 = GW_HOST_VM_ADAPTER, /* Compatibility spelling. */
   GW_HOST_DIRECT_IMAGES = 2,
   /* Retained for callers that explicitly enabled the former opt-in mode. */
   GW_HOST_ARRAY_COPY_CACHE = 4,

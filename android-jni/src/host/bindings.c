@@ -133,6 +133,10 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
     out = (jvalue){0};
   }
   GW_RPC_SCOPE(post, GW_RPC_HOST_TRAMPOLINE_POST, -1);
+  /* Guest may return immediately after a Java callback. Check before the
+     bridge performs JNI frame cleanup; keep the exception pending so the
+     original Java caller still receives it. */
+  (void)(*env)->ExceptionCheck(env);
   jobject ref = b->ret == 'L' ? fh_ref(c, out.l) : NULL;
   ref = (*env)->PopLocalFrame(env, ref);
   fh_drop_locals(c, prior + 1);

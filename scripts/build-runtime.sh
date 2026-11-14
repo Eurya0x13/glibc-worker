@@ -84,7 +84,12 @@ build_project() {
   GW_PROJECT_BUILD="$project_build" "$project/build.sh" "${cmake_args[@]}" \
     -DCMAKE_INSTALL_PREFIX="$project_build/install" \
     -DCMAKE_PREFIX_PATH="$prefix_path" "$@"
-  cmake --install "$project_build"
+  # Recreate only this generated SDK prefix, so deleted public headers and
+  # helper classes cannot survive an incremental source/API migration.
+  rm -rf "$project_build/install.next"
+  cmake --install "$project_build" --prefix "$project_build/install.next"
+  rm -rf "$project_build/install"
+  mv "$project_build/install.next" "$project_build/install"
   prefix_path="$project_build/install${prefix_path:+;$prefix_path}"
 }
 

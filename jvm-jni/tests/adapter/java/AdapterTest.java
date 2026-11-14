@@ -7,8 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public final class AdapterTest {
-  static native int install(String library, String digest, int family);
+  static String vmDigest;
+  static native int installProfile(String library, String digest, String vmDigest, int family);
+  static int install(String library, String digest, int family) {
+    return installProfile(library, digest, vmDigest, family);
+  }
   static native int restore();
+  static native int oldProfile();
+  static native int vmMismatchProfile(String library, String digest, String vmDigest, int family);
   static native int[] metrics();
   static native int stop();
   static native void faults(int mask);
@@ -129,7 +135,8 @@ public final class AdapterTest {
     System.out.println("adapter main");
     System.load(args[0]);
     int family = Integer.parseInt(args[3]);
-    if (args.length == 10) {
+    vmDigest = args[9];
+    if (args.length == 11) {
       faults((1 << 1) | (1 << 2));
       check("failed_restoration_rejected", install(args[1], args[2], family) == -1);
       check("process_disposal_required", error().contains("process disposal required"));
@@ -137,10 +144,26 @@ public final class AdapterTest {
       writeResult(args[7]);
       return; // Dedicated VM process; never reuse the partially restored adapter.
     }
+    check("old_profile_rejected", oldProfile() == -1);
     check("hash_rejected",
         install(args[1], args[2].replaceFirst(".", args[2].startsWith("0") ? "1" : "0"), family)
             == -1);
+    check("vm_hash_rejected",
+        installProfile(args[1], args[2],
+            vmDigest.replaceFirst(".", vmDigest.startsWith("0") ? "1" : "0"), family)
+            == -1);
     check("unknown_family_rejected", install(args[1], args[2], 999) == -1);
+    File copy = new File(new File(args[0]).getParentFile(), "unloaded-libjava.so");
+    java.nio.file.Files.copy(new File(args[1]).toPath(), copy.toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    try {
+      check(
+          "nonresident_artifact_rejected", install(copy.getAbsolutePath(), args[2], family) == -1);
+    } finally {
+      java.nio.file.Files.delete(copy.toPath());
+    }
+    check("different_target_vm_rejected",
+        vmMismatchProfile(args[1], args[2], vmDigest, family) == -1);
     check("wrong_family_rejected", wrongFamily(args[1], args[2], family == 1 ? 6 : 1));
     faults(1 << 1);
     check("partial_registration_rejected", install(args[1], args[2], family) == -1);

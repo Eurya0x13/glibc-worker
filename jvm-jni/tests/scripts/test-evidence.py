@@ -29,6 +29,7 @@ with tempfile.TemporaryDirectory(
         assert (output / "run-state.json").read_text() == active
         run.finish({"result": "PASS"})
     old_id = json.loads((output / "summary.json").read_text())["run_id"]
+    (output / "launcher-probe.log").write_text("previous launch")
     assert (
         json.loads((output / "run-state.json").read_text())["status"] == "PASS"
     )
@@ -61,6 +62,10 @@ with tempfile.TemporaryDirectory(
     assert not (output / "summary.json").exists()
     failed = json.loads((output / "run-state.json").read_text())
     assert failed["status"] == "FAILED"
+    assert not (output / "launcher-probe.log").exists()
+    assert (
+        Path(failed["prior_artifacts"]) / "launcher-probe.log"
+    ).read_text() == "previous launch"
     assert (
         json.loads(
             (Path(failed["prior_artifacts"]) / "summary.json").read_text()

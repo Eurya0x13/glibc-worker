@@ -1,17 +1,9 @@
 {
   "x86_64": {
-    "jre_archive": "jre17-x86_64-20210825-release.tar.xz",
-    "jre_sha256": "ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71",
-    "jvm_sha256": "6d075ce61eb514493f09196fc2d388d74e086bf35898ad09d0573e8d08ccdb54",
-    "libjava_sha256": "bacb1a55b6633cec1d02c6bdc8ada8e15261e47ae37f31509a2cf855b267e88c",
     "zstd_resource": "linux/amd64/libzstd-jni-1.5.7-6.so",
     "zstd_sha256": "9d73d69f127a14b8bf6967838552ba5ebd0dce71f1ba3d9ceea30a64224979a0"
   },
   "arm64-v8a": {
-    "jre_archive": "jre17-arm64-20210825-release.tar.xz",
-    "jre_sha256": "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
-    "jvm_sha256": "e340425f9ef8d4280c9d64786d488d5699131b9d62333a2b990a47c0ca34b2de",
-    "libjava_sha256": "a837701c8406adeac8c9b01c531045d21c816c6ba18ae251410f7b0f5ecea5b1",
     "zstd_resource": "linux/aarch64/libzstd-jni-1.5.7-6.so",
     "zstd_sha256": "84b324c21523ca1dbb2e7d145d22d81848e1e015793ad2c6150ca9e7547f0486"
   }

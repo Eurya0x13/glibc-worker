@@ -15,8 +15,8 @@
 - [x] AUD-07：上下文/重入帧稳定分块增长，保留线程身份与应急失败通道；完成类注册交接、严格依赖归属及执行 scope 关闭规则，默认/诊断真机组合通过。
 - [x] AUD-08：每进程单 Runtime 绑定一个目标 VM，关闭后不重建；deadline 只作监督，不提前释放在途借用，无法确认安全时隔离并由宿主处置进程。生命周期/停滞保留主机验证及真实 Android JRE 覆盖、冒烟通过。
 - [x] AUD-09：runner 独占结果目录，先归档旧制品再检查设备，原子记录本轮状态与 run_id，并核对安装 APK 散列。
-- [ ] AUD-10：按具体 Android JRE 制品扩展验证，不把桌面适配器测试当作 Android 双 libc 通过。
-- [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
+- [x] AUD-10：v2 profile 校验 libjava/libjvm 配对及实际目标 VM，按具体 Android 制品记录验证；固定 ARM64 JRE17/21/25 严格覆盖通过，JRE8 正常模式完整通过；8 的 CheckJNI 数组提交崩溃已独立复现，不列为严格覆盖通过。
+- [x] AUD-11：删除 JRE17 旧名称、转发符号、Java 包装类和构建宏兼容；SDK 消费者改用通用名称。
 - [x] AUD-12：清理结果不确定时永久隔离桥、保留可能仍被使用的资源，由宿主丢弃进程；不自动杀应用。
 
 AUD-03 的错误映射和故障回滚保持有效；AUD-07 将原固定深度/上下文耗尽替换为动态增长，扩容失败继续保留异常、撤回未发布资源并使用独立应急 RPC。AUD-07 的线程、类交接、依赖归属及容量规则见 [JNI 交互契约](../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md)。AUD-08 的决策为不提供任意 native 的通用超时返回或强制取消：期限由宿主监督，真实完成/取消确认前保留在途资源，不能将隔离等同于安全撤销。单实例、关闭与处置规则见 [生命周期契约](../android-jni/docs/LIFECYCLE.md)。
@@ -67,7 +67,7 @@ AUD-03 的错误映射和故障回滚保持有效；AUD-07 将原固定深度/�
 | Guest 附着线程名 | 63 字节正文 + 终止符 | 超长截断 |
 | 错误和诊断消息 | 511 字节正文 + 终止符 | 超长截断，可能丢失诊断细节 |
 | JVM profile 名称 | 127 字节正文 + 终止符 | 必须在固定数组内终止 |
-| profile 的 libjava SHA256 | 64 个小写十六进制字符 + 终止符 | 长度或字符格式不符拒绝 |
+| v2 profile 的 libjava / libjvm SHA256 | 64 个小写十六进制字符 + 终止符 | 长度或字符格式不符拒绝 |
 
 反射得到超长方法/字段描述符时抛 `IllegalArgumentException`，释放临时 UTF 字符串和 local 引用，不插入截断 ID。命令超长时在改变槽位、深度和序号前拒绝。注册和显式查找维持各自的 JNI/结构化错误返回契约。
 
@@ -194,7 +194,7 @@ AUD-07 管理线程身份、容量、所有权和借用；AUD-08 明确进程生
 | 映像策略 | 默认按安装目录或内容散列目录解析；目录外请求需匹配同字节已安装映像，或显式开启直接路径模式 |
 | 目录映射条目的名字 | `lib[A-Za-z0-9_.-]+\.so`，并检查规范化后的父目录和内容一致性 |
 | Android 执行权限 | 直接路径模式不绕过 Android 的路径、可执行映射及系统调用策略 |
-| JVM 私有接口 | 选择审阅后的接口族并匹配 libjava SHA256；字段、方法或原生符号不符时拒绝 |
+| JVM 私有接口 | 选择审阅后的接口族并匹配 libjava/libjvm 两个 SHA256；字段、方法或原生符号不符时拒绝 |
 | profile 生命周期 | 只在未安装、无并发装卸载和调用时配置；已安装时不能更换 |
 | 安装失败恢复 | 尝试恢复原钩子；再次失败时保留状态并要求丢弃进程 |
 | Android 构建基线 | 当前组合构建 API29，测试应用 minSdk29 / targetSdk36；这不是所有更低 Android 版本已被证明不能支持的结论 |
@@ -204,7 +204,9 @@ AUD-07 管理线程身份、容量、所有权和借用；AUD-08 明确进程生
 
 AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配置均创建成功，但持锁 pthread 正常返回后 timedlock 返回 ETIMEDOUT，未获得 EOWNERDEAD。新补丁在对象写入前返回 ENOTSUP；主机标准 glibc 正对照覆盖 EOWNERDEAD、consistent 后复用和 ENOTRECOVERABLE。新 runtime 的 QEMU 与真机组合各通过 125 项检查，含普通锁、递归、errorcheck、跨线程超时和实际条件变量等待/唤醒。它不证明完整 pthread/PI/跨进程兼容。
 
-旧的 [jre17_adapter.h](../jvm-jni/include/jre17_adapter.h) 仅声明转发到通用适配器的兼容名称，不再承载 JRE17 专用实现。维护中的 SDK 消费者使用 [jvm_adapter.h](../jvm-jni/include/jvm_adapter.h)。AUD-11 应明确是否需要旧源码/二进制接口兼容；若删除，应同步清理转发符号、安装清单和相关文档。
+AUD-10 关闭的是制品识别和验证证据边界，不是所有 Android JRE 的启动适配。清单固定归档、ABI、libjava/libjvm 配对和接口族；生产安装只使用已驻留 libjava，核对原方法归属、目标 JavaVM 实例与实际 libjvm 散列，v1 profile 明确拒绝。固定 Android ARM64 JRE17/21/25 的 smoke/coverage 在 CheckJNI 下完整通过；JRE8 严格 smoke、正常 JIT coverage 通过，但严格 coverage 在 JNI_COMMIT 后发生 VM 缓冲区释放崩溃。无桥 JNI 最小用例对照证明该问题独立于 glibc-worker，正常模式通过、CheckJNI 模式退出 134；严格组失败仍保留，不以正常组替代。测试宿主复用固定 Pojav JLI 启动路径、原始目录布局及 linker64 代理探针；它们不进入生产 SDK。桥的 native 返回清理前补充 ExceptionCheck，保留待抛异常。桌面五套 VM 各通过 31 项正常断言和 3 项恢复失败断言，不能替代 Android 双 libc 结果。具体模式边界与重现方式见 [JRE 契约](../jvm-jni/docs/JRE_COMPATIBILITY.md) 和 [测试入口](../jvm-jni/tests/README.md)。
+
+AUD-11 已按不保留名称兼容的决定删除旧 C 头/符号、Java 包装类、构建宏 fallback 及旧 Host 枚举。SDK 安装到全新暂存目录后替换生成前缀，Java classes 编译前清理，避免增量构建夹带已删除接口。迁移入口为 [jvm_adapter.h](../jvm-jni/include/jvm_adapter.h)、`JvmAdapter` 和 `GW_HOST_VM_ADAPTER`；旧客户端需重新编译。SDK 检查同时验证旧头、符号、类和枚举不再导出。
 
 源码位置：[build-glibc.sh](../core/scripts/build-glibc.sh)、[Termux NPTL 补丁](../core/patches/termux/set-nptl-syscalls.patch)、[clone3 补丁](../core/patches/termux/disable-clone3-glibc244.patch)、[package-runtime.sh](../android-jni/scripts/package-runtime.sh)、[GuestImages.java](../android-jni/src/java/dev/glibc/worker/GuestImages.java)、[profiles.c](../jvm-jni/src/native/profiles.c)、[ADAPTER.md](../jvm-jni/docs/ADAPTER.md)。
 
@@ -230,8 +232,8 @@ AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配�
 
 | 验证 | 已有证据 | 尚不能证明 |
 | --- | --- | --- |
-| 桌面 JRE8/11/17/21/25 适配器 | 每个 VM 27 项正常契约断言及 3 项恢复失败断言通过 | 所有 Android JRE 制品、双 libc、所有新增 JNI 能力均兼容 |
-| Android 固定 JRE17 | 删除前 C 对照及当前默认 Zig 均通过：142 项 Java/JNI、26 项装载、234/235 槽功能触达；Guest 退出与 VM 销毁完成 | 完整 JNI 规范、所有源码分支或其他 Android JRE 制品 |
+| 桌面 JRE8/11/17/21/25 适配器 | 每个 VM 31 项正常契约断言及 3 项恢复失败断言通过 | 所有 Android JRE 制品、双 libc、所有新增 JNI 能力均兼容 |
+| Android 固定 ARM64 JRE8 / 17 / 21 / 25 | 17/21/25 严格覆盖通过；8 正常 JIT 完整覆盖及严格 smoke 通过：142 项 Java/JNI、26 项装载、234/235 槽功能触达；Guest 退出与 VM 销毁完成。JRE8 GetModule 验证明确拒绝 | JRE8 的 CheckJNI JNI_COMMIT 路径（VM 独立缺陷）、完整 JNI 规范、所有源码分支或其他制品；历史 C 对照仍只针对固定 JRE17 |
 | ELF 分类三态与边界 | 49 项 ASan/UBSan 检查、C 装载检查和当前 Android 组合回归通过 | 真实 GNU loader 的完整 ELF 验证 |
 | Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 所有资源上限已取消、任意并发卸载安全或性能提升 |
 | 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消 |

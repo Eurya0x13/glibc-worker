@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/PojavLauncherTeam/PojavLauncher",
+  "commit": "b12ad048157b3aa255d078c235dd4571e1900309",
+  "files": [
+    {
+      "path": "app_pojavlauncher/src/main/java/net/kdt/pojavlaunch/utils/JREUtils.java",
+      "sha256": "a2c665a290c4ea75bb3add85a9cceb51f2188a4ad72a4531c2edec3de94fa34d"
+    },
+    {
+      "path": "app_pojavlauncher/src/main/jni/jre_launcher.c",
+      "sha256": "8e022d6030415be215e4ee0c01c6661854e08464fb62de0d228225592a994017"
+    },
+    {
+      "path": "app_pojavlauncher/src/main/jni/utils.c",
+      "sha256": "a4d1bcff6f130b1aab2a0856177ed2cf417727e6f6d4f238c08156436795b7f4"
+    }
+  ]
+}

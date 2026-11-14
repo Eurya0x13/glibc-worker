@@ -130,8 +130,25 @@ static int classes(JNIEnv *e, jclass module, jbyteArray bytes) {
 
   jobject (*getmodule)(JNIEnv *, jclass) =
       (jobject (*)(JNIEnv *, jclass))((void **)*e)[233];
+  int supported = (*e)->GetVersion(e) >= 0x00090000;
   jobject mod = getmodule(e, module);
-  C(mod);
+  if (supported) {
+    E();
+    C(mod);
+    (*e)->DeleteLocalRef(e, mod);
+  } else {
+    C(!mod && (*e)->ExceptionCheck(e));
+    jthrowable pending = (*e)->ExceptionOccurred(e);
+    (*e)->ExceptionClear(e);
+    jclass unsupported =
+        (*e)->FindClass(e, "java/lang/UnsupportedOperationException");
+    C(unsupported && pending && (*e)->IsInstanceOf(e, pending, unsupported));
+    (*e)->DeleteLocalRef(e, pending);
+    (*e)->DeleteLocalRef(e, unsupported);
+  }
+  dprintf(2,
+          "JNI_MODULE_TEST {\"supported\":%s,\"unsupported_exception\":%s}\n",
+          supported ? "true" : "false", supported ? "false" : "true");
   return 0;
 }
 

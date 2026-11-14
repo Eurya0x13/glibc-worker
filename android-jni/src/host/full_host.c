@@ -80,7 +80,7 @@ static pthread_key_t context_key;
 jclass gw_host_helper_class;
 jmethodID gw_host_describe_method, gw_host_declaring_method;
 static struct gw_image_policy image_policy;
-static int legacy_adapter;
+static int use_vm_adapter;
 static const struct gw_jni_vm_adapter_v1 *vm_adapter;
 
 /* Publish the negotiated JNI version into the idle bootstrap call before
@@ -741,7 +741,7 @@ void full_host_poll(void) {
 static int start_bridge(struct shared *s, JNIEnv *env,
                         const struct gw_host_bridge_config *options) {
   const char *dir = options->native_directory;
-  legacy_adapter = (options->flags & GW_HOST_LEGACY_JRE17) != 0;
+  use_vm_adapter = (options->flags & GW_HOST_VM_ADAPTER) != 0;
   fh_array_copy_start((options->flags & GW_HOST_DISABLE_ARRAY_COPY_CACHE) == 0);
   printf("BINDING_REGISTRY backend=%s\n", fh_binding_backend());
 
@@ -836,7 +836,7 @@ static int start_bridge(struct shared *s, JNIEnv *env,
   const char *jre_path = options->abi_version == GW_HOST_BRIDGE_CONFIG_V2
                              ? options->jre_library_path
                              : NULL;
-  if (legacy_adapter &&
+  if (use_vm_adapter &&
       vm_adapter->install(env, dir, jre_path, &error) != GW_OK) {
     goto fail;
   }
@@ -865,8 +865,8 @@ int full_host_start(struct shared *s, JNIEnv *env,
       (options->abi_version == GW_HOST_BRIDGE_CONFIG_V2 &&
        options->struct_size < sizeof *options) ||
       (options->flags &
-       ~(GW_HOST_LEGACY_JRE17 | GW_HOST_DIRECT_IMAGES |
-         GW_HOST_ARRAY_COPY_CACHE | GW_HOST_DISABLE_ARRAY_COPY_CACHE)) ||
+       ~(GW_HOST_VM_ADAPTER | GW_HOST_DIRECT_IMAGES | GW_HOST_ARRAY_COPY_CACHE |
+         GW_HOST_DISABLE_ARRAY_COPY_CACHE)) ||
       !options->native_directory || !options->image_catalog) {
     return JNI_ERR;
   }
@@ -1018,7 +1018,7 @@ int full_host_shutdown(void) {
     return JNI_ERR;
   }
 
-  if (legacy_adapter && vm_adapter->restore(env, &error) != GW_OK) {
+  if (use_vm_adapter && vm_adapter->restore(env, &error) != GW_OK) {
     printf("LOADER_BACKEND adapter_restore_failed=%s\n", error.message);
     gw_dlopen_quarantine();
     return JNI_ERR;

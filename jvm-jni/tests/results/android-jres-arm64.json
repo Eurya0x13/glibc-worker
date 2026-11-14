@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-14",
+  "device": {
+    "abi": "arm64-v8a",
+    "android": 13,
+    "model": "V2239A"
+  },
+  "scope": "Fixed Android artifacts and stated VM modes only; not full JNI specification coverage",
+  "strict_matrix_result": "FAIL",
+  "results": [
+    {
+      "artifact": "angelaura-8-arm64",
+      "abi": "arm64-v8a",
+      "libjava_sha256": "bfc35d8fc9fe94792419e568f2409ef048c7a714b3fc23ec9217907f765eaa48",
+      "libjvm_sha256": "f54272d9888c94a37afcf756c7c074152b8f5d50d870a1682237bd68e40f728b",
+      "family": 1,
+      "apk_sha256": "8134412dd25f04e92d51adf09bdbc703cf278c276147e6b84eba30bf24cf4605",
+      "strict_smoke": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "10eb64f30fb14c988ebd673e5102bfe9",
+        "report_sha256": "b30751ce0fba432870ba7a571f9c3c659de158fc561da61b66f8834bdcb85374",
+        "java_checks": null,
+        "loader_checks": null,
+        "jni_module": null
+      },
+      "strict_coverage": {
+        "result": "FAIL",
+        "reason": "JRE8 CheckJNI JNI_COMMIT crash reproduced without glibc-worker",
+        "run_id": "0a20ac3b21e149f996400cdb0ca9ee44",
+        "report_sha256": "95763022dd4149e65cb00de8d70f7d61428e2ec52e994a1a63acdc1733266de5"
+      },
+      "normal_coverage": {
+        "result": "PASS",
+        "mode": "benchmark-normal-jit",
+        "run_id": "8bca81dca82d4b24b2e9b6d4dad9feb1",
+        "report_sha256": "9229447400244600ac75bebd30c6daba341b29b5fa69ea89da59da43bd328fbc",
+        "java_checks": 142,
+        "loader_checks": 26,
+        "jni_module": {
+          "supported": false,
+          "unsupported_exception": true
+        }
+      }
+    },
+    {
+      "artifact": "pojav-17-ec28559-arm64-v8a",
+      "abi": "arm64-v8a",
+      "libjava_sha256": "a837701c8406adeac8c9b01c531045d21c816c6ba18ae251410f7b0f5ecea5b1",
+      "libjvm_sha256": "e340425f9ef8d4280c9d64786d488d5699131b9d62333a2b990a47c0ca34b2de",
+      "family": 4,
+      "apk_sha256": "3b6ebd14d670d00147f0e567a8b45eb45176567bfa58e87367e815927f44d97f",
+      "strict_smoke": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "72a4999ff2e84a0291b2c89680d511e8",
+        "report_sha256": "ab1edeadcf8ac478ef9940e8fc9a8e200256d1abd9d9467f3168ce922e02360a",
+        "java_checks": null,
+        "loader_checks": null,
+        "jni_module": null
+      },
+      "strict_coverage": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "f03a8cbbee694dc3a474eaecd762bbbf",
+        "report_sha256": "9004db46033acdcaa39dd32e145f45f56b18f758c344f847af366d6fe6ffe14c",
+        "java_checks": 142,
+        "loader_checks": 26,
+        "jni_module": {
+          "supported": true,
+          "unsupported_exception": false
+        }
+      }
+    },
+    {
+      "artifact": "angelaura-21-arm64",
+      "abi": "arm64-v8a",
+      "libjava_sha256": "d3a81966293689f61a896f3b39637d8070e1b39f4e3580628e39539a76087217",
+      "libjvm_sha256": "df8665c98bc26493cc529896e2f493ed0a78500fe527667cd35f804b3abb749c",
+      "family": 6,
+      "apk_sha256": "b94e68f194297080340013f3ca523769808a1abcef9807185e3683c9de77149a",
+      "strict_smoke": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "05f348d0e1d64d609bdd12807ee058e6",
+        "report_sha256": "a69d096be9bf10e173487611a1e211c896d3922ed9309e5e30a78c7a399c0697",
+        "java_checks": null,
+        "loader_checks": null,
+        "jni_module": null
+      },
+      "strict_coverage": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "dc03ed3507214a3ebbf4ed5a7d831384",
+        "report_sha256": "0524d167ef4908d4c15cbb82314078861958cfe64fdaad5eb20190ed1790fa35",
+        "java_checks": 142,
+        "loader_checks": 26,
+        "jni_module": {
+          "supported": true,
+          "unsupported_exception": false
+        }
+      }
+    },
+    {
+      "artifact": "angelaura-25-arm64",
+      "abi": "arm64-v8a",
+      "libjava_sha256": "5619356d4fbb9893a7f38ac8679d5d7419ee17672f307f4bf5a699c504af5785",
+      "libjvm_sha256": "5e1edd62f3162e12191f31730bf48cd8f256493ad4d4caef4b4dc398e8510818",
+      "family": 6,
+      "apk_sha256": "9a43866c8b18e14ef2e3dd258fb456ab81e832aaf3c5874472a755777fb52115",
+      "strict_smoke": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "cfeae21ac5b84387a735e24ec16dce70",
+        "report_sha256": "1e5afa35da0ae3da80e8acb11580ae5e85a6c68031e4a9a9d69527c6183662ae",
+        "java_checks": null,
+        "loader_checks": null,
+        "jni_module": null
+      },
+      "strict_coverage": {
+        "result": "PASS",
+        "mode": "strict-checkjni-interpreter",
+        "run_id": "dd8d8d2976c14282b3414aca3155e014",
+        "report_sha256": "bfd2890dd92ef3c3c31344d33bf8bc90b4ffddee98bddee4e504f329a35c4269",
+        "java_checks": 142,
+        "loader_checks": 26,
+        "jni_module": {
+          "supported": true,
+          "unsupported_exception": false
+        }
+      }
+    }
+  ],
+  "independent_jre8_control": {
+    "result": "PASS",
+    "meaning": "reproduced VM failure without glibc-worker",
+    "strict_jni_supported": false,
+    "modes": {
+      "normal": {
+        "exit": 0,
+        "committed_copy": true,
+        "round_trip": true
+      },
+      "checkjni": {
+        "exit": 134,
+        "committed_copy": true,
+        "round_trip": false
+      }
+    },
+    "run_id": "84ebb586e28742f586995611fbe94246"
+  },
+  "sdk_consumers": "relocated ARM64 C/C++ compile and link PASS",
+  "report_negative_cases": {
+    "identity_module": {
+      "result": "PASS",
+      "negative_cases": [
+        "JRE_ARTIFACT_missing",
+        "JRE_ARTIFACT_duplicate",
+        "JRE_ARTIFACT_id",
+        "JRE_ARTIFACT_abi",
+        "JRE_ARTIFACT_major",
+        "JRE_ARTIFACT_archive_sha256",
+        "JRE_ARTIFACT_libjava_sha256",
+        "JRE_ARTIFACT_libjvm_sha256",
+        "JRE_ARTIFACT_family",
+        "JVM_ARTIFACT_missing",
+        "JVM_ARTIFACT_duplicate",
+        "JVM_ARTIFACT_family",
+        "JVM_ARTIFACT_libjava_sha256",
+        "JVM_ARTIFACT_libjvm_sha256",
+        "JVM_ARTIFACT_resident",
+        "JVM_ARTIFACT_vm_bound",
+        "JRE_EXEC_PROBE_missing",
+        "JRE_EXEC_PROBE_duplicate",
+        "JRE_EXEC_PROBE_artifact",
+        "JRE_EXEC_PROBE_mode",
+        "JRE_EXEC_PROBE_direct_started",
+        "JRE_EXEC_PROBE_direct_exit",
+        "JRE_EXEC_PROBE_proxy_exit"
+      ],
+      "baseline_negative_cases": [],
+      "module_negative_cases": [
+        "missing",
+        "supported",
+        "unsupported_exception"
+      ]
+    },
+    "launcher_baseline": {
+      "result": "PASS",
+      "negative_cases": [
+        "JRE_ARTIFACT_missing",
+        "JRE_ARTIFACT_duplicate",
+        "JRE_ARTIFACT_id",
+        "JRE_ARTIFACT_abi",
+        "JRE_ARTIFACT_major",
+        "JRE_ARTIFACT_archive_sha256",
+        "JRE_ARTIFACT_libjava_sha256",
+        "JRE_ARTIFACT_libjvm_sha256",
+        "JRE_ARTIFACT_family",
+        "JVM_ARTIFACT_missing",
+        "JVM_ARTIFACT_duplicate",
+        "JVM_ARTIFACT_family",
+        "JVM_ARTIFACT_libjava_sha256",
+        "JVM_ARTIFACT_libjvm_sha256",
+        "JVM_ARTIFACT_resident",
+        "JVM_ARTIFACT_vm_bound",
+        "JRE_EXEC_PROBE_missing",
+        "JRE_EXEC_PROBE_duplicate",
+        "JRE_EXEC_PROBE_artifact",
+        "JRE_EXEC_PROBE_mode",
+        "JRE_EXEC_PROBE_direct_started",
+        "JRE_EXEC_PROBE_direct_exit",
+        "JRE_EXEC_PROBE_proxy_exit"
+      ],
+      "baseline_negative_cases": [
+        "missing",
+        "duplicate",
+        "nested_begin",
+        "failed_exit",
+        "missing_main",
+        "baseline_after_main",
+        "unmatched_launcher_warning",
+        "runtime_warning",
+        "fatal_in_baseline"
+      ],
+      "module_negative_cases": []
+    },
+    "runtime_lifecycle": {
+      "result": "PASS",
+      "negative_cases": [
+        "missing",
+        "duplicate",
+        "singleton",
+        "foreign_shutdown_refused",
+        "stopped",
+        "restart_refused"
+      ]
+    }
+  }
+}

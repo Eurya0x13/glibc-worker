@@ -35,7 +35,7 @@ struct gw_jvm_hook {
 struct gw_jvm_adapter {
   pthread_mutex_t lock;
   int installed;
-  struct gw_jvm_profile_v1 profile;
+  struct gw_jvm_profile_v2 profile;
   const struct gw_jvm_shape *shape;
   const struct gw_loader_api_v1 *backend;
   void *libjava;

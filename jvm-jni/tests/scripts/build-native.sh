@@ -44,7 +44,7 @@ guest_flags=(-fPIC -O1 -g "${warnings[@]}" "${includes[@]}" -Iandroid-jni/build/
 guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1)
 lab_sources=(jvm-jni/tests/native/harness/bootstrap.c
   jvm-jni/tests/native/harness/jni.c jvm-jni/tests/native/harness/jni_dispatch.c jvm-jni/tests/native/harness/jre_host.c
-  jvm-jni/tests/native/harness/jre_layout_spike.c jvm-jni/tests/native/harness/loader_smoke.c
+  jvm-jni/tests/native/harness/pojav_jli.c jvm-jni/tests/native/harness/jre_layout_spike.c jvm-jni/tests/native/harness/loader_smoke.c
   jvm-jni/tests/native/harness/lab_suite.c
   jvm-jni/tests/native/harness/sigsys.c)
 
@@ -56,6 +56,8 @@ mapfile -t abi_flags <"$core_out/generated/abi-flags.txt"
 host_flags+=("${abi_flags[@]}")
 guest_flags+=("${abi_flags[@]}")
 cp "$core_out/libglibc_bridge.so" "$out/"
+"$ccndk" -shared "${host_flags[@]}" \
+  jvm-jni/tests/native/harness/jre_exec_compat.c -o "$out/libjre_exec_compat.so"
 "$ccndk" -shared "${host_flags[@]}" \
   "${lab_sources[@]}" -L"$out" -lglibc_bridge "$core_out/libglibc_bootstrap.a" \
   -llog -ldl -pthread \

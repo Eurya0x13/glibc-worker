@@ -26,7 +26,7 @@ GNU 侧由本项目 `build-guest.sh` 单独构建，通过环境变量显式指�
 
 ## 可选 VM 适配
 
-`include/jni_vm_adapter.h` 定义安装/恢复钩子表，必须在 bridge 初始化前注册。未请求 `GW_HOST_VM_ADAPTER` 时不调用它；没有注册却请求该 flag 会失败。保留 `GW_HOST_LEGACY_JRE17` 作为相同位的兼容名称。私有实现与固定 profile 属于 jvm-jni。
+`include/jni_vm_adapter.h` 定义安装/恢复钩子表，必须在 bridge 初始化前注册。未请求 `GW_HOST_VM_ADAPTER` 时不调用它；没有注册却请求该 flag 会失败。只使用 `GW_HOST_VM_ADAPTER`，已删除 JRE17 旧名称别名。私有实现与固定 profile 属于 jvm-jni。
 
 当前协议、导出名和公开 JNI loader ABI 保留。`host_bridge.h` v2 中的历史 `jre_library_path` 字段仅传给可选适配层；不会被本项目用于推断 JRE 私有布局。
 

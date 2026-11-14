@@ -229,6 +229,18 @@ def execute(args, output, attempt):
         check=True,
     )
 
+    subprocess.run(
+        adb
+        + [
+            "shell",
+            "run-as",
+            "dev.glibc.worker",
+            "mkdir",
+            "-p",
+            "files/android-jre",
+        ],
+        check=True,
+    )
     label = "运行冒烟测试" if args.group == "smoke" else "运行覆盖测试"
     subprocess.run(
         adb
@@ -238,7 +250,7 @@ def execute(args, output, attempt):
             "dev.glibc.worker",
             "touch" if args.array_copy_cache == "off" else "rm",
             *([] if args.array_copy_cache == "off" else ["-f"]),
-            "files/android-jre17/array-copy-cache-disabled",
+            "files/android-jre/array-copy-cache-disabled",
         ],
         check=True,
     )
@@ -250,7 +262,7 @@ def execute(args, output, attempt):
             "dev.glibc.worker",
             "touch" if args.payload_profile == "threshold" else "rm",
             *([] if args.payload_profile == "threshold" else ["-f"]),
-            "files/android-jre17/payload-threshold-enabled",
+            "files/android-jre/payload-threshold-enabled",
         ],
         check=True,
     )
@@ -262,7 +274,7 @@ def execute(args, output, attempt):
             "dev.glibc.worker",
             "touch" if args.array_copy_cache == "on" else "rm",
             *([] if args.array_copy_cache == "on" else ["-f"]),
-            "files/android-jre17/array-copy-cache-enabled",
+            "files/android-jre/array-copy-cache-enabled",
         ],
         check=True,
     )
@@ -274,7 +286,7 @@ def execute(args, output, attempt):
             "dev.glibc.worker",
             "touch" if args.payload_diagnostic else "rm",
             *([] if args.payload_diagnostic else ["-f"]),
-            "files/android-jre17/payload-diagnostic-enabled",
+            "files/android-jre/payload-diagnostic-enabled",
         ],
         check=True,
     )
@@ -363,6 +375,21 @@ def execute(args, output, attempt):
         if result.returncode == 0 and "APP_RESULT=" in result.stdout:
             report = output / "report.txt"
             report.write_text(result.stdout)
+            if "JRE_EXEC_PROBE " in result.stdout:
+                probe = subprocess.run(
+                    adb
+                    + [
+                        "shell",
+                        "run-as",
+                        "dev.glibc.worker",
+                        "cat",
+                        "files/android-jre/launcher-probe.log",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                (output / "launcher-probe.log").write_text(probe.stdout)
 
             evidence = verify(
                 result.stdout,
@@ -452,7 +479,7 @@ def execute(args, output, attempt):
                                 "run-as",
                                 "dev.glibc.worker",
                                 "cat",
-                                "files/android-jre17/payload-stages.bin",
+                                "files/android-jre/payload-stages.bin",
                             ]
                         )
                     )
@@ -465,7 +492,7 @@ def execute(args, output, attempt):
                         "run-as",
                         "dev.glibc.worker",
                         "cat",
-                        "files/android-jre17/payload-samples.bin",
+                        "files/android-jre/payload-samples.bin",
                     ]
                 )
                 (output / "payload-samples.bin").write_bytes(raw)

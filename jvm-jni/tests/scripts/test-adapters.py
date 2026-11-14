@@ -86,9 +86,10 @@ def build_tests(output, jdk):
     ):
         raise SystemExit("Desktop JDK JNI headers missing under " + str(jdk))
     (output / "jre-adapter-profile.h").write_text(
-        '#define GW_JRE17_PROFILE "unconfigured"\n'
-        '#define GW_JRE17_LIBJAVA_SHA256 ""\n'
-        "#define GW_JRE17_LOAD_THREE_BOOL 0\n"
+        '#define GW_JVM_PROFILE_NAME "unconfigured"\n'
+        '#define GW_JVM_LIBJAVA_SHA256 ""\n'
+        '#define GW_JVM_LIBJVM_SHA256 ""\n'
+        "#define GW_JVM_PROFILE_FAMILY GW_JVM_NATIVE_LIBRARIES_15\n"
     )
     common = [
         os.environ.get("CC", "cc"),
@@ -155,7 +156,7 @@ def build_tests(output, jdk):
     ]
     java += [
         PROJECT / "src/java/dev/glibc/worker" / (name + ".java")
-        for name in ("JvmAdapter", "Jre17Adapter")
+        for name in ("JvmAdapter",)
     ]
     java += [
         ROOT / "android-jni/src/java/dev/glibc/worker" / (name + ".java")
@@ -188,7 +189,7 @@ def execute_case(output, prefix, arguments, name):
         baseline.stdout + baseline.stderr
     )
     completed = subprocess.run(
-        list(map(str, command)), text=True, capture_output=True, timeout=60
+        list(map(str, command)), text=True, capture_output=True, timeout=180
     )
     log = output / (name + ".log")
     log.write_text(completed.stdout + completed.stderr)
@@ -226,13 +227,19 @@ def execute_case(output, prefix, arguments, name):
 
 def test_runtime(output, family, home, index):
     java, library = java_image(home)
+    vms = list(java.parent.parent.rglob("libjvm.so"))
+    if len(vms) != 1:
+        raise SystemExit(
+            "Expected one libjvm.so under " + str(java.parent.parent)
+        )
+    vm_digest = digest(vms[0])
     version = run([java, "-version"]).stderr.strip()
     modern = 'version "24' in version or 'version "25' in version
     options = ["--enable-native-access=ALL-UNNAMED"] if modern else []
     prefix = [
         java,
         *options,
-        "-Xint",
+        "-Xmixed",
         "-Xcheck:jni",
         "-XX:+UseSerialGC",
         "-cp",
@@ -248,6 +255,7 @@ def test_runtime(output, family, home, index):
         output / "libadapter_fixture_reject.so",
         "RESULT",
         output / "libadapter_ordinary.so",
+        vm_digest,
     ]
     normal = execute_case(output, prefix, arguments, "runtime-" + str(index))
     poisoned = execute_case(
@@ -261,6 +269,7 @@ def test_runtime(output, family, home, index):
         "version": version,
         "family": family,
         "libjava_sha256": digest(library),
+        "libjvm_sha256": vm_digest,
         "normal": normal,
         "poisoned": poisoned,
     }

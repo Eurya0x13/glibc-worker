@@ -80,7 +80,7 @@ Guest GetVersion 返回协商值，GetEnv 和 AttachCurrentThread 拒绝更高�
 
 ## 配置和兼容边界
 
-v2 配置保留历史 `jre_library_path` 字段，仅交给可选适配器。`GW_HOST_LEGACY_JRE17` 保留为 `GW_HOST_VM_ADAPTER` 同位别名；请求适配器却未注册会在初始化早期失败。`GW_HOST_DIRECT_IMAGES` 允许直接映像；默认内容匹配要求宿主提前部署相同原始二进制。路径可执行性仍受 Android 策略限制。
+v2 配置保留历史 `jre_library_path` 字段，仅交给可选适配器。启用适配器只使用 `GW_HOST_VM_ADAPTER`，旧名称不再提供；请求适配器却未注册会在初始化早期失败。`GW_HOST_DIRECT_IMAGES` 允许直接映像；默认内容匹配要求宿主提前部署相同原始二进制。路径可执行性仍受 Android 策略限制。
 
 大数组策略见 [副本缓存](ARRAY_COPY_CACHE.md)。Host/Guest 只能共享约定的 POD、地址与长度，allocator、FILE、pthread、异常对象及 JNI 引用的所有权不能跨 libc 自由互换。
 

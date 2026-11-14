@@ -1,11 +1,11 @@
 #define _GNU_SOURCE
 #include "adapter_internal.h"
-#include "jre17_adapter.h"
 #include "jni_vm_adapter.h"
 #include "dlopen_backend.h"
 #include <dlfcn.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* Drops every JNI reference, the libjava handle and all resolved ids. Safe
  * only when no proxy is reachable from the VM: install never happened, or
@@ -77,13 +77,13 @@ static int resolve_helper(JNIEnv *env) {
 /* Delegates hashing to the Java helper and compares with the profile
  * digest; any pending exception counts as a mismatch. Only past this gate
  * is libjava dlopened. */
-static int verify_image(JNIEnv *env, const char *path) {
+static int verify_image(JNIEnv *env, const char *path, const char *expected) {
   jstring file = (*env)->NewStringUTF(env, path);
   if (!file) {
     return 0;
   }
 
-  jstring digest = (*env)->NewStringUTF(env, gw_jvm.profile.libjava_sha256);
+  jstring digest = (*env)->NewStringUTF(env, expected);
   jboolean matches = JNI_FALSE;
   if (digest) {
     matches = (*env)->CallStaticBooleanMethod(env, gw_jvm.helper, gw_jvm.verify,
@@ -125,12 +125,23 @@ static int resolve_fields(JNIEnv *env) {
  * original export via dlsym, the pinned owner class, and the Java method
  * by exact name and descriptor. An unexpected libjava leaves the VM
  * untouched. */
-static int resolve_hooks(JNIEnv *env) {
+static int resolve_hooks(JNIEnv *env, const char *path) {
+  struct stat expected;
+  if (stat(path, &expected)) {
+    return 0;
+  }
   for (unsigned i = 0; i < 3; i++) {
     const struct gw_jvm_hook_shape *shape = &gw_jvm.shape->hooks[i];
     struct gw_jvm_hook *hook = &gw_jvm.hooks[i];
     void *original = dlsym(gw_jvm.libjava, shape->symbol);
     if (!original) {
+      return 0;
+    }
+    Dl_info origin = {0};
+    struct stat actual;
+    if (!dladdr(original, &origin) || !origin.dli_fname ||
+        stat(origin.dli_fname, &actual) || actual.st_dev != expected.st_dev ||
+        actual.st_ino != expected.st_ino) {
       return 0;
     }
 
@@ -160,6 +171,29 @@ static int resolve_hooks(JNIEnv *env) {
   }
 
   return 1;
+}
+
+/* An attested pathname is insufficient: require an already resident libjava
+ * whose VM dependency is the VM selected by this JNIEnv. Never load another
+ * libjava/JVM merely to probe compatibility. Loaded artifacts must remain
+ * immutable throughout installation and use (no file-replacement races). */
+static int verify_running_vm(JNIEnv *env) {
+  JavaVM *selected = NULL, *listed = NULL;
+  if ((*env)->GetJavaVM(env, &selected) != JNI_OK || !selected) {
+    return 0;
+  }
+  jint (*enumerate)(JavaVM **, jsize, jsize *) =
+      (void *)dlsym(gw_jvm.libjava, "JNI_GetCreatedJavaVMs");
+  Dl_info source = {0}, target = {0};
+  if (!enumerate || !dladdr((void *)enumerate, &source) ||
+      !dladdr((void *)(*selected)->GetEnv, &target) ||
+      source.dli_fbase != target.dli_fbase) {
+    return 0;
+  }
+  jsize count = 0;
+  return enumerate(&listed, 1, &count) == JNI_OK && count == 1 &&
+         listed == selected && source.dli_fname &&
+         verify_image(env, source.dli_fname, gw_jvm.profile.libjvm_sha256);
 }
 
 /* Try every original, including registrations after a partial failure, and
@@ -229,13 +263,23 @@ static int prepare(JNIEnv *env, const char *path,
                           "Cannot resolve JVM adapter helper");
   }
 
-  if (!verify_image(env, path)) {
+  if (!verify_image(env, path, gw_jvm.profile.libjava_sha256)) {
     return gw_dlopen_fail(error, GW_E_IMAGE,
                           "JVM adapter profile does not match libjava SHA256");
   }
 
-  gw_jvm.libjava = dlopen(path, RTLD_NOW);
-  if (!gw_jvm.libjava || !resolve_fields(env) || !resolve_hooks(env)) {
+  gw_jvm.libjava = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+  if (!gw_jvm.libjava) {
+    return gw_dlopen_fail(
+        error, GW_E_IMAGE,
+        "Reviewed libjava path is not resident in target process");
+  }
+  if (!verify_running_vm(env)) {
+    return gw_dlopen_fail(
+        error, GW_E_IMAGE,
+        "Target VM identity or actual libjvm SHA256 mismatch");
+  }
+  if (!resolve_fields(env) || !resolve_hooks(env, path)) {
     return gw_dlopen_fail(
         error, GW_E_BRIDGE,
         "JVM classes, fields or native methods differ from profile");
@@ -281,6 +325,11 @@ int gw_jvm_adapter_install(JNIEnv *env, const char *directory,
   }
 
   if (rc == GW_OK) {
+    printf(
+        "JVM_ARTIFACT {\"family\":%u,\"libjava_sha256\":\"%s\","
+        "\"libjvm_sha256\":\"%s\",\"resident\":true,\"vm_bound\":true}\n",
+        gw_jvm.profile.family, gw_jvm.profile.libjava_sha256,
+        gw_jvm.profile.libjvm_sha256);
     printf("LOAD_PROXY installed=1 family=%u profile=%s libjava_sha256=%s\n",
            gw_jvm.profile.family, gw_jvm.profile.name,
            gw_jvm.profile.libjava_sha256);
@@ -316,16 +365,6 @@ int gw_jvm_adapter_restore(JNIEnv *env, struct gw_loader_error *error) {
   return rc;
 }
 
-/* Source and binary compatibility for existing JRE17 embedders. */
-int gw_jre17_adapter_install(JNIEnv *e, const char *d, const char *p,
-                             struct gw_loader_error *error) {
-  return gw_jvm_adapter_install(e, d, p, error);
-}
-
-/* Restore counterpart of the compatibility entry above. */
-int gw_jre17_adapter_restore(JNIEnv *e, struct gw_loader_error *error) {
-  return gw_jvm_adapter_restore(e, error);
-}
 /* v1 VM-adapter table; registration keeps this pointer until process exit,
  * so it must have static storage. */
 static const struct gw_jni_vm_adapter_v1 adapter = {

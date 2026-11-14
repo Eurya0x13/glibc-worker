@@ -22,14 +22,19 @@ def verify(
             + status[1]
             + (": " + diagnostic[0] if diagnostic else "")
         )
+    launch_method = (
+        "JLI_Launch" if "JRE_STAGE=JLI_Launch" in report else "JNI_CreateJavaVM"
+    )
     required = [
         "APP_RESULT=PASS",
         "JAVA_ART_RESUMED",
         "JNI_TARGET=Android-JRE-HotSpot",
         (
-            "JRE_STAGE=JNI_CreateJavaVM checkjni=off interpreter=off benchmark_jit=1"
+            "JRE_STAGE="
+            + launch_method
+            + " checkjni=off interpreter=off benchmark_jit=1"
             if benchmark_jit
-            else "JRE_STAGE=JNI_CreateJavaVM checkjni=on"
+            else "JRE_STAGE=" + launch_method + " checkjni=on"
         ),
         "JRE_CREATE_RESULT=0",
         "distinct=1",
@@ -44,6 +49,85 @@ def verify(
         "Guest raw thread exit observed=1",
         "SMOKE_TEST_RESULT=PASS group=" + group,
     ]
+
+    artifact_rows = re.findall(
+        r"^JRE_ARTIFACT (\{[^\n]+\})$", report, re.MULTILINE
+    )
+    vm_rows = re.findall(r"^JVM_ARTIFACT (\{[^\n]+\})$", report, re.MULTILINE)
+    if len(artifact_rows) != 1 or len(vm_rows) != 1:
+        raise ValueError("Missing unique Android JRE artifact identity")
+    artifact = json.loads(artifact_rows[0])
+    catalog = json.loads(
+        (Path(__file__).parent / "config/android-jres.json").read_text()
+    )
+    pins = [p for p in catalog if p["id"] == artifact.get("id")]
+    if len(pins) != 1:
+        raise ValueError("Unknown Android JRE artifact identity")
+    pin = pins[0]
+    if launch_method != (
+        "JLI_Launch" if pin["startup"] == "pojav-layout" else "JNI_CreateJavaVM"
+    ):
+        raise ValueError("Android JRE artifact startup method mismatch")
+    if pin["startup"] == "pojav-layout":
+        probes = re.findall(
+            r"^JRE_EXEC_PROBE (\{[^\n]+\})$", report, re.MULTILINE
+        )
+        if len(probes) != 1:
+            raise ValueError("Missing Android JRE artifact launcher probe")
+        probe = json.loads(probes[0])
+        direct = probe.get("direct_started")
+        direct_exit = probe.get("direct_exit")
+        valid_direct = (
+            type(direct) is bool
+            and type(direct_exit) is int
+            and (
+                (not direct and direct_exit == -1)
+                or (direct and 0 <= direct_exit <= 255)
+            )
+        )
+        if (
+            not valid_direct
+            or set(probe)
+            != {
+                "artifact",
+                "mode",
+                "direct_started",
+                "direct_exit",
+                "proxy_exit",
+            }
+            or type(probe.get("proxy_exit")) is not int
+            or probe.get("artifact") != pin["id"]
+            or probe.get("mode") != "linker64"
+            or probe.get("proxy_exit") != 0
+        ):
+            raise ValueError("Android JRE artifact linker64 proxy failed")
+    expected_artifact = {
+        "id": pin["id"],
+        "abi": pin["abi"],
+        "major": pin["major"],
+        "archive_sha256": pin["archive_sha256"],
+        "libjava_sha256": pin["libjava"]["sha256"],
+        "libjvm_sha256": pin["libjvm"]["sha256"],
+        "family": pin["family"],
+    }
+    selected_vm = json.loads(vm_rows[0])
+    if (
+        any(type(artifact.get(k)) is not int for k in ("major", "family"))
+        or type(selected_vm.get("family")) is not int
+    ):
+        raise ValueError("Android JRE artifact has invalid numeric fields")
+    if any(
+        type(selected_vm.get(k)) is not bool for k in ("resident", "vm_bound")
+    ):
+        raise ValueError("Android JRE artifact has invalid VM binding flags")
+    if artifact != expected_artifact or selected_vm != {
+        "family": pin["family"],
+        "libjava_sha256": pin["libjava"]["sha256"],
+        "libjvm_sha256": pin["libjvm"]["sha256"],
+        "resident": True,
+        "vm_bound": True,
+    }:
+        raise ValueError("Android JRE artifact or selected-VM mismatch")
 
     runtime_rows = re.findall(
         r"^RUNTIME_LIFECYCLE_TEST (\{[^\n]+\})$", report, re.MULTILINE
@@ -103,7 +187,7 @@ def verify(
             raise ValueError("Missing JNI version capability evidence")
         version_check = json.loads(version_match[1])
         if version_check != {
-            "capability": 0x000A0000,
+            "capability": pin["jni_capability"],
             "getenv_current": True,
             "getenv_future_rejected": True,
             "attach_future_rejected": True,
@@ -290,13 +374,73 @@ def verify(
             raise ValueError("Missing evidence: " + marker)
 
     for marker in (
-        "WARNING in native method",
         "FATAL ERROR in native method",
         "JNI DETECTED ERROR",
         "=FAIL",
     ):
         if marker in report:
             raise ValueError("Runtime diagnostic: " + marker)
+
+    launcher_jni_baseline = None
+    module_capability = None
+    module_rows = re.findall(
+        r"^JNI_MODULE_TEST (\{[^\n]+\})$", report, re.MULTILINE
+    )
+    if group == "coverage":
+        supported = pin["jni_capability"] >= 0x00090000
+        module_capability = {
+            "supported": supported,
+            "unsupported_exception": not supported,
+        }
+        parsed = [json.loads(row) for row in module_rows]
+        if len(parsed) != 1 or any(
+            row != module_capability
+            or any(type(value) is not bool for value in row.values())
+            for row in parsed
+        ):
+            raise ValueError("JNI module capability evidence failed")
+    diagnostic_report = report
+    if pin.get("launcher_jni_baseline"):
+        baselines = re.findall(
+            r"^JRE_LAUNCHER_BASELINE_BEGIN\n(.*?)\nJRE_LAUNCHER_BASELINE_END exit=0$",
+            report,
+            re.MULTILINE | re.DOTALL,
+        )
+        if (
+            len(baselines) != 1
+            or report.count("JRE_LAUNCHER_BASELINE_BEGIN\n") != 1
+            or report.count("JRE_LAUNCHER_BASELINE_END ") != 1
+            or baselines[0].count("JRE_LAUNCHER_BASELINE_MAIN\n") != 1
+        ):
+            raise ValueError("Missing unique JRE launcher CheckJNI baseline")
+        before, after = baselines[0].split("JRE_LAUNCHER_BASELINE_MAIN\n")
+        if "WARNING in native method" in after:
+            raise ValueError("CheckJNI diagnostic after baseline main")
+        diagnostic_report = re.sub(
+            r"^JRE_LAUNCHER_BASELINE_BEGIN\n.*?\nJRE_LAUNCHER_BASELINE_END exit=0\n",
+            "",
+            report,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        if diagnostic_report.count("JRE_JLI_MAIN\n") != 1:
+            raise ValueError("Missing unique JRE launcher main boundary")
+        prefix, runtime = diagnostic_report.split("JRE_JLI_MAIN\n")
+        warnings = r"^WARNING in native method:[^\n]*$"
+        expected = re.findall(warnings, before, re.MULTILINE)
+        observed = re.findall(warnings, prefix, re.MULTILINE)
+        if observed != expected:
+            raise ValueError(
+                "CheckJNI launcher warnings differ from no-bridge baseline"
+            )
+        diagnostic_report = (
+            re.sub(warnings, "", prefix, flags=re.MULTILINE) + runtime
+        )
+        launcher_jni_baseline = {
+            "before_main_warnings": len(observed),
+            "post_main_warnings": 0,
+        }
+    if "WARNING in native method" in diagnostic_report:
+        raise ValueError("Runtime diagnostic: WARNING in native method")
 
     uid = re.search(r"APP_CONTEXT pid=(\d+) uid=(\d+)", report)
     if uid is None or int(uid[2]) < 10000:
@@ -357,6 +501,9 @@ def verify(
         "resource_capacity": resource_rows,
         "bridge_lifecycle": lifecycle,
         "runtime_lifecycle": runtime_lifecycle,
+        "jre_artifact": artifact,
+        "launcher_jni_baseline": launcher_jni_baseline,
+        "jni_module_capability": module_capability,
         "descriptor_boundaries": descriptor_rows,
         "failure_boundaries": failure_rows,
         "execution_scopes": scope_rows,
