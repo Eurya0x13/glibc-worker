@@ -20,9 +20,15 @@ Host 线程首次进入桥时绑定独立上下文及 Guest worker，保持到�
 
 初始容量并非资源预算：每个绑定上下文还需要线程栈、VM 附着和私有状态。增长可能受操作系统和 VM 限制而失败。上下文复用不重置事件 epoch，也不丢弃已经发布的帧目录；关闭和永久隔离均不意味着可安全撤销任意在途工作。
 
-动态目录按索引定位不需要链表遍历，但线程维护仍有线性路径：领取空闲上下文、Host 控制线程以及 Guest owner 的 `fg_pump` 会扫描上下文容量。owner 的扫描还发生在命令处理过程中，不能统一视为启动成本；容量随高水位保留，线程退出不消除该扫描成本。普通 Host 工作线程的已绑定调用不执行 owner 扫描；上下文扩容后的主线程性能需单独测量，不能由工作线程基准外推。
+Guest owner 的 `fg_pump` 不扫描上下文容量。Host 发布 `FB_HOST_REQUEST`、Guest worker 发布 `FB_DEAD` 后，把稳定上下文索引投递到共享待办入口并通知 owner。无待办的常规泵送只读入口一次，创建/回收成本按本批有变化的上下文计；单次处理有限快照，之后继续 owner 自己的命令，不持续追赶新投递。
 
-协议升级为 v5。启动握手检查共享区、上下文/RPC/call 的布局大小、初始上下文和帧容量、叶页宽度及模块上限。Host/Guest 必须成套重编部署，不能混用 v4。诊断 handoff 明细只采样前 12 层，较深调用继续执行并计入其他统计；该诊断窗口不是执行深度上限。
+待办是多生产者、单 owner 消费的索引栈。节点字段内嵌于稳定上下文，零为入口哨兵，不分配事件对象，也不把引用池换成链表。一个上下文最多挂入一次，重复投递合并；其 release RMW 仍发布最新状态。owner 先摘取批次、保存下一索引，再 acquire-clear 挂入标志，最后检查状态。清除之前的更新由该 acquire 观察；清除之后的更新重新入栈并通知，因此不能把合并投递写成普通 load 后提前返回。保存 next 前不能允许重投，重置可复用字段也不能清除待办标志或 next。只有 owner 消费，生产者只前插、不读取旧入口节点，因此入口索引复用不会产生删除节点时的 ABA 问题。
+
+这不是 FIFO 事件日志：不同上下文没有跨线程排序保证，处理的是最新生命周期状态。单个上下文的创建、退出和复用仍由原有 `FB_HOST_REQUEST → FB_RUNNING → FB_DEAD → FB_JOINED → FB_FREE` 协议约束；启动失败仍反馈 `FB_ATTACH_FAILED`。在状态发布与投递之间暂停的生产者会延后该通知，未增加 deadline 或取消保证。
+
+领取空闲上下文、Host 控制线程以及一次性关闭/诊断仍有容量扫描，本轮没有改动这些路径或 8 线程等待策略。普通 Host 工作线程的已绑定调用本来就不执行 owner 维护；其基准不能代替 owner 测量。
+
+私有协议为 v6，新增 owner 待办字段。启动握手检查共享区、上下文/RPC/call 的布局大小、初始上下文和帧容量、叶页宽度及模块上限。Host/Guest 必须成套重编部署，不能混用 v5 或更早版本。诊断 handoff 明细只采样前 12 层，较深调用继续执行并计入其他统计；该诊断窗口不是执行深度上限。
 
 ## 类注册与交接
 
@@ -50,6 +56,9 @@ Host 线程首次进入桥时绑定独立上下文及 Guest worker，保持到�
 ## 验证入口
 
 - `python3 android-jni/tests/context_pages.py`：ASan/UBSan 的并发领取、稳定地址、96 层帧、页分配失败与恢复。
+- `python3 android-jni/tests/owner_work.py --output PATH`：生产 `fg_pump` 的真实 pthread 创建/回收、失败恢复与复用；32 生产者投递、合并和等待通知；将 4096 容量的扩展上下文页设为 `PROT_NONE` 后验证无待办泵送不访问它们。默认 ASan/UBSan，`--sanitizer thread` 改用 TSan。native 执行器是空替身，不证明 JNI 业务行为。
+- 同一入口加 `--baseline-ref COMMIT`：固定夹具、C `-O1`，16/256/1024/4096 历史容量下各 1 轮预热和 10 轮测量，十对平衡 A/B，每个容量新进程。`--android-ndk PATH --ffi-include PATH --device SERIAL` 在真机 shell UID 下运行 standalone bionic 构建，并保留热状态。记录的是生产泵送代码的批次平均 CPU 成本，不是 GNU Guest 完整 TLS/JNI/RPC 往返延迟，不能外推游戏收益。
+- 已保留的 owner 十对 A/B、源码散列和回归证据见 [owner-inbox-arm64.json](../tests/results/owner-inbox-arm64.json)。
 - `tests/failures.py`：生产 Host/Guest RPC 的分配失败、应急异常处理、私有记录/TLS/worker 失败及恢复，VM/worker 使用替身。
 - `tests/bindings.py` / `tests/resources.py`：真实 libffi、类更新重入拒绝、交接、注销失败隔离，以及 Zig owner 目录增长和 OOM。
 - `jvm-jni/tests/coverage/run.sh --device SERIAL`：真实 Android JRE 下三轮 Host/Guest 各 32 线程、32 层重入、共享依赖注册、后台顶层逆向归属、歧义/混合批拒绝与卸载后的所有权检查。既有 scope、mutex、JNI、回滚和最终零引用/closure 检查继续执行。

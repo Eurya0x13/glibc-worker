@@ -1,0 +1,495 @@
+{
+  "result": "PASS",
+  "validation": {
+    "asan_ubsan": {
+      "summary_sha256": "e7d33c5916ede529cb1b8a16c2782435e22aab1cd4e96cb35cf1eb203ea8b42d",
+      "details": {
+        "result": "PASS",
+        "validation": {
+          "result": "PASS",
+          "concurrent_posts": 64000,
+          "coalesced_posts": 64000,
+          "worker_lifecycles": 98,
+          "coalescing": true,
+          "requeue": true,
+          "idle_protected_capacity": 4096,
+          "worker_faults": 2
+        }
+      }
+    },
+    "tsan": {
+      "summary_sha256": "e7d33c5916ede529cb1b8a16c2782435e22aab1cd4e96cb35cf1eb203ea8b42d",
+      "details": {
+        "result": "PASS",
+        "validation": {
+          "result": "PASS",
+          "concurrent_posts": 64000,
+          "coalesced_posts": 64000,
+          "worker_lifecycles": 98,
+          "coalescing": true,
+          "requeue": true,
+          "idle_protected_capacity": 4096,
+          "worker_faults": 2
+        }
+      }
+    },
+    "failures": {
+      "summary_sha256": "eeda9ceab3821ae96085722a6a779ab228cb0d96fab1bb5badf937fd996472e1",
+      "details": {
+        "result": "PASS",
+        "checks": 16414,
+        "depth_recovery": true,
+        "oom_rollback": true,
+        "id_index_oom_rollback": true,
+        "context_status": true
+      }
+    },
+    "context_pages": {
+      "summary_sha256": "3f03dddbaa66c0706da691da34198ede504f7b387a3c2ca71cde7f2e2f653680",
+      "details": {
+        "result": "PASS",
+        "checks": 1308,
+        "threads": 48,
+        "depth": 96,
+        "mapping_faults": 5,
+        "stable_addresses": true,
+        "unique_contexts": true
+      }
+    },
+    "loader_transport": {
+      "summary_sha256": "d4f2d1c8393e03cc17a457d08a222c3f3061dcfa5cca7e64a091fd1471619868",
+      "details": {
+        "result": "PASS",
+        "scenarios": 15,
+        "cleanup_order": true,
+        "quarantine": true,
+        "exception_preserved": true,
+        "pending_call_retained": true,
+        "late_reply": true,
+        "supervisor_disposal": true
+      }
+    },
+    "lifecycle": {
+      "summary_sha256": "08a66a9b0ae633206f11790214f8443cb672475725b522adc6a3f485483f07c1",
+      "details": {
+        "result": "PASS",
+        "scenarios": 9,
+        "singleton": true,
+        "concurrent_start_excluded": true,
+        "owner_thread": true,
+        "terminal_shutdown": true,
+        "startup_failure_retained": true,
+        "unsafe_shutdown_retained": true
+      }
+    },
+    "wake_filter_tsan": {
+      "details": {
+        "result": "PASS",
+        "concurrent_posts": 64000,
+        "coalesced_posts": 64000,
+        "worker_lifecycles": 98,
+        "coalescing": true,
+        "requeue": true,
+        "idle_protected_capacity": 4096,
+        "worker_faults": 2
+      },
+      "compile": [
+        "/usr/sbin/clang",
+        "-DGW_FUTEX_WAKE_FILTER=1",
+        "-std=gnu17",
+        "-O1",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-Wl,--gc-sections",
+        "-Wl,--wrap=calloc",
+        "-Wl,--wrap=pthread_create",
+        "-fsanitize=thread",
+        "-fno-omit-frame-pointer",
+        "-I/mnt/data/projects/glibc-worker/android-jni/src/common",
+        "-I/mnt/data/projects/glibc-worker/android-jni/src/guest",
+        "-I/mnt/data/projects/glibc-worker/android-jni/include",
+        "-I/mnt/data/projects/glibc-worker/core/include",
+        "-I/mnt/data/projects/glibc-worker/bionic-dlopen/include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/jni-include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/tsan",
+        "/mnt/data/projects/glibc-worker/android-jni/tests/native/owner_work.c",
+        "/mnt/data/projects/glibc-worker/android-jni/src/guest/full_guest.c",
+        "/mnt/data/projects/glibc-worker/android-jni/src/guest/rpc.c",
+        "-pthread",
+        "-o",
+        "/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/filtered/owner_work"
+      ],
+      "log_sha256": "25850b4ed6e22e57b446951f0d05cb56d2e7ac70b3f8427f59e7bd7dc66728dd"
+    },
+    "android_coverage": {
+      "summary_sha256": "bb0234ff6cb1903ffeaf5defdfe98af73e2e2cd55d49560f9595633570a9fa99",
+      "report_sha256": "dd27724781b3d37b638d88487d0fe5ee2e803ded90843521244cade9214ee1cf",
+      "result": "PASS",
+      "run_id": "7196c89b4968477da2a178584252b526",
+      "abi": "arm64-v8a",
+      "apk_sha256": "6827241832119f5cbb85105c55ca4bd4345e485a819638e63ee3ad208dd05244",
+      "installed_apk_sha256": "6827241832119f5cbb85105c55ca4bd4345e485a819638e63ee3ad208dd05244",
+      "jvm_mode": "strict-checkjni-interpreter",
+      "java_checks": 142,
+      "backend_checks": 26,
+      "slots_touched": 234,
+      "slots_total": 235,
+      "dynamic_capacity": [
+        {
+          "cycle": 0,
+          "depth": 32,
+          "threads": 32,
+          "guest_threads": 32,
+          "contexts": 80,
+          "initial_contexts": 16
+        },
+        {
+          "cycle": 1,
+          "depth": 32,
+          "threads": 32,
+          "guest_threads": 32,
+          "contexts": 80,
+          "initial_contexts": 16
+        },
+        {
+          "cycle": 2,
+          "depth": 32,
+          "threads": 32,
+          "guest_threads": 32,
+          "contexts": 80,
+          "initial_contexts": 16
+        }
+      ],
+      "runtime_lifecycle": {
+        "result": "PASS",
+        "singleton": true,
+        "foreign_shutdown_refused": true,
+        "stopped": true,
+        "restart_refused": true
+      },
+      "bridge_lifecycle": {
+        "loads": 13,
+        "unloads": 13,
+        "constructors": 16,
+        "destructors": 13,
+        "calls": 6122,
+        "depth": 33,
+        "globals": 0,
+        "weak": 0,
+        "locals": 0,
+        "closures": 0,
+        "threads": 1,
+        "errors": 0,
+        "expected_errors": 0,
+        "coverage": 234
+      },
+      "jre_artifact_id": "pojav-17-ec28559-arm64-v8a"
+    },
+    "android_smoke": {
+      "summary_sha256": "22f8edd25fa0024c0055bc74fcfa0f32d888f0dbbe787739bc3bba5577d7fdc2",
+      "report_sha256": "6003899ce2867d45225590fbed048c2bad609245c2a96b35770b7632cfc96100",
+      "result": "PASS",
+      "run_id": "bbedfe3059f74b1eb1319f60bf119402",
+      "abi": "arm64-v8a",
+      "apk_sha256": "6827241832119f5cbb85105c55ca4bd4345e485a819638e63ee3ad208dd05244",
+      "installed_apk_sha256": "6827241832119f5cbb85105c55ca4bd4345e485a819638e63ee3ad208dd05244",
+      "jvm_mode": "strict-checkjni-interpreter",
+      "java_checks": null,
+      "backend_checks": null,
+      "slots_touched": 0,
+      "slots_total": 0,
+      "dynamic_capacity": [],
+      "runtime_lifecycle": {
+        "result": "PASS",
+        "singleton": true,
+        "foreign_shutdown_refused": true,
+        "stopped": true,
+        "restart_refused": true
+      },
+      "bridge_lifecycle": null,
+      "jre_artifact_id": "pojav-17-ec28559-arm64-v8a"
+    }
+  },
+  "pairs": 10,
+  "order": [
+    "A0",
+    "B1",
+    "B2",
+    "A3",
+    "B4",
+    "A5",
+    "A6",
+    "B7",
+    "A8",
+    "B9",
+    "B10",
+    "A11",
+    "B12",
+    "A13",
+    "A14",
+    "B15",
+    "A16",
+    "B17",
+    "B18",
+    "A19"
+  ],
+  "comparison": [
+    {
+      "capacity": 16,
+      "baseline_median_cpu_us": 0.16005787500000002,
+      "candidate_median_cpu_us": 0.013355625,
+      "paired_median_percent": -90.77900220288575,
+      "candidate_lower_pairs": 10,
+      "per_run_cpu_us": {
+        "A0": 0.159221,
+        "B1": 0.01323075,
+        "B2": 0.013346,
+        "A3": 0.16088475,
+        "B4": 0.01213475,
+        "A5": 0.173029,
+        "A6": 0.15895175,
+        "B7": 0.01469225,
+        "A8": 0.20064400000000002,
+        "B9": 0.01336525,
+        "B10": 0.0162595,
+        "A11": 0.159231,
+        "B12": 0.013202,
+        "A13": 0.12105774999999999,
+        "A14": 0.1279135,
+        "B15": 0.013192,
+        "A16": 0.17269225,
+        "B17": 0.016269,
+        "B18": 0.01618275,
+        "A19": 0.17592275000000002
+      }
+    },
+    {
+      "capacity": 256,
+      "baseline_median_cpu_us": 3.03409625,
+      "candidate_median_cpu_us": 0.014577,
+      "paired_median_percent": -99.51914263030575,
+      "candidate_lower_pairs": 10,
+      "per_run_cpu_us": {
+        "A0": 3.037721,
+        "B1": 0.0161445,
+        "B2": 0.01213475,
+        "A3": 3.0140284999999998,
+        "B4": 0.0145675,
+        "A5": 3.07377875,
+        "A6": 3.04999125,
+        "B7": 0.04389425,
+        "A8": 3.03962525,
+        "B9": 0.01456725,
+        "B10": 0.016173,
+        "A11": 3.0491822500000003,
+        "B12": 0.016298,
+        "A13": 3.0008559999999997,
+        "A14": 3.0211827500000004,
+        "B15": 0.013221,
+        "A16": 3.023298,
+        "B17": 0.014586499999999999,
+        "B18": 0.013279000000000001,
+        "A19": 3.0304715
+      }
+    },
+    {
+      "capacity": 1024,
+      "baseline_median_cpu_us": 15.314595875,
+      "candidate_median_cpu_us": 0.012250125,
+      "paired_median_percent": -99.91972939132083,
+      "candidate_lower_pairs": 10,
+      "per_run_cpu_us": {
+        "A0": 15.2387785,
+        "B1": 0.0132215,
+        "B2": 0.008106000000000002,
+        "A3": 15.321904,
+        "B4": 0.009692500000000001,
+        "A5": 15.3597505,
+        "A6": 15.26396175,
+        "B7": 0.014577,
+        "A8": 15.143077,
+        "B9": 0.01217325,
+        "B10": 0.013240499999999999,
+        "A11": 15.3282505,
+        "B12": 0.012231,
+        "A13": 15.274346,
+        "A14": 15.30728775,
+        "B15": 0.01226925,
+        "A16": 15.40378725,
+        "B17": 0.0162115,
+        "B18": 0.01219225,
+        "A19": 15.395145
+      }
+    },
+    {
+      "capacity": 4096,
+      "baseline_median_cpu_us": 64.04511575,
+      "candidate_median_cpu_us": 0.0076825,
+      "paired_median_percent": -99.98798160717017,
+      "candidate_lower_pairs": 10,
+      "per_run_cpu_us": {
+        "A0": 64.54815475000001,
+        "B1": 0.009721,
+        "B2": 0.0076825,
+        "A3": 63.95714649999999,
+        "B4": 0.006346,
+        "A5": 63.54547275,
+        "A6": 64.1467315,
+        "B7": 0.00766325,
+        "A8": 63.86884524999999,
+        "B9": 0.00768275,
+        "B10": 0.007654,
+        "A11": 63.65159375,
+        "B12": 0.007654,
+        "A13": 64.133085,
+        "A14": 63.7202975,
+        "B15": 0.0076825,
+        "A16": 64.65794125,
+        "B17": 0.0091155,
+        "B18": 0.007721250000000001,
+        "A19": 64.31756899999999
+      }
+    }
+  ],
+  "baseline_revision": "6173538c819582338ffbdf555cb2eed207288ed4",
+  "inputs": {
+    "A": {
+      "compile": [
+        "/mnt/data/Android/Sdk/ndk/30.0.16138531/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang",
+        "-std=gnu17",
+        "-O1",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-Wl,--gc-sections",
+        "-DGW_OWNER_BASELINE=1",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/baseline-source/android-jni/src/common",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/baseline-source/android-jni/src/guest",
+        "-I/mnt/data/projects/glibc-worker/android-jni/include",
+        "-I/mnt/data/projects/glibc-worker/core/include",
+        "-I/mnt/data/projects/glibc-worker/bionic-dlopen/include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/jni-include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired",
+        "-Icore/build/ffi-android/arm64-v8a/include",
+        "/mnt/data/projects/glibc-worker/android-jni/tests/native/owner_work.c",
+        "/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/baseline-source/android-jni/src/guest/full_guest.c",
+        "/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/baseline-source/android-jni/src/guest/rpc.c",
+        "-pthread",
+        "-o",
+        "/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/A/owner_work"
+      ],
+      "binary_sha256": "3d45591c2e427918deb70785be7ffc89cdfc1a3c569e1218b60154aaaf002d35",
+      "fixture_sha256": "6d0c2d1d29bb27fda8abb5aa86eea825289d042c3b7274eb069d5644071effe4",
+      "sources_sha256": {
+        "src/common/full_bridge.h": "59dac8d71dad66b2746a3f0b6f9b5dbb28ad72804e7ddf476e028d6dc5e416c0",
+        "src/common/full_protocol.h": "e200532979a2604b6c57d86bf1e22b5e6be53a2f1286d43091c4070b4fb126f1",
+        "src/common/jni_capabilities.h": "acc127270f8787fe56496e3172e09ca67d57f54292332c847e64dbf05d129388",
+        "src/common/jni_signature.h": "5211a216f02478a93b154595638a83854ae224ba41aa68214649fae7fa8fc926",
+        "src/common/protocol.h": "bbe21db35eac10acf59556e7605312962e054c4e53e3d3d0d4051def94e78cfb",
+        "src/common/stable_pages.h": "d7afe817282faaa9be93b3b3225c22e7f7883c711d9bb7946cc14d898fab06dd",
+        "src/guest/full_guest.c": "34a53a780c5e3e689220e7d486848150f605224364e1168ec40f519e3d761304",
+        "src/guest/rpc.c": "1d60d9ce284a6c5a7492473e569d7bb125b9312bc02a363855b0dbc43280256b"
+      }
+    },
+    "B": {
+      "compile": [
+        "/mnt/data/Android/Sdk/ndk/30.0.16138531/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang",
+        "-std=gnu17",
+        "-O1",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-Wl,--gc-sections",
+        "-Wl,--wrap=calloc",
+        "-Wl,--wrap=pthread_create",
+        "-I/mnt/data/projects/glibc-worker/android-jni/src/common",
+        "-I/mnt/data/projects/glibc-worker/android-jni/src/guest",
+        "-I/mnt/data/projects/glibc-worker/android-jni/include",
+        "-I/mnt/data/projects/glibc-worker/core/include",
+        "-I/mnt/data/projects/glibc-worker/bionic-dlopen/include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/jni-include",
+        "-I/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired",
+        "-Icore/build/ffi-android/arm64-v8a/include",
+        "/mnt/data/projects/glibc-worker/android-jni/tests/native/owner_work.c",
+        "/mnt/data/projects/glibc-worker/android-jni/src/guest/full_guest.c",
+        "/mnt/data/projects/glibc-worker/android-jni/src/guest/rpc.c",
+        "-pthread",
+        "-o",
+        "/mnt/data/projects/glibc-worker/android-jni/build/owner-inbox/paired/B/owner_work"
+      ],
+      "binary_sha256": "f4ee502ed10f7ffba68fe1ff0d9a2e4ea101e8897b4dff0b44a98f12beb74a24",
+      "fixture_sha256": "6d0c2d1d29bb27fda8abb5aa86eea825289d042c3b7274eb069d5644071effe4",
+      "sources_sha256": {
+        "src/common/full_bridge.h": "59dac8d71dad66b2746a3f0b6f9b5dbb28ad72804e7ddf476e028d6dc5e416c0",
+        "src/common/full_protocol.h": "22d89a78c1e3646a9cc2cc683f48c09c5611db308f5322180afa0dad66713f20",
+        "src/common/jni_capabilities.h": "acc127270f8787fe56496e3172e09ca67d57f54292332c847e64dbf05d129388",
+        "src/common/jni_signature.h": "5211a216f02478a93b154595638a83854ae224ba41aa68214649fae7fa8fc926",
+        "src/common/protocol.h": "bbe21db35eac10acf59556e7605312962e054c4e53e3d3d0d4051def94e78cfb",
+        "src/common/stable_pages.h": "d7afe817282faaa9be93b3b3225c22e7f7883c711d9bb7946cc14d898fab06dd",
+        "src/guest/full_guest.c": "b95322cfc1216f38508854757c54a25520e5d14266a799505c00965e494f080a",
+        "src/guest/rpc.c": "1d60d9ce284a6c5a7492473e569d7bb125b9312bc02a363855b0dbc43280256b"
+      }
+    }
+  },
+  "scope": "Guest owner maintenance dispatch only; no changes to eight-thread waiting policy, free-context reservation, Host controller scans, or one-time shutdown scans",
+  "target": "aarch64-linux-android.29",
+  "schema_version": 1,
+  "date": "2026-11-15",
+  "measurement": {
+    "device": {
+      "model": "V2239A",
+      "android": 13,
+      "abi": "arm64-v8a"
+    },
+    "processes": 80,
+    "warmup_trials_per_process": 1,
+    "measured_trials_per_process": 10,
+    "calls_per_trial": 2000,
+    "clock": "CLOCK_THREAD_CPUTIME_ID",
+    "quantiles": "Median across run medians of trial mean CPU cost; not single-call latency percentiles",
+    "workload": "All auxiliary contexts FREE after retained high-water capacity was mapped and touched; production fg_pump with a no-op fg_execute",
+    "execution": "Standalone bionic build of Guest pump code under shell UID; not a GNU Guest TLS/JNI/RPC round trip",
+    "battery_temperature_c": [
+      28.0,
+      28.0
+    ],
+    "thermal_statuses": [
+      0
+    ],
+    "frequency": "Unlocked; nanosecond floors vary and do not establish an exact constant overhead",
+    "runner_at_measurement_sha256": "f2281d26885bfd07cd8b94a1b4b462abd4cc1d03b5703e31b777ee63577fffd9"
+  },
+  "protocol": {
+    "version": 6,
+    "deployment": "Rebuild and deploy Host and Guest together; reject v5 and earlier"
+  },
+  "implementation": {
+    "publication": "State first, then per-context release RMW even for coalesced posts; enqueue stable index and notify owner on first post",
+    "consumption": "One consumer detaches a finite batch, saves next, acquire-clears pending, then reads state",
+    "storage": "Two atomic int fields per context and one bridge head; no per-event allocation, no pool-wide linked-list replacement",
+    "cost": "O(1) empty check independent of capacity; O(pending lifecycle contexts) work per detached batch, plus actual pthread creation/join"
+  },
+  "limits": [
+    "Pending work is not FIFO and coalesces state changes; existing lifecycle states still govern creation, join and reuse.",
+    "A producer paused between state publication and enqueue may delay its notification; no deadline or cancellation guarantee was added.",
+    "Free-context reservation, Host controller, shutdown and diagnostic scans remain capacity-dependent.",
+    "Baseline snapshots Guest/common sources from the recorded revision, using the current identical fixture, generated JNI tables and public/core headers; this is not a whole historical runtime rebuild.",
+    "No game/mod performance gain or whole-JNI latency improvement is inferred."
+  ],
+  "application_sources_sha256": {
+    "android-jni/src/common/full_protocol.h": "22d89a78c1e3646a9cc2cc683f48c09c5611db308f5322180afa0dad66713f20",
+    "android-jni/src/guest/full_guest.c": "b95322cfc1216f38508854757c54a25520e5d14266a799505c00965e494f080a",
+    "android-jni/src/host/full_host.c": "01109aca962d2185334bb4d52c612de9f8a510be7110865143bb90bb469fef34"
+  },
+  "build_log_sha256": "003aec2fa7d7848dde152ee2ca43f755454f3fd66cf861314397a1b7db5e1a9c"
+}

@@ -71,7 +71,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 
 已保留的 ARM64 十对结果见 [runtime-performance-arm64.json](results/runtime-performance-arm64.json)，引用存储组件的独立 CPU 测量见 [reference-cost-arm64.json](../../android-jni/tests/results/reference-cost-arm64.json)。后者使用最小 VM 替身，不能当作真实 JNI 的完整延迟。
 
-ID 全池扫描替换为专用索引后的组件 A/B、OOM/类身份回归，以及固定 JRE17 严格覆盖和冒烟记录见 [id-index-arm64.json](../../android-jni/tests/results/id-index-arm64.json)；该结果不更新或替代此前 owner 扫描及 8 线程往返的待定位信号。
+ID 全池扫描替换为专用索引后的组件 A/B、OOM/类身份回归，以及固定 JRE17 严格覆盖和冒烟记录见 [id-index-arm64.json](../../android-jni/tests/results/id-index-arm64.json)。owner 常规泵送改为生命周期待办后的独立十对 A/B、并发和真机回归见 [owner-inbox-arm64.json](../../android-jni/tests/results/owner-inbox-arm64.json)；8 线程往返信号仍待单独定位，未在这两轮修改等待策略。
 
 ## 安装包边界
 

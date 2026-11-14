@@ -300,7 +300,7 @@ static void *fg_worker(void *arg) {
 
   atomic_fetch_sub(&G->live_guest_threads, 1);
   atomic_store_explicit(&c->state, FB_DEAD, memory_order_release);
-  fb_event_notify(&fb_context_at(G, 0)->guest_event);
+  fb_owner_post(G, gid);
   return NULL;
 }
 
@@ -310,8 +310,11 @@ void fg_pump(void) {
   }
 
   if (gid == 0) {
-    for (int i = 1; i < fb_context_capacity(G); i++) {
+    int pending = fb_owner_take(G);
+    while (pending) {
+      int i = pending;
       struct fb_context *c = fb_context_at(G, i);
+      pending = fb_owner_next(c);
       int state = atomic_load_explicit(&c->state, memory_order_acquire);
       struct guest_slot *slot = guest_slot(i, state == FB_HOST_REQUEST);
       if (state == FB_HOST_REQUEST && !c->origin &&

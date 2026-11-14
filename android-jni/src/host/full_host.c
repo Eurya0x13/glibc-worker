@@ -548,7 +548,7 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
     }
 
     atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
-    fb_event_notify(&fb_context_at(gw_host_bridge, 0)->guest_event);
+    fb_owner_post(gw_host_bridge, i);
     for (;;) {
       uint32_t observed = fb_event_sample(&w->host_event);
       int attached = atomic_load_explicit(&w->state, memory_order_acquire);

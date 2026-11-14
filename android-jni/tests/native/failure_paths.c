@@ -14,6 +14,7 @@
 static struct full_bridge bridge;
 static struct host_context service_context;
 static _Atomic int stop_server, mode;
+static int owner_requests;
 static int pending, last_class, globals_created, globals_deleted, weaks_created,
     weaks_deleted;
 static _Atomic int fail_memory, fail_tls, tls_scope, fail_pages, fail_private;
@@ -150,13 +151,25 @@ static void *server(void *unused) {
       w->attach_result = JNI_ENOMEM;
       atomic_store_explicit(&w->state, FB_ATTACH_FAILED, memory_order_release);
       fb_event_notify(&w->guest_event);
-    } else if (action == 2 && state == FB_HOST_REQUEST) {
-      w->attach_result = JNI_ENOMEM;
-      atomic_store_explicit(&w->state, FB_ATTACH_FAILED, memory_order_release);
-      fb_event_notify(&w->host_event);
-    } else if (action == 3 && state == FB_HOST_REQUEST) {
-      atomic_store_explicit(&w->state, FB_RUNNING, memory_order_release);
-      fb_event_notify(&w->host_event);
+    } else if (action == 2 || action == 3) {
+      /* In these modes the double replaces the Guest owner. Consume the
+         production inbox, including its reuse/publication rules. */
+      int batch = fb_owner_take(&bridge);
+      while (batch) {
+        int id = batch;
+        struct fb_context *requested = fb_context_at(&bridge, id);
+        batch = fb_owner_next(requested);
+        assert(atomic_load_explicit(&requested->state, memory_order_acquire) ==
+               FB_HOST_REQUEST);
+        owner_requests++;
+        if (action == 2) {
+          requested->attach_result = JNI_ENOMEM;
+        }
+        atomic_store_explicit(&requested->state,
+                              action == 2 ? FB_ATTACH_FAILED : FB_RUNNING,
+                              memory_order_release);
+        fb_event_notify(&requested->host_event);
+      }
     }
 
     for (int i = -1; i < fb_frame_capacity(&bridge.ctx[0]); i++) {
@@ -315,6 +328,7 @@ int main(void) {
   atomic_store(&tls_scope, 0);
   atomic_store(&stop_server, 1);
   assert(!pthread_join(worker, NULL));
+  CHECK(owner_requests == 2 && !fb_owner_take(&bridge));
   CHECK(!atomic_load(&bridge.live_local) && !atomic_load(&bridge.live_global));
   printf(
       "{\"result\":\"PASS\",\"checks\":%u,\"depth_recovery\":true,\"oom_"

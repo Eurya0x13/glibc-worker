@@ -24,7 +24,7 @@ Guest `AttachCurrentThread` / `AttachCurrentThreadAsDaemon` 失败始终清空�
 
 ExceptionOccurred 若因 token 分配失败无法返回对象，已有异常仍保留；ExceptionCheck 和 ExceptionClear 不依赖分配引用槽。VM 或线程栈本身的 StackOverflowError 仍保留，但桥不承诺无限递归或在原生栈耗尽后恢复。
 
-私有协议为 v5，使用稳定动态目录、独立应急 RPC 和逐上下文诊断地址。Host/Guest 必须一起重编部署；握手检查共享结构、帧布局、初始容量和页宽，不能混用 v4。完整线程与所有权契约见 [CONTEXTS_AND_OWNERSHIP](CONTEXTS_AND_OWNERSHIP.md)。
+私有协议为 v6，使用稳定动态目录、独立应急 RPC、逐上下文诊断地址和 owner 生命周期待办。Host/Guest 必须一起重编部署；握手检查共享结构、帧布局、初始容量和页宽，不能混用 v5 或更早版本。完整线程与所有权契约见 [CONTEXTS_AND_OWNERSHIP](CONTEXTS_AND_OWNERSHIP.md)。
 
 ## 回滚与资源所有权
 

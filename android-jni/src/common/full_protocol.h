@@ -56,6 +56,9 @@ struct fb_context {
   /* Never reset these epochs while recycling a context slot. */
   struct fb_event host_event, guest_event;
   _Atomic int state, closing, host_done, guest_done;
+  /* Intrusive owner inbox node, independent of the reusable state fields.
+     Only the producer holding owner_pending may change owner_next. */
+  _Atomic int owner_pending, owner_next;
   _Atomic int origin;
   int host_tid, guest_tid, daemon, attach_result;
   char name[64];
@@ -74,6 +77,7 @@ struct full_bridge {
   struct fb_context ctx[FB_CONTEXTS];
   struct fb_pages contexts;
   _Atomic int context_capacity;
+  _Atomic int owner_pending_head;
   _Atomic unsigned hits[FB_APIS];
   _Atomic int loads, unloads, constructors, destructors, live_guest_threads;
   _Atomic int native_calls, max_depth, live_global, live_weak, live_local,
@@ -102,6 +106,46 @@ static inline struct fb_context *fb_context_at(struct full_bridge *b, int i) {
 
   return fb_pages_at(&b->contexts, (unsigned)(i - FB_CONTEXTS),
                      sizeof(struct fb_context), 0);
+}
+
+/* Many lifecycle producers, one Guest owner consumer. Stable context indices
+   form a pending stack: no event allocation, capacity scan, or pointer into
+   either libc's private storage. Index zero is reserved for the owner.
+   Publish the state first. Even a coalesced post must be a release RMW so
+   the consumer's acquire-clear observes that state update. */
+static inline void fb_owner_post(struct full_bridge *b, int id) {
+  struct fb_context *c = fb_context_at(b, id);
+  if (atomic_exchange_explicit(&c->owner_pending, 1, memory_order_acq_rel)) {
+    return;
+  }
+  int head = atomic_load_explicit(&b->owner_pending_head, memory_order_relaxed);
+  do {
+    atomic_store_explicit(&c->owner_next, head, memory_order_relaxed);
+  } while (!atomic_compare_exchange_weak_explicit(&b->owner_pending_head, &head,
+                                                  id, memory_order_release,
+                                                  memory_order_relaxed));
+  fb_event_notify(&b->ctx[0].guest_event);
+}
+
+/* Detach one finite batch before processing it, so a stream of new lifecycle
+   changes cannot indefinitely postpone the owner's own command. Only gid=0
+   may consume. A producer never dereferences the previous stack head, so
+   index reuse cannot cause a stale-node pop (there is no producer-side pop). */
+static inline int fb_owner_take(struct full_bridge *b) {
+  if (!atomic_load_explicit(&b->owner_pending_head, memory_order_acquire)) {
+    return 0;
+  }
+  return atomic_exchange_explicit(&b->owner_pending_head, 0,
+                                  memory_order_acquire);
+}
+
+/* Save next BEFORE allowing this node to be posted again. Clear BEFORE
+   inspecting its state: a concurrent state update is either acquired from
+   the coalesced post, or enqueued for the next batch with its own wake. */
+static inline int fb_owner_next(struct fb_context *c) {
+  int next = atomic_load_explicit(&c->owner_next, memory_order_relaxed);
+  atomic_exchange_explicit(&c->owner_pending, 0, memory_order_acq_rel);
+  return next;
 }
 
 static inline int fb_frame_capacity(struct fb_context *c) {
@@ -242,7 +286,7 @@ enum {
    capacity. Use idle bootstrap args, preserving shared POD layout. Publish the
    ACK with the existing release/acquire phase-ready edge before any module can
    open. */
-#define FB_LOADER_PROTOCOL 5
+#define FB_LOADER_PROTOCOL 6
 #define FB_LOADER_HELLO 0x47574c48
 #define FB_LOADER_ACK 0x47574c41
 
