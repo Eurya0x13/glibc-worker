@@ -5,10 +5,21 @@
 #include "guest_internal.h"
 #include "generated/guest-policy.inc"
 
+/* A JNIEnv passes only when it is this thread's own Guest facade: the bridge
+   is mapped, the thread holds a live context slot, and the pointer equals
+   this thread's fg_env singleton. A real VM JNIEnv or another thread's
+   facade never qualifies. */
 int fg_valid(JNIEnv *env) {
   return G && gid >= 0 && gid < fb_context_capacity(G) && env == &fg_env;
 }
 
+/* Post one request on the chosen rpc slot and block for its reply, pumping
+   inbound Host work while waiting. Publishing the slot index into rpc_top is
+   what lets the owning Host context's full_host_poll route a nested
+   Guest->Host callback to this blocked thread; the saved top is restored so
+   a later exchange at the same depth reuses the slot. slot < 0 selects the
+   reserved emergency slot, which never touches rpc_top. A guest-side error
+   yields the canned failure value for this api. */
 static jvalue exchange(int api, jvalue *args, int slot) {
   jvalue zero = {0};
   GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
@@ -82,6 +93,10 @@ static jvalue exchange(int api, jvalue *args, int slot) {
   return r->error ? fg_failure_result(api) : r->result;
 }
 
+/* Entry for the generated JNI table: validate the calling thread, then run
+   one exchange at the current nesting depth. When the frame cannot grow,
+   emergency APIs still go out on the reserved slot while ordinary ones report
+   FB_FAILURE_MEMORY to the Host and return the canned failure value. */
 jvalue fg_rpc(JNIEnv *env, int api, jvalue *args) {
   if (!fg_valid(env)) {
     errno = EINVAL;
@@ -96,6 +111,7 @@ jvalue fg_rpc(JNIEnv *env, int api, jvalue *args) {
     atomic_fetch_add(&G->errors, 1);
     return fg_failure_result(api);
   }
+
   if (!fb_ensure_frame(fb_context_at(G, gid), gdepth)) {
     if (fg_emergency_api(api)) {
       return exchange(api, args, -1);
@@ -104,5 +120,6 @@ jvalue fg_rpc(JNIEnv *env, int api, jvalue *args) {
     exchange(FB_RPC_REPORT_FAILURE, failure, -1);
     return fg_failure_result(api);
   }
+
   return exchange(api, args, gdepth);
 }

@@ -9,6 +9,10 @@ struct load_frame {
   int local_depth;
 };
 
+/* Open a loader transaction on the calling context: quarantine gate, then a
+   fresh 1024-local frame with the module and depth saved. Fails before
+   mutating the context, so the caller never unwinds a half-installed
+   transaction. */
 static int enter_frame(struct host_context *c, uint64_t id,
                        struct load_frame *saved,
                        struct gw_loader_error *error) {
@@ -16,16 +20,20 @@ static int enter_frame(struct host_context *c, uint64_t id,
     return gw_loader_fail(error, GW_E_QUARANTINED,
                           "Guest bridge quarantined; discard process");
   }
+
   *saved = (struct load_frame){c->module, c->local_depth};
   if ((*c->env)->PushLocalFrame(c->env, 1024) != JNI_OK) {
     return gw_loader_fail(error, GW_E_BRIDGE,
                           "Cannot create loader local frame");
   }
+
   c->module = id;
   c->local_depth++;
   return GW_OK;
 }
 
+/* Close the transaction: pop the frame, retire every local minted inside it,
+   restore the saved module and depth. */
 static void leave_frame(struct host_context *c, struct load_frame saved) {
   (*c->env)->PopLocalFrame(c->env, NULL);
   fh_drop_locals(c, saved.local_depth + 1);
@@ -33,6 +41,7 @@ static void leave_frame(struct host_context *c, struct load_frame saved) {
   c->module = saved.module;
 }
 
+/* Detach the pending exception (or return NULL) so cleanup JNI may run. */
 static jthrowable take_exception(JNIEnv *env) {
   jthrowable pending = (*env)->ExceptionOccurred(env);
   if (pending) {
@@ -41,6 +50,8 @@ static jthrowable take_exception(JNIEnv *env) {
   return pending;
 }
 
+/* Re-raise the rollback's cause after cleanup, discarding any exception the
+   cleanup itself raised. */
 static void restore_exception(JNIEnv *env, jthrowable original) {
   if (original) {
     /* Cleanup may itself fail. Preserve the exception that caused rollback. */
@@ -52,6 +63,8 @@ static void restore_exception(JNIEnv *env, jthrowable original) {
   }
 }
 
+/* Keep the earliest failure; later exceptions from rollback steps are
+   dropped. */
 static void merge_exception(JNIEnv *env, jthrowable *original) {
   jthrowable next = take_exception(env);
   if (!*original) {
@@ -61,11 +74,17 @@ static void merge_exception(JNIEnv *env, jthrowable *original) {
   }
 }
 
+/* Terminal outcome: quarantine the bridge; retained resources are never
+   freed after this. */
 static int quarantine(struct gw_loader_error *error, const char *reason) {
   gw_dlopen_quarantine();
   return gw_loader_fail(error, GW_E_QUARANTINED, reason);
 }
 
+/* Guest load transaction: run JNI_OnLoad and commit on an accepted version;
+   on rejection unregister, abort and sweep so no partial binding survives.
+   Any uncertain rollback quarantines the process rather than freeing
+   resources that may still be reachable. */
 jint fh_transport_load(JNIEnv *env, uint64_t id, const char *image,
                        struct gw_loader_error *error) {
   struct host_context *c = fh_context(env, error);
@@ -118,6 +137,9 @@ jint fh_transport_load(JNIEnv *env, uint64_t id, const char *image,
   return accepted ? out.i : JNI_ERR;
 }
 
+/* Guest unload transaction: prepare (JNI_OnUnload), remove VM native
+   entries, then dlclose; only a fully successful pass releases the module's
+   bindings and ID-cache entries. */
 int fh_transport_close(JNIEnv *env, uint64_t id,
                        struct gw_loader_error *error) {
   struct host_context *c = fh_context(env, error);
@@ -157,6 +179,8 @@ int fh_transport_close(JNIEnv *env, uint64_t id,
   return rc;
 }
 
+/* Resolve one symbol into a trampoline binding owned by the image; *entry
+   stays executable and valid until the module's bindings are released. */
 int fh_transport_find(JNIEnv *env, uint64_t id, const char *symbol,
                       const char *descriptor, void **entry,
                       struct gw_loader_error *error) {
@@ -164,6 +188,7 @@ int fh_transport_find(JNIEnv *env, uint64_t id, const char *symbol,
   if (!c) {
     return GW_ERROR;
   }
+
   uint64_t previous = c->module;
   c->module = id;
   jvalue found = fh_command(c, FB_LOOKUP, 0, symbol, NULL);
@@ -172,6 +197,7 @@ int fh_transport_find(JNIEnv *env, uint64_t id, const char *symbol,
           ? make_binding(id, (uintptr_t)found.j, descriptor, error)
           : NULL;
   c->module = previous;
+
   if (c->command_error) {
     return gw_loader_fail(
         error, GW_E_BRIDGE,
@@ -183,6 +209,7 @@ int fh_transport_find(JNIEnv *env, uint64_t id, const char *symbol,
   if (!binding) {
     return GW_ERROR;
   }
+
   *entry = binding->code;
   return GW_OK;
 }

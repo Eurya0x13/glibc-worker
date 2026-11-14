@@ -41,6 +41,7 @@ static struct guest_slot *guest_slot(int id, int create) {
   if (!c) {
     return NULL;
   }
+
   uintptr_t value =
       atomic_load_explicit(&c->guest_private, memory_order_acquire);
   if (!value && create) {
@@ -56,6 +57,7 @@ static struct guest_slot *guest_slot(int id, int create) {
       free(fresh);
     }
   }
+
   struct guest_slot *slot = (void *)value;
 #if GW_RPC_PROFILE
   if (slot) {
@@ -389,6 +391,7 @@ int full_guest_wait(struct shared *s) {
   struct fb_event *event = &fb_context_at(G, 0)->guest_event;
   uint32_t observed = fb_event_sample(event);
   fg_pump();
+
   if (atomic_load_explicit(&s->stop, memory_order_acquire) ||
       !atomic_load(&G->running)) {
     return 0;

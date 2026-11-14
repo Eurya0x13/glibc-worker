@@ -22,10 +22,12 @@ static uintptr_t tp(void) {
 static int callback(struct packet *p) {
   sh->packet = (uintptr_t)p;
   atomic_store_explicit(&sh->request, 1, memory_order_release);
+
   /* errno must remain the Guest EBADF while Host services the request. */
   while (!atomic_load_explicit(&sh->response, memory_order_acquire)) {
     __asm__ volatile("" ::: "memory");
   }
+
   return sh->reply;
 }
 
@@ -47,10 +49,12 @@ static void *child(void *unused) {
 static int visit(struct dl_phdr_info *info, size_t size, void *opaque) {
   (void)size;
   (void)opaque;
+
   if ((strstr(info->dlpi_name, "libc.so.6") ||
        strstr(info->dlpi_name, "libguest_libc.so"))) {
     sh->guest_libc_found = 1;
   }
+
   return 0;
 }
 

@@ -1,0 +1,470 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-14",
+  "device": {
+    "model": "V2239A",
+    "android": 13,
+    "abi": "arm64-v8a"
+  },
+  "scope": "Retained artifact comparison and production-reference component CPU costs; no game FPS or exact per-commit attribution",
+  "runtime_comparison": {
+    "runs_per_variant": 10,
+    "paired_runs": 10,
+    "mode": "JIT, CheckJNI off, spin 20000ns, profiling/wake filtering/ready polling off",
+    "warmup_per_thread_per_trial": 500,
+    "measured_calls_per_thread_per_trial": 2000,
+    "trials_per_case_per_process": 3,
+    "measured_native_calls_total": 3120000,
+    "variant_inputs": {
+      "A": {
+        "apk_sha256": "93e4e50a381fbea8fabcccd1f2420247506bf92ad7be7ba1737ea7a73e6dcf3b",
+        "checker_revision": "69dd8f3338a4f4516c0823a91c08368166d1d284",
+        "checker_sha256": "7bdea730e8e9b75b660fd5748915cf2abf973ec81aae41a9013b7ac4026a2976"
+      },
+      "B": {
+        "apk_sha256": "3b6ebd14d670d00147f0e567a8b45eb45176567bfa58e87367e815927f44d97f",
+        "checker_revision": "701a79ab515fa768b8d8f78210c6f768eba5bb60",
+        "checker_sha256": "ae4d3757c13a1e904e73d17e833237da397722376f9a695a4cb1bb45b5a836b8"
+      }
+    },
+    "workload_sha256": {
+      "lib/arm64-v8a/libguest_bench.so": "565460aa236c3b8aa57241c07b69010251d7638953f925f1e4493c7be0f3acb8",
+      "lib/arm64-v8a/libjava.so": "a837701c8406adeac8c9b01c531045d21c816c6ba18ae251410f7b0f5ecea5b1",
+      "lib/arm64-v8a/libjvm.so": "e340425f9ef8d4280c9d64786d488d5699131b9d62333a2b990a47c0ca34b2de",
+      "lib/arm64-v8a/libjli.so": "4552cbda5d1514f9720a40840324d7ab274409bd963c8f128fe5028e04da4e65",
+      "assets/android-jre/lib/modules": "a9e3a1008d6ca3ec5f6ea535ec44a725194b309e3420cb7e8dd5be6578637671",
+      "assets/android-jre/release": "1074c79a058545cccfb1a4661a0654da2bef9f7608c909bbb8c6ed133bdd69f7",
+      "benchmark/ChildModule.class": "c5df334f3ba7d9966fc5b980591f2f91661153816a6fdbb957b31781a85b9225",
+      "benchmark/PayloadModule.class": "d066623d4df9dc6b48c0ce03ac5fdce4c336f36a719c168dfea3a608d8e1e124",
+      "benchmark/PayloadWorkload$1.class": "84ff1ed51588ad535877a12007c0d52bb8620ccd9cb20112c8fc0c3229557fdc",
+      "benchmark/PayloadWorkload.class": "05465410d31bcf3eb21c2804b15f8168744c15f6fe296280cd32679ad1c6081c",
+      "benchmark/Workload$1.class": "6b161228def5682953f43d2709580ab5ec88f4f7ac0780ccfdab181f0e3106a3",
+      "benchmark/Workload.class": "11e24f7601734fc59e396a6ed016560fde47d330785b81d711032428c05a12c4"
+    },
+    "order": [
+      "A0",
+      "B1",
+      "B2",
+      "A3",
+      "B4",
+      "A5",
+      "A6",
+      "B7",
+      "A8",
+      "B9",
+      "B10",
+      "A11",
+      "B12",
+      "A13",
+      "A14",
+      "B15",
+      "A16",
+      "B17",
+      "B18",
+      "A19"
+    ],
+    "run_ids": [
+      "0ff2b97e42ee4b239b57729fc846dc64",
+      "a162c0be31e14f4ca1ba8cf148e37974",
+      "92209f5cbbf14198a55dd94003bad686",
+      "fa61eca2891e4945ac3229f3f957f0d7",
+      "aaffbf72f89d4c7483d669eacc27a5cd",
+      "d4a778f73052440ab560acad9f4a9608",
+      "af87292b591b462f8d782efc726a4071",
+      "af140cbbf7704b30931ea5873cfbb921",
+      "e38af8d93b3e4ad9a08e448be5370243",
+      "19eca2fa0dca4a9da8bb1851eabaef7d",
+      "97fc9f6899d44530a9f4d28e5094bf33",
+      "b90d416af7874ffd82724a79bf3e752e",
+      "7b3a21d62c2040788bb371ddc35602dd",
+      "8fd057ab68d94f0798b15997939d3324",
+      "46c90c2926804187877fa6bf7876d861",
+      "7740a65f5e374d508cfeccd0a06ea9cd",
+      "c3016676fec6462cb4dab8b8c4db990c",
+      "9e942fcb2f3643f2ab18aa9890108890",
+      "03067cde310844b38604ddcf917176c5",
+      "f2f2966b6334456497249d4e06747b2b"
+    ],
+    "battery_temperature_c": [
+      27.8,
+      30.1
+    ],
+    "thermal_statuses": [
+      0
+    ],
+    "quantiles": "Median of 30 per-trial quantiles per case/variant; not pooled-call quantiles",
+    "limitations": [
+      "Checker revisions do not attest build-source revisions of retained APKs.",
+      "Measured benchmark classes, Guest benchmark DSO and JRE bytes match; surrounding suites, harness and GNU runtime differ.",
+      "Different untimed coverage and warm state, unlocked CPU frequency and scheduling can affect results.",
+      "CPU is process-wide; not exclusively bridge execution.",
+      "Workers use cached method IDs and do not measure owner-context scans or deep recursion.",
+      "Millisecond outliers exist on both sides; no scheduler trace attribution in this review."
+    ],
+    "cases": [
+      {
+        "threads": 1,
+        "callback": false,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 16.1155,
+          "p95_us": 50.3275,
+          "p99_us": 96.058,
+          "max_us": 2498.884,
+          "idle_cpu_percent_one_core": 0.14951403487695628,
+          "calls_per_second": 45938.49440643088,
+          "cpu_us_per_call": 34.56989958333333
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 14.8655,
+          "p95_us": 53.4805,
+          "p99_us": 112.9235,
+          "max_us": 5537.385,
+          "idle_cpu_percent_one_core": 0.24351693883883535,
+          "calls_per_second": 39436.302497584926,
+          "cpu_us_per_call": 33.670940433333335
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 6,
+            "median_percent": -19.16216233117764,
+            "min_percent": -74.57250015892187,
+            "max_percent": 142.6040061633282
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 6,
+            "median_percent": -8.253784280089583,
+            "min_percent": -57.40382787248875,
+            "max_percent": 266.4335664335664
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 5,
+            "median_percent": 2.595123870053123,
+            "min_percent": -86.75946351163432,
+            "max_percent": 660.9000000000001
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -10.858100031519257,
+            "min_percent": -30.36951033295796,
+            "max_percent": 79.52376148370423
+          }
+        }
+      },
+      {
+        "threads": 1,
+        "callback": true,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 13.0765,
+          "p95_us": 45.288,
+          "p99_us": 89.1155,
+          "max_us": 4379.423,
+          "idle_cpu_percent_one_core": 0.12315896396329226,
+          "calls_per_second": 36095.0330818588,
+          "cpu_us_per_call": 37.9080923
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 11.4615,
+          "p95_us": 49.173,
+          "p99_us": 94.2885,
+          "max_us": 6336.808,
+          "idle_cpu_percent_one_core": 0.13655897718855134,
+          "calls_per_second": 48737.79571106579,
+          "cpu_us_per_call": 36.89379375
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 8,
+            "median_percent": -17.215305761765993,
+            "min_percent": -71.48153429345501,
+            "max_percent": 71.56504402724704
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -20.96950931858761,
+            "min_percent": -47.23157985661225,
+            "max_percent": 361.5796694322858
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 4,
+            "median_percent": 17.126953117399168,
+            "min_percent": -86.62608294298528,
+            "max_percent": 322.8644107903454
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -10.233837663473867,
+            "min_percent": -53.79800317819853,
+            "max_percent": 185.03518419656677
+          }
+        }
+      },
+      {
+        "threads": 4,
+        "callback": false,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 12.7695,
+          "p95_us": 86.1925,
+          "p99_us": 273.5575,
+          "max_us": 12090.038,
+          "idle_cpu_percent_one_core": 3.508893744063756,
+          "calls_per_second": 101025.8309016566,
+          "cpu_us_per_call": 28.436844791666665
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 11.25,
+          "p95_us": 82.442,
+          "p99_us": 253.8845,
+          "max_us": 9338.923,
+          "idle_cpu_percent_one_core": 3.8033188218843836,
+          "calls_per_second": 115696.5350268977,
+          "cpu_us_per_call": 27.192259695833336
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 4,
+            "median_percent": 2.9151201103980062,
+            "min_percent": -57.27555661958343,
+            "max_percent": 128.1171125694094
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 5,
+            "median_percent": -4.932110234226023,
+            "min_percent": -56.061891448954015,
+            "max_percent": 36.50363636363636
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -3.928087574329936,
+            "min_percent": -36.82252663622526,
+            "max_percent": 24.604961194454944
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 4,
+            "median_percent": 1.050190206571544,
+            "min_percent": -39.58600420214419,
+            "max_percent": 23.908724840158555
+          }
+        }
+      },
+      {
+        "threads": 4,
+        "callback": true,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 5.1725,
+          "p95_us": 82.0,
+          "p99_us": 381.481,
+          "max_us": 19118.115,
+          "idle_cpu_percent_one_core": 0.19692439623901206,
+          "calls_per_second": 101121.18831314912,
+          "cpu_us_per_call": 28.8674557625
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 4.943,
+          "p95_us": 61.654,
+          "p99_us": 310.481,
+          "max_us": 9656.115,
+          "idle_cpu_percent_one_core": 0.12428441136426921,
+          "calls_per_second": 139326.2809523259,
+          "cpu_us_per_call": 26.242267779166667
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 5,
+            "median_percent": -1.470957734447742,
+            "min_percent": -64.64017398181099,
+            "max_percent": 93.21974354470403
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -28.633005902984586,
+            "min_percent": -58.64727272727273,
+            "max_percent": 64.17064967250839
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 6,
+            "median_percent": -3.2127872451696127,
+            "min_percent": -45.168453746933615,
+            "max_percent": 14.66429923893584
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 7,
+            "median_percent": -7.894054162202152,
+            "min_percent": -49.15632102831232,
+            "max_percent": 45.13634667984299
+          }
+        }
+      },
+      {
+        "threads": 8,
+        "callback": false,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 13.4805,
+          "p95_us": 174.096,
+          "p99_us": 367.654,
+          "max_us": 12809.769,
+          "idle_cpu_percent_one_core": 0.10341746413090577,
+          "calls_per_second": 167226.6654420896,
+          "cpu_us_per_call": 27.474969772916666
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 15.3845,
+          "p95_us": 180.5,
+          "p99_us": 375.288,
+          "max_us": 15270.346,
+          "idle_cpu_percent_one_core": 0.09037875480184114,
+          "calls_per_second": 163314.36847528073,
+          "cpu_us_per_call": 28.785799510416666
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 2,
+            "median_percent": 18.506243098102527,
+            "min_percent": -28.41210093405828,
+            "max_percent": 48.51844771554197
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 5,
+            "median_percent": 0.7755746058393798,
+            "min_percent": -17.08118404999893,
+            "max_percent": 16.0969360786533
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 5,
+            "median_percent": -0.21647097044604213,
+            "min_percent": -13.182704545082125,
+            "max_percent": 23.912341034458894
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 2,
+            "median_percent": 4.011455470680126,
+            "min_percent": -20.147650053330878,
+            "max_percent": 18.03852421230041
+          }
+        }
+      },
+      {
+        "threads": 8,
+        "callback": true,
+        "baseline": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 4.385,
+          "p95_us": 251.4995,
+          "p99_us": 524.442,
+          "max_us": 11205.692,
+          "idle_cpu_percent_one_core": 0.10062859156081233,
+          "calls_per_second": 167702.9337602881,
+          "cpu_us_per_call": 30.152118054166664
+        },
+        "candidate": {
+          "runs": 10,
+          "samples": 30,
+          "p50_us": 4.538,
+          "p95_us": 268.6345,
+          "p99_us": 556.1345,
+          "max_us": 18157.923,
+          "idle_cpu_percent_one_core": 0.11201137419416168,
+          "calls_per_second": 156902.8743854895,
+          "cpu_us_per_call": 30.831299689583336
+        },
+        "paired_summary": {
+          "p50_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 2,
+            "median_percent": 7.146224337091189,
+            "min_percent": -11.756993006993,
+            "max_percent": 19.565800053604953
+          },
+          "p95_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 2,
+            "median_percent": 9.120459699091821,
+            "min_percent": -13.567762286055585,
+            "max_percent": 24.82651577987829
+          },
+          "p99_us": {
+            "pairs": 10,
+            "candidate_lower_pairs": 2,
+            "median_percent": 6.177849031805682,
+            "min_percent": -5.365582678093617,
+            "max_percent": 16.857446808510645
+          },
+          "cpu_us_per_call": {
+            "pairs": 10,
+            "candidate_lower_pairs": 4,
+            "median_percent": 2.1908826894930233,
+            "min_percent": -14.468937672022786,
+            "max_percent": 23.45971446048378
+          }
+        }
+      }
+    ],
+    "raw_comparison_sha256": "6b4fcbfe770dbce7a2b5a9417045fd68ebaa8f11d11159b88b02e227c6001ed2",
+    "strict_smoke_final": {
+      "result": "PASS",
+      "apk_sha256": "3b6ebd14d670d00147f0e567a8b45eb45176567bfa58e87367e815927f44d97f",
+      "run_id": "7bf9a5f8091040279ee8fd5f17500f38",
+      "report_sha256": "024e40243583140db4a841ee2de9b3062f9a6591f75b2a1e8ba017157db59c38"
+    }
+  },
+  "findings": [
+    {
+      "id": "id-scan",
+      "status": "measured",
+      "source": "android-jni/src/host/references.c",
+      "detail": "ID interning scans the mixed handle high-water capacity under handles_lock, including on misses after globals are freed. Token lookup remains constant-time."
+    },
+    {
+      "id": "owner-scan",
+      "status": "source-confirmed; cost not measured",
+      "source": "android-jni/src/guest/full_guest.c",
+      "detail": "Owner fg_pump scans retained context capacity even during commands; worker-thread benchmark does not cover this."
+    },
+    {
+      "id": "eight-thread-signal",
+      "status": "observed; cause not isolated",
+      "detail": "Eight-thread scalar and callback P50 increased in 8 of 10 adjacent pairs; scalar paired median +18.5%, callback +7.1%. Do not attribute all of this to scope accounting or safety checks."
+    }
+  ],
+  "reference_component_results": "android-jni/tests/results/reference-cost-arm64.json"
+}

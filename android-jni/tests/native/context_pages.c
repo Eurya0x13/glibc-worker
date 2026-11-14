@@ -22,6 +22,7 @@ void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
     errno = ENOMEM;
     return MAP_FAILED;
   }
+
   return __real_mmap(p, n, prot, flags, fd, off);
 }
 
@@ -32,6 +33,7 @@ static void destroy_node(struct fb_page_node *node, unsigned level,
   if (!node) {
     return;
   }
+
   for (unsigned i = 0; i < 256; i++) {
     void *child = (void *)atomic_load(&node->child[i]);
     if (!child) {
@@ -43,6 +45,7 @@ static void destroy_node(struct fb_page_node *node, unsigned level,
       assert(!munmap(child, stride * FB_PAGE_ITEMS));
     }
   }
+
   assert(!munmap(node, sizeof *node));
 }
 
@@ -52,8 +55,10 @@ static void destroy_bridge(struct full_bridge *b) {
     destroy_node((void *)atomic_load(&c->frames.root), 3,
                  sizeof(struct fb_frame));
   }
+
   destroy_node((void *)atomic_load(&b->contexts.root), 3,
                sizeof(struct fb_context));
+
   free(b);
 }
 
@@ -67,6 +72,7 @@ static void *reserve(void *opaque) {
   struct job *job = opaque;
   job->id = fb_reserve_context(job->bridge);
   assert(job->id > 0);
+
   struct fb_context *c = fb_context_at(job->bridge, job->id);
   fb_context_reset(c);
   struct fb_call *first = fb_call_at(c, 0);
@@ -74,13 +80,16 @@ static void *reserve(void *opaque) {
   assert(fb_ensure_frame(c, FB_DEPTH));
   struct fb_rpc *early = fb_rpc_at(c, FB_DEPTH);
   early->result.i = job->id;
+
   for (int depth = 0; depth < 96; depth++) {
     assert(fb_ensure_frame(c, depth));
   }
+
   assert(fb_call_at(c, 0) == first && first->args[0].i == job->id);
   assert(fb_rpc_at(c, FB_DEPTH) == early && early->result.i == job->id);
   int result = pthread_barrier_wait(job->ready);
   assert(!result || result == PTHREAD_BARRIER_SERIAL_THREAD);
+
   return NULL; /* Keep the reservations; no other thread can claim these IDs. */
 }
 
@@ -91,6 +100,7 @@ static void concurrent_growth(void) {
   CHECK(!pthread_barrier_init(&ready, NULL, 48));
   pthread_t threads[48];
   struct job jobs[48];
+
   for (unsigned i = 0; i < 48; i++) {
     jobs[i] = (struct job){.bridge = b, .ready = &ready};
     CHECK(!pthread_create(&threads[i], NULL, reserve, &jobs[i]));
@@ -98,6 +108,7 @@ static void concurrent_growth(void) {
   for (unsigned i = 0; i < 48; i++) {
     CHECK(!pthread_join(threads[i], NULL));
   }
+
   CHECK(!pthread_barrier_destroy(&ready));
   CHECK(fb_context_capacity(b) > 48);
   for (unsigned i = 0; i < 48; i++) {
@@ -106,13 +117,16 @@ static void concurrent_growth(void) {
     }
     CHECK(fb_frame_capacity(fb_context_at(b, jobs[i].id)) >= 96);
   }
+
   int before = fb_context_capacity(b);
   for (int i = 1; i < before; i++) {
     atomic_store(&fb_context_at(b, i)->state, FB_RESERVED);
   }
+
   atomic_store(&fail_mapping, atomic_load(&mapping_calls));
   CHECK(fb_reserve_context(b) == -1 && fb_context_capacity(b) == before);
   atomic_store(&fail_mapping, -1);
+
   CHECK(fb_reserve_context(b) == before &&
         fb_context_capacity(b) == before + FB_PAGE_ITEMS);
   destroy_bridge(b);
@@ -126,9 +140,11 @@ static void growth_failures(void) {
     struct fb_call *first = fb_call_at(c, 0);
     first->args[0].i = 91;
     atomic_store(&fail_mapping, atomic_load(&mapping_calls) + fault);
+
     CHECK(!fb_ensure_frame(c, FB_DEPTH));
     CHECK(fb_frame_capacity(c) == FB_DEPTH && fb_call_at(c, FB_DEPTH) == NULL);
     CHECK(fb_call_at(c, 0) == first && first->args[0].i == 91);
+
     atomic_store(&fail_mapping, -1);
     CHECK(fb_ensure_frame(c, FB_DEPTH) && fb_rpc_at(c, FB_DEPTH));
     CHECK(!fb_ensure_frame(c, INT_MAX) && !fb_ensure_frame(c, -1));
@@ -139,6 +155,7 @@ static void growth_failures(void) {
 int main(void) {
   growth_failures();
   concurrent_growth();
+
   printf(
       "{\"result\":\"PASS\",\"checks\":%u,\"threads\":48,\"depth\":96,"
       "\"mapping_faults\":5,\"stable_addresses\":true,\"unique_contexts\":true}"

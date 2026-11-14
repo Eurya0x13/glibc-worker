@@ -2,9 +2,10 @@
 
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
+from pathlib import Path
+
 from host_build import build
 
 root = Path(__file__).resolve().parents[2]
@@ -90,6 +91,7 @@ cmd = [
 subprocess.run(cmd, check=True)
 r = subprocess.run(
     [str(out / "failure_paths")],
+    check=False,
     capture_output=True,
     text=True,
     timeout=60,
@@ -100,5 +102,6 @@ if r.returncode:
     raise SystemExit("Failure checks failed: " + str(out / "run.log"))
 d = json.loads(r.stdout)
 assert d["result"] == "PASS"
+assert d["id_index_oom_rollback"]
 (out / "summary.json").write_text(json.dumps(d, indent=2) + "\n")
 print("Production failure paths: PASS")

@@ -18,6 +18,7 @@ static int diagnostics_growth(struct full_bridge *bridge) {
   struct gw_rpc_breakdown stages;
   struct gw_handoff_snapshot handoff;
   unsigned contexts = (unsigned)fb_context_capacity(bridge);
+
   if (gw_rpc_diagnostics_snapshot(&totals, sizeof totals) ||
       gw_rpc_breakdown_snapshot(&stages, sizeof stages) ||
       gw_rpc_handoff_snapshot(&handoff, sizeof handoff) || !totals.enabled ||
@@ -26,10 +27,12 @@ static int diagnostics_growth(struct full_bridge *bridge) {
       !totals.host.completed || !totals.guest.completed) {
     return 1;
   }
+
   printf(
       "AUDIT_DIAGNOSTICS_TEST {\"result\":\"PASS\",\"contexts\":%u,"
       "\"profile\":true,\"wake_filter\":%d,\"ready_poll\":%d}\n",
       contexts, GW_FUTEX_WAKE_FILTER, GW_RPC_READY_POLL);
+
   return 0;
 }
 #endif
@@ -115,9 +118,11 @@ static jlong process_cpu_nanos(JNIEnv *env, jclass cls) {
   (void)env;
   (void)cls;
   struct timespec time;
+
   if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time)) {
     return -1;
   }
+
   return (jlong)time.tv_sec * 1000000000 + time.tv_nsec;
 }
 
@@ -199,9 +204,11 @@ static jint bridge_state(JNIEnv *env, jclass cls, jlong id) {
 static jint bridge_try_close(JNIEnv *env, jclass cls, jlong id) {
   (void)cls;
   struct gw_loader_error error = {0};
+
   int result =
       gw_loader_query(GW_LOADER_ABI_V1, sizeof(struct gw_loader_api_v1))
           ->close(env, (uint64_t)id, &error);
+
   return result == GW_ERROR ? error.code : -100 - result;
 }
 

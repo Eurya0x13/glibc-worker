@@ -1,6 +1,11 @@
 # 项目边界与 review 顺序
 
-当前容量、失败语义和待决问题集中在 [实现限制与待审计问题](AUDIT.md)，包含审阅清单、源码位置及尚未完成的验证。
+实现边界按所属项目维护：
+
+- core：[运行时补丁](../core/docs/RUNTIME_PATCHES.md)、[mutex 契约](../core/docs/MUTEXES.md)。
+- bionic-dlopen：[执行借用与关闭规则](../bionic-dlopen/docs/EXECUTION_SCOPES.md)。
+- android-jni：[资源容量与增长](../android-jni/docs/ZIG_BINDINGS.md)、[上下文与所有权](../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md)、[生命周期](../android-jni/docs/LIFECYCLE.md)、[失败语义](../android-jni/docs/FAILURES.md)。
+- jvm-jni：[适配器契约](../jvm-jni/docs/ADAPTER.md)、[JRE 兼容性与已知限制](../jvm-jni/docs/JRE_COMPATIBILITY.md)。
 
 1. `core/`：bootstrap、raw clone、futex 事件和诊断。检查这里没有 JNI、Java 或 libffi 依赖。
 2. `bionic-dlopen/`：C transport、ELF 分类、逻辑句柄及装卸载同步。JNI 版本与方法描述符不在这里解释。

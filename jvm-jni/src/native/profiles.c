@@ -9,7 +9,8 @@
 #if !defined(GW_JVM_PROFILE_NAME) || !defined(GW_JVM_LIBJAVA_SHA256) || \
     !defined(GW_JVM_LIBJVM_SHA256) || !defined(GW_JVM_PROFILE_FAMILY)
 #error \
-    "Define GW_JVM_PROFILE_NAME, GW_JVM_LIBJAVA_SHA256, GW_JVM_LIBJVM_SHA256 and GW_JVM_PROFILE_FAMILY"
+    "Define GW_JVM_PROFILE_NAME, GW_JVM_LIBJAVA_SHA256, GW_JVM_LIBJVM_SHA256 " \
+    "and GW_JVM_PROFILE_FAMILY"
 #endif
 /* The singleton starts with the build-time profile; only
  * gw_jvm_jni_set_profile may replace it, and only while not installed. */
@@ -29,15 +30,19 @@ static int valid_digest(const char digest[65]) {
   if (digest[64]) {
     return 0;
   }
+
   for (unsigned i = 0; i < 64; i++) {
     if (!((digest[i] >= '0' && digest[i] <= '9') ||
           (digest[i] >= 'a' && digest[i] <= 'f'))) {
       return 0;
     }
   }
+
   return 1;
 }
 
+/* Whole-profile gate for caller input: exact ABI version and size, a known
+ * loader family, a NUL-terminated non-empty name and both digests valid. */
 static int valid_profile(const struct gw_jvm_profile_v2 *p) {
   return p && p->abi_version == GW_JVM_PROFILE_ABI_V2 &&
          p->struct_size == sizeof *p && gw_jvm_shape(p->family) && p->name[0] &&

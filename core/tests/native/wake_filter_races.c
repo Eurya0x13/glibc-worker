@@ -89,11 +89,13 @@ static uint64_t now_ns(void) {
   if (clock_gettime(CLOCK_MONOTONIC, &value)) {
     abort();
   }
+
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) + value.tv_nsec;
 }
 
 static void await_at_least(_Atomic int *value, int expected) {
   uint64_t deadline = now_ns() + UINT64_C(3000000000);
+
   while (atomic_load(value) < expected) {
     CHECK(now_ns() < deadline);
     usleep(50);
@@ -102,6 +104,7 @@ static void await_at_least(_Atomic int *value, int expected) {
 
 static void await_waiters(unsigned expected) {
   uint64_t deadline = now_ns() + UINT64_C(3000000000);
+
   while (atomic_load(&active_waits) < expected) {
     CHECK(now_ns() < deadline);
     usleep(50);
@@ -111,6 +114,7 @@ static void await_waiters(unsigned expected) {
 #if GW_FUTEX_WAKE_FILTER
 static void await_wait_calls(uint64_t expected) {
   uint64_t deadline = now_ns() + UINT64_C(3000000000);
+
   while (atomic_load(&wait_calls) < expected) {
     CHECK(now_ns() < deadline);
     usleep(50);
@@ -129,6 +133,7 @@ static void event_test_hook(int point, void *event) {
       atomic_exchange(&gate.reached, 1)) {
     return;
   }
+
   while (!atomic_load(&gate.released)) {
     sched_yield();
   }
@@ -140,6 +145,7 @@ static void arm_gate(int point, int role, struct fb_event *event) {
   atomic_store(&gate.event, (uintptr_t)event);
   atomic_store(&gate.reached, 0);
   atomic_store(&gate.released, 0);
+
   atomic_store(&gate.point, point);
 }
 

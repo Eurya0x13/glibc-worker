@@ -51,6 +51,7 @@ void *__wrap_ffi_closure_alloc(size_t size, void **code) {
   if (closure_failure > 0) {
     closure_failure--;
   }
+
   return __real_ffi_closure_alloc(size, code);
 }
 
@@ -60,6 +61,7 @@ static jint push_frame(JNIEnv *env, jint capacity) {
     fh_throw(env, FB_FAILURE_MEMORY, "test frame allocation failure");
     return JNI_ERR;
   }
+
   return JNI_OK;
 }
 
@@ -83,6 +85,7 @@ static jint throw_new(JNIEnv *env, jclass cls, const char *text) {
   (void)env;
   (void)cls;
   (void)text;
+
   exception_pending = 1;
   return JNI_OK;
 }
@@ -103,6 +106,7 @@ static jweak weak_ref(JNIEnv *env, jobject object) {
     exception_pending = 1;
     return NULL;
   }
+
   registration_weaks++;
   return (jweak)object;
 }
@@ -120,6 +124,7 @@ static jobject local_ref(JNIEnv *env, jobject object) {
     exception_pending = 1;
     return NULL;
   }
+
   return object;
 }
 
@@ -129,6 +134,7 @@ static jint register_methods(JNIEnv *env, jclass cls,
   (void)cls;
   assert(count == 3 && methods[0].fnPtr && methods[2].fnPtr);
   register_calls++;
+
   if (mutation_probe == 1) {
     mutation_probe = 0;
     assert(fh_unregister(&context, cls) == JNI_ERR);
@@ -137,6 +143,7 @@ static jint register_methods(JNIEnv *env, jclass cls,
     exception_pending = 0;
     mutation_checks += 2;
   }
+
   return reject_registration ? JNI_ERR : JNI_OK;
 }
 
@@ -144,6 +151,7 @@ static jint unregister_methods(JNIEnv *env, jclass cls) {
   (void)env;
   (void)cls;
   unregister_calls++;
+
   if (mutation_probe == 2) {
     mutation_probe = 0;
     assert(fh_register(&context, cls, mutation_methods, 3) == JNI_ERR);
@@ -152,6 +160,7 @@ static jint unregister_methods(JNIEnv *env, jclass cls) {
     exception_pending = 0;
     mutation_checks += 2;
   }
+
   return unregister_failure ? JNI_ERR : JNI_OK;
 }
 
@@ -178,6 +187,7 @@ struct host_context *fh_context(JNIEnv *environment,
     fh_throw(environment, FB_FAILURE_MEMORY, "test context capacity failure");
     return NULL;
   }
+
   context.env = environment;
   return &context;
 }
@@ -189,6 +199,7 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
     fh_throw(c->env, FB_FAILURE_MEMORY, "test token allocation failure");
     return NULL;
   }
+
   return value;
 }
 
@@ -208,6 +219,7 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t guest,
   if (op == FB_OWNER) {
     return (jvalue){.j = guest < 4 ? (jlong)reverse_owner[guest] : 0};
   }
+
   assert(op == FB_NATIVE && !strcmp(signature, "(J)J"));
   return (jvalue){.j = arguments[1].j + (jlong)guest + (jlong)c->module};
 }
@@ -227,6 +239,7 @@ int gw_loader_fail(struct gw_loader_error *error, int code, const char *text) {
     error->code = code;
     snprintf(error->message, sizeof error->message, "%s", text);
   }
+
   return GW_ERROR;
 }
 
@@ -235,7 +248,9 @@ static void invoke(struct binding *b) {
   jobject receiver = (jobject)(uintptr_t)9;
   jlong argument = 123, result = 0;
   void *values[] = {&environment, &receiver, &argument};
+
   ffi_call(&b->cif, FFI_FN(b->code), &result, values);
+
   assert(result == argument + (jlong)b->guest + (jlong)b->module);
 }
 
@@ -245,6 +260,7 @@ static void *allocate(void *unused, size_t size, size_t alignment) {
     injected_failures++;
     return NULL;
   }
+
   void *memory = NULL;
   if (alignment < sizeof(void *)) {
     alignment = sizeof(void *);
@@ -252,6 +268,7 @@ static void *allocate(void *unused, size_t size, size_t alignment) {
   if (posix_memalign(&memory, alignment, size)) {
     return NULL;
   }
+
   outstanding++;
   return memory;
 }
@@ -289,6 +306,7 @@ static struct binding *get(struct gw_binding_store *store, uint64_t module,
                            uintptr_t guest) {
   void *object = NULL;
   int created = 0;
+
   assert(gw_binding_store_get(store, module, guest, "(J)J", 4, &object,
                               &created) == GW_BINDING_OK);
   return object;
@@ -298,6 +316,7 @@ static void initial_pool(void) {
   struct gw_binding_store *store = gw_binding_store_create(&callbacks);
   assert(store && gw_binding_store_capacity(store) == 512);
   assert(!atomic_load(&counters.live_closures));
+
   struct binding *first = NULL;
   for (uint64_t module = 1; module <= 64; module++) {
     for (uintptr_t guest = 1; guest <= 8; guest++) {
@@ -311,18 +330,22 @@ static void initial_pool(void) {
   assert(atomic_load(&counters.live_closures) == 512);
   assert(get(store, 1, 1) == first);
   invoke(first);
+
   get(store, 64, 9);
   assert(gw_binding_store_capacity(store) == 576);
   invoke(first);
+
   assert(gw_binding_store_release(store, 2) == GW_BINDING_OK);
   for (uintptr_t guest = 1; guest <= 8; guest++) {
     get(store, 65, guest);
   }
   assert(gw_binding_store_capacity(store) == 576);
+
   for (uint64_t module = 1; module <= 65; module++) {
     assert(gw_binding_store_release(store, module) == GW_BINDING_OK);
   }
   assert(gw_binding_store_destroy(store) == GW_BINDING_OK && !outstanding);
+
   for (size_t failure = 0; failure < 24; failure++) {
     fail_at = allocation_attempts + failure;
     store = gw_binding_store_create(&callbacks);
@@ -339,6 +362,7 @@ static void store_stress(void) {
   assert(store);
   struct binding *first = get(store, 1, 1);
   void *code = first->code;
+
   for (uintptr_t i = 2; i <= 4096; i++) {
     get(store, 1, i);
     get(store, 2, i);
@@ -347,11 +371,14 @@ static void store_stress(void) {
       invoke(first);
     }
   }
+
   assert(atomic_load(&counters.live_closures) == 8191);
   assert(get(store, 2, 1) != first);
+
   assert(gw_binding_store_destroy(store) == GW_BINDING_BUSY);
   assert(gw_binding_store_release(store, 2) == GW_BINDING_OK);
   invoke(first);
+
   atomic_store(&first->active, 1);
   assert(gw_binding_store_release(store, 1) == GW_BINDING_BUSY);
   assert(atomic_load(&counters.live_closures) == 1);
@@ -442,13 +469,16 @@ static void registration_contract(const JNINativeMethod *methods) {
   mutation_probe = 1;
   assert(fh_register(&context, cls, methods, 3) == JNI_OK &&
          mutation_checks == 2);
+
   context.module = 23;
   assert(fh_unregister(&context, cls) == JNI_ERR && exception_pending);
   exception_pending = 0;
   context.module = 22;
+
   mutation_probe = 2;
   assert(fh_unregister(&context, cls) == JNI_OK && mutation_checks == 4);
   assert(!registration_weaks && atomic_load(&counters.live_closures) == 3);
+
   context.module = 23;
   assert(fh_register(&context, cls, methods, 3) == JNI_OK);
   int before = unregister_calls;
@@ -456,9 +486,11 @@ static void registration_contract(const JNINativeMethod *methods) {
          unregister_calls == before);
   assert(fh_unregister(&context, cls) == JNI_OK);
   release_bindings(23);
+
   /* Untracked unregister also reserves the class against concurrent publish. */
   mutation_probe = 2;
   assert(fh_unregister(&context, cls) == JNI_OK && mutation_checks == 6);
+
   context.module = 0;
   reverse_owner[1] = reverse_owner[3] = 24;
   reverse_owner[2] = 25;
@@ -471,6 +503,7 @@ static void registration_contract(const JNINativeMethod *methods) {
   assert(fh_register(&context, cls, methods, 3) == JNI_OK);
   assert(fh_unregister(&context, cls) == JNI_OK);
   release_bindings(24);
+
   context.module = 22;
   assert(fh_register(&context, cls, methods, 3) == JNI_OK);
 }
@@ -485,12 +518,14 @@ static void uncertain_unregister(const JNINativeMethod *methods) {
     size_t weak = registration_weaks;
     int live = atomic_load(&counters.live_closures);
     unregister_failure = 1;
+
     assert(fh_unregister(&context, cls) == JNI_ERR && quarantined);
     assert(registration_weaks == weak &&
            atomic_load(&counters.live_closures) == live);
     _exit(
         0); /* Quarantine deliberately retains resources until process exit. */
   }
+
   int status;
   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) &&
          !WEXITSTATUS(status));
@@ -615,12 +650,14 @@ static void production_backend(void) {
 
 int main(void) {
   assert(!gw_binding_store_create(NULL));
+
   initial_pool();
   store_stress();
   store_failures();
   production_backend();
   assert(atomic_load(&counters.errors) ==
          3); /* Busy rejection, weak promotion OOM, unregister failure. */
+
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\","
       "\"store_bindings\":8192,\"production_bindings\":%d,"

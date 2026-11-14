@@ -10,6 +10,7 @@ static int changing_clock(clockid_t clock, struct timespec *value) {
     errno = EIO;
     return -1;
   }
+
   int result = clock_gettime(clock, value);
   errno = EBUSY; /* Even a successful diagnostic clock call must preserve its
                     caller's errno. */

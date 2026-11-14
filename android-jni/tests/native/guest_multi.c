@@ -60,6 +60,7 @@ static jint JNICALL own_tls(JNIEnv *e, jclass c, jint v) {
   (void)e;
   (void)c;
   int old = tls;
+
   if (v >= 0) {
     tls = v;
   }
@@ -87,12 +88,14 @@ struct registration_job {
 static jint register_target_methods(JNIEnv *e, jclass target, int kind) {
   JNINativeMethod m[] = {{"probe", "()I", (void *)identity},
                          {"other", "()I", (void *)identity}};
+
   if (kind == 1 || kind == 3) {
     m[0].fnPtr = m[1].fnPtr = (void *)multi_dep_native;
   }
   if (kind == 4) {
     m[1].fnPtr = (void *)multi_dep_native;
   }
+
   return (*e)->RegisterNatives(e, target, m, 2);
 }
 
@@ -103,11 +106,13 @@ static void *background_register(void *opaque) {
   if (job->result != JNI_OK) {
     return NULL;
   }
+
   job->result = register_target_methods(e, job->target, job->kind);
   job->exception = (*e)->ExceptionCheck(e);
   if (job->exception) {
     (*e)->ExceptionClear(e);
   }
+
   (*vm)->DetachCurrentThread(vm);
   return NULL;
 }
@@ -118,6 +123,7 @@ static jint JNICALL register_target(JNIEnv *e, jclass c, jclass target,
   if (kind < 2) {
     return register_target_methods(e, target, kind);
   }
+
   struct registration_job job = {
       .target = (jclass)(*e)->NewGlobalRef(e, target),
       .kind = kind,
@@ -125,10 +131,12 @@ static jint JNICALL register_target(JNIEnv *e, jclass c, jclass target,
   if (!job.target) {
     return JNI_ERR;
   }
+
   pthread_t thread;
   if (!pthread_create(&thread, NULL, background_register, &job)) {
     pthread_join(thread, NULL);
   }
+
   (*e)->DeleteGlobalRef(e, job.target);
   return job.result == JNI_ERR && !job.exception ? -7 : job.result;
 }
@@ -207,6 +215,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *opaque) {
 JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *v, void *opaque) {
   (void)opaque;
   JNIEnv *e = NULL;
+
   if ((*v)->GetEnv(v, (void **)&e, JNI_VERSION_1_6) == JNI_OK && retained) {
     (*e)->DeleteGlobalRef(e, retained);
     retained = NULL;

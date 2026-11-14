@@ -16,6 +16,7 @@ static uint64_t clock_ns(clockid_t clock) {
   if (clock_gettime(clock, &value)) {
     abort();
   }
+
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) +
          (uint64_t)value.tv_nsec;
 }

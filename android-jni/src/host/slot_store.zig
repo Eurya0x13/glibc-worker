@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 const width = 64;
+const Index = @import("slot_index.zig").Index;
 const Config = extern struct {
     object_size: usize,
     object_alignment: usize,
@@ -18,6 +19,7 @@ const Chunk = struct {
     storage: [*]u8,
     live: u64 = 0,
     burned: u64 = 0,
+    indexed: u64 = 0,
     generation: [width]u32 = @splat(0),
     owner: [width]i32 = @splat(-1),
     position: [width]usize = @splat(0),
@@ -29,6 +31,7 @@ const Store = struct {
     available: std.ArrayList(u32) = .empty,
     owners: std.ArrayList(Owner) = .empty,
     count: usize = 0,
+    index: Index = .{},
 
     fn allocator(self: *Store) Allocator {
         return .{ .ptr = self, .vtable = &.{
@@ -165,6 +168,10 @@ fn erase(store_: ?*Store, token: u64) callconv(.c) c_int {
     const index = store.validIndex(token) orelse return 0;
     const chunk = store.chunks.items[index / width];
     const slot: u6 = @intCast(index % width);
+    if (chunk.indexed & (@as(u64, 1) << slot) != 0) {
+        store.index.erase(store.allocator(), token);
+        chunk.indexed &= ~(@as(u64, 1) << slot);
+    }
     const owner = chunk.owner[slot];
     if (owner >= 0) {
         const list = &store.owners.items[@intCast(owner)];
@@ -187,6 +194,7 @@ fn destroy(store_: ?*Store) callconv(.c) c_int {
     if (store.count != 0) return 0;
     const config = store.config;
     const allocator = store.allocator();
+    store.index.deinit(allocator);
     for (store.chunks.items) |chunk| {
         config.deallocate.?(config.context, chunk.storage);
         allocator.destroy(chunk);
@@ -198,7 +206,28 @@ fn destroy(store_: ?*Store) callconv(.c) c_int {
     config.deallocate.?(config.context, store);
     return 1;
 }
+fn indexInsert(store_: ?*Store, token: u64, kind: c_int, value: usize) callconv(.c) c_int {
+    const store = store_ orelse return 0;
+    const index = store.validIndex(token) orelse return 0;
+    const chunk = store.chunks.items[index / width];
+    const bit = @as(u64, 1) << @as(u6, @intCast(index % width));
+    if (chunk.indexed & bit != 0) return 0;
+    store.index.insert(store.allocator(), kind, value, token) catch return 0;
+    chunk.indexed |= bit;
+    return 1;
+}
+fn indexCandidate(store_: ?*Store, kind: c_int, value: usize, position: usize) callconv(.c) u64 {
+    const store = store_ orelse return 0;
+    return store.index.candidate(kind, value, position);
+}
+fn indexAt(store_: ?*Store, position: usize) callconv(.c) u64 {
+    const store = store_ orelse return 0;
+    return store.index.at(position);
+}
 comptime {
+    @export(&indexInsert, .{ .name = "gw_slot_index_insert", .visibility = .hidden });
+    @export(&indexCandidate, .{ .name = "gw_slot_index_candidate", .visibility = .hidden });
+    @export(&indexAt, .{ .name = "gw_slot_index_at", .visibility = .hidden });
     @export(&create, .{ .name = "gw_slot_create", .visibility = .hidden });
     @export(&insert, .{ .name = "gw_slot_insert", .visibility = .hidden });
     @export(&get, .{ .name = "gw_slot_get", .visibility = .hidden });

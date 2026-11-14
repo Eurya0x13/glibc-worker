@@ -52,6 +52,7 @@ JNIEXPORT void conformance_observe_destructor(_Atomic int *p) {
 static jobject new_v(JNIEnv *e, jclass cls, jmethodID ctor, ...) {
   va_list va;
   va_start(va, ctor);
+
   jobject o = (*e)->NewObjectV(e, cls, ctor, va);
   va_end(va);
   return o;
@@ -433,6 +434,7 @@ static jint JNICALL tls_set(JNIEnv *e, jclass c, jint value) {
   (void)e;
   (void)c;
   int old = tls_value;
+
   tls_value = value;
   return old;
 }
@@ -486,6 +488,7 @@ static jlong JNICALL mixed(JNIEnv *e, jclass c, jlong value, jdouble scale,
 static void JNICALL throw_native(JNIEnv *e, jclass c) {
   (void)c;
   jclass ex = (*e)->FindClass(e, "java/lang/IllegalStateException");
+
   if (ex) {
     (*e)->ThrowNew(e, ex, "guest native throw");
   }
@@ -626,6 +629,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *reserved) {
 JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *v, void *reserved) {
   (void)reserved;
   JNIEnv *e = NULL;
+
   if ((*v)->GetEnv(v, (void **)&e, JNI_VERSION_1_6) != JNI_OK) {
     fprintf(stderr, "GUEST_UNLOAD_ENV_ERROR\n");
   }

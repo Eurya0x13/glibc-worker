@@ -13,6 +13,7 @@ static int checks, failures, rejected, accepted, owner_dead, stuck;
 
 static void check(int good, const char *name, int result) {
   checks++;
+
   if (!good) {
     failures++;
     dprintf(STDOUT_FILENO, "MUTEX_FAILURE name=%s rc=%d\n", name, result);
@@ -22,11 +23,13 @@ static void check(int good, const char *name, int result) {
 static struct timespec deadline(void) {
   struct timespec value;
   clock_gettime(CLOCK_REALTIME, &value);
+
   value.tv_nsec += 100000000;
   if (value.tv_nsec >= 1000000000) {
     value.tv_sec++;
     value.tv_nsec -= 1000000000;
   }
+
   return value;
 }
 
@@ -44,6 +47,7 @@ static void *leave_locked(void *opaque) {
 static void *timed_contender(void *opaque) {
   struct owner *owner = opaque;
   struct timespec until = deadline();
+
   owner->result = pthread_mutex_timedlock(owner->mutex, &until);
   if (!owner->result) {
     pthread_mutex_unlock(owner->mutex);
@@ -59,11 +63,13 @@ static void recovery(pthread_mutex_t *mutex, int inconsistent) {
   if (rc) {
     return;
   }
+
   rc = pthread_join(thread, NULL);
   check(rc == 0 && owner.result == 0, "owner-exited-locked", rc);
   if (rc || owner.result) {
     return;
   }
+
   struct timespec until = deadline();
   rc = pthread_mutex_timedlock(mutex, &until);
   owner_dead += rc == EOWNERDEAD;
@@ -75,10 +81,12 @@ static void recovery(pthread_mutex_t *mutex, int inconsistent) {
     }
     return;
   }
+
   if (!inconsistent) {
     rc = pthread_mutex_consistent(mutex);
     check(rc == 0, "consistent", rc);
   }
+
   rc = pthread_mutex_unlock(mutex);
   check(rc == 0, "recovered-unlock", rc);
   rc = pthread_mutex_trylock(mutex);
@@ -102,6 +110,7 @@ static void robust(enum gw_mutex_expectation expected) {
         if (rc) {
           return;
         }
+
         rc = pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
         check(!rc, "attr-robust", rc);
         rc = pthread_mutexattr_settype(&attr, types[t]);
@@ -110,6 +119,7 @@ static void robust(enum gw_mutex_expectation expected) {
         check(!rc, "attr-sharing", rc);
         rc = pthread_mutexattr_setprotocol(&attr, protocols[p]);
         check(!rc, "attr-protocol", rc);
+
         pthread_mutex_t mutex;
         unsigned char before[sizeof mutex];
         memset(&mutex, 0x5a, sizeof mutex);
@@ -126,6 +136,7 @@ static void robust(enum gw_mutex_expectation expected) {
         } else {
           check(rc == 0, "reference-robust-init", rc);
         }
+
         /* A private non-PI mutex provides a bounded old-runtime reproducer.
            The shared tests use attributes only; they do not claim IPC support.
          */
@@ -137,11 +148,13 @@ static void robust(enum gw_mutex_expectation expected) {
           check(destroyed == 0 || (stuck && destroyed == EBUSY), "destroy",
                 destroyed);
         }
+
         rc = pthread_mutexattr_destroy(&attr);
         check(!rc, "attr-destroy", rc);
       }
     }
   }
+
   if (expected == GW_MUTEX_RECOVERED) {
     pthread_mutexattr_t attr;
     pthread_mutex_t mutex;
@@ -151,6 +164,7 @@ static void robust(enum gw_mutex_expectation expected) {
     check(!rc, "inconsistent-robust", rc);
     rc = pthread_mutex_init(&mutex, &attr);
     check(!rc, "inconsistent-init", rc);
+
     if (!rc) {
       recovery(&mutex, 1);
       rc = pthread_mutex_destroy(&mutex);
@@ -173,13 +187,16 @@ static void *wait_condition(void *opaque) {
   if (waiter->result) {
     return NULL;
   }
+
   atomic_store_explicit(&waiter->entered, 1, memory_order_release);
   struct timespec until = deadline();
   until.tv_sec += 2;
+
   while (!waiter->release && !waiter->result) {
     waiter->result =
         pthread_cond_timedwait(&waiter->condition, &waiter->mutex, &until);
   }
+
   pthread_mutex_unlock(&waiter->mutex);
   return NULL;
 }
@@ -200,6 +217,7 @@ static void ordinary(void) {
       pthread_mutexattr_destroy(&attr);
       continue;
     }
+
     rc = pthread_mutex_lock(&mutex);
     check(!rc, "ordinary-lock", rc);
     if (!rc) {
@@ -228,10 +246,12 @@ static void ordinary(void) {
       rc = pthread_mutex_unlock(&mutex);
       check(!rc, "ordinary-unlock", rc);
     }
+
     rc = pthread_mutex_destroy(&mutex);
     check(!rc, "ordinary-destroy", rc);
     pthread_mutexattr_destroy(&attr);
   }
+
   struct waiter waiter = {.mutex = PTHREAD_MUTEX_INITIALIZER,
                           .condition = PTHREAD_COND_INITIALIZER};
   pthread_t thread;
@@ -240,6 +260,7 @@ static void ordinary(void) {
   if (rc) {
     return;
   }
+
   struct timespec until = deadline();
   until.tv_sec += 1;
   struct timespec now;
@@ -251,12 +272,14 @@ static void ordinary(void) {
     }
     usleep(1000);
   }
+
   rc = pthread_mutex_lock(&waiter.mutex);
   check(!rc, "condition-lock", rc);
   waiter.release = 1;
   rc = pthread_cond_signal(&waiter.condition);
   check(!rc, "condition-signal", rc);
   pthread_mutex_unlock(&waiter.mutex);
+
   rc = pthread_join(thread, NULL);
   check(!rc && !waiter.result && atomic_load(&waiter.entered), "condition-join",
         rc);
@@ -268,8 +291,10 @@ static void ordinary(void) {
 
 int gw_mutex_contract(enum gw_mutex_expectation expected) {
   checks = failures = rejected = accepted = owner_dead = stuck = 0;
+
   ordinary();
   robust(expected);
+
   dprintf(STDOUT_FILENO,
           "MUTEX_CONTRACT {\"result\":\"%s\",\"policy\":\"%s\",\"checks\":%d,"
           "\"failures\":%d,\"robust_rejected\":%d,\"robust_accepted\":%d,"

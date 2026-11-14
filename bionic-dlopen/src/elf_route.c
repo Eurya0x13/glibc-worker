@@ -47,6 +47,7 @@ static int fail(struct image *image, int code, const char *message) {
     snprintf(image->error->message, sizeof image->error->message, "%s",
              message);
   }
+
   return 0;
 }
 
@@ -58,6 +59,7 @@ static int read_file(struct image *image, uint64_t offset, void *out,
       pread(image->fd, out, size, (off_t)offset) != (ssize_t)size) {
     return fail(image, GW_E_IMAGE, "ELF metadata is truncated or unreadable");
   }
+
   return 1;
 }
 

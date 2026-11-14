@@ -3,8 +3,9 @@ package conformance;
 /** Negative JNI cases in the same child ClassLoader as ResourceCapacity. */
 public final class FailureCases {
   private static void require(boolean condition, String message) {
-    if (!condition)
+    if (!condition) {
       throw new AssertionError(message);
+    }
   }
 
   public static int verify(int available) throws Exception {
@@ -39,8 +40,10 @@ public final class FailureCases {
         threads[i].start();
       }
       long deadline = System.nanoTime() + 10_000_000_000L;
-      while (ResourceCapacity.failureProbe(7, 0) != threads.length && System.nanoTime() < deadline)
+      while (
+          ResourceCapacity.failureProbe(7, 0) != threads.length && System.nanoTime() < deadline) {
         Thread.sleep(2);
+      }
       require(ResourceCapacity.failureProbe(7, 0) == threads.length, "Grow past initial contexts");
       require(ResourceCapacity.failureProbe(11, 0) == 32,
           "32 Guest-origin attachments grow while Host threads remain bound");
@@ -48,13 +51,17 @@ public final class FailureCases {
     } finally {
       ResourceCapacity.failureProbe(5, 0);
       for (Thread thread : threads)
-        if (thread != null)
+        if (thread != null) {
           thread.join(5000);
+        }
     }
-    for (int i = 0; i < threads.length; i++) require(!threads[i].isAlive(), "Worker release");
+    for (int i = 0; i < threads.length; i++) {
+      require(!threads[i].isAlive(), "Worker release");
+    }
     for (Throwable error : errors)
-      if (error != null)
+      if (error != null) {
         throw new AssertionError(error);
+      }
     return 5;
   }
 
@@ -70,8 +77,9 @@ public final class FailureCases {
     thread.start();
     thread.join(5000);
     require(!thread.isAlive(), "Context recovery timeout");
-    if (error[0] != null)
+    if (error[0] != null) {
       throw new AssertionError(error[0]);
+    }
     return true;
   }
 }

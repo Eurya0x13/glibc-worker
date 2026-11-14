@@ -46,6 +46,7 @@ uintptr_t multi_dep_cookie(void) {
 
 int multi_dep_tls(int n) {
   int old = tls;
+
   if (n >= 0) {
     tls = n;
   }

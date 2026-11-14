@@ -48,10 +48,12 @@ static void reset(struct gw_rpc_row *row) {
   *row = (struct gw_rpc_row){0};
   gw_rpc_current = row;
   gw_rpc_scope_current = NULL;
+
   wall_now = UINT64_C(1000000000);
   cpu_now = UINT64_C(100000000);
   fail_wall = fail_cpu = 0;
   wall_reads = cpu_reads = 0;
+
   errno = -305;
 }
 

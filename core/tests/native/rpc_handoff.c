@@ -180,6 +180,7 @@ int main(void) {
   /* Verify that the ordinary include does not pull in diagnostic helpers. */
   struct timespec now;
   CHECK(!test_clock_gettime(CLOCK_MONOTONIC, &now));
+
   puts("RPC_HANDOFF profile=0 disabled=PASS result=PASS");
   return 0;
 }

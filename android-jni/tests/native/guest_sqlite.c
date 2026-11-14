@@ -27,6 +27,7 @@ static int execute(sqlite3 *db, const char *sql) {
     dprintf(2, "SQLITE_ERROR rc=%d message=%s\n", rc,
             error ? error : sqlite3_errmsg(db));
   }
+
   sqlite3_free(error);
   return rc;
 }
@@ -84,6 +85,7 @@ static void *writer(void *opaque) {
 static void remove_database(const char *path) {
   char side[4096];
   unlink(path);
+
   snprintf(side, sizeof side, "%s-wal", path);
   unlink(side);
   snprintf(side, sizeof side, "%s-shm", path);
@@ -226,6 +228,7 @@ done:
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *opaque) {
   (void)opaque;
   JNIEnv *e = NULL;
+
   return (*vm)->GetEnv(vm, (void **)&e, JNI_VERSION_1_6) == JNI_OK
              ? JNI_VERSION_1_6
              : JNI_ERR;

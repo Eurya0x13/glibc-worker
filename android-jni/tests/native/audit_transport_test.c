@@ -35,6 +35,7 @@ void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
     errno = ENOMEM;
     return MAP_FAILED;
   }
+
   return __real_mmap(p, n, prot, flags, fd, off);
 }
 
@@ -82,6 +83,7 @@ static jint throw_new(JNIEnv *env, jclass cls, const char *message) {
   (void)env;
   (void)cls;
   (void)message;
+
   pending = 1;
   return JNI_OK;
 }
@@ -134,6 +136,7 @@ int release_registrations(JNIEnv *env, uint64_t id) {
   (void)env;
   assert(id == 17 && !pending);
   cleanup[cleanup_count++] = 100;
+
   if (fail_unregister) {
     pending = 88;
     return JNI_ERR;
@@ -152,13 +155,16 @@ struct binding *make_binding(uint64_t id, uintptr_t guest, const char *sig,
 void full_host_poll(void) {
   struct fb_call *command = fb_call_at(&bridge.ctx[0], context.depth - 1);
   int sequence = atomic_load_explicit(&command->request, memory_order_acquire);
+
   if (atomic_load(&stall)) {
     atomic_store_explicit(&published, 1, memory_order_release);
     return;
   }
+
   assert(sequence != atomic_load(&command->response));
   operations[operation_count++] = command->op;
   cleanup[cleanup_count++] = command->op;
+
   if (command->op == FB_LOAD) {
     command->result.i = reject_load ? (jint)0x00190000 : load_version;
     if (throw_load) {
@@ -179,12 +185,14 @@ void full_host_poll(void) {
     snprintf(command->diagnostic, sizeof command->diagnostic,
              "controlled Guest failure");
   }
+
   atomic_store_explicit(&command->response, sequence, memory_order_release);
 }
 
 static void scenario(unsigned test) {
   struct gw_loader_error error = {0};
   context.env = &environment;
+
   if (test == 0) {
     assert(fh_transport_load(&environment, 17, "image", &error) ==
            JNI_VERSION_1_8);
@@ -227,22 +235,26 @@ static void scenario(unsigned test) {
     memset(long_sig, 'I', FB_SIG);
     long_sig[FB_SIG] = 0;
     struct fb_call *slot = &bridge.ctx[0].call[0];
+
     fh_command(&context, FB_NATIVE, 0, long_sig, NULL);
     assert(context.command_error == GW_E_ARGUMENT &&
            !strcmp(exception_type, "java/lang/IllegalArgumentException"));
     assert(!atomic_load(&slot->request) && !operation_count && !context.depth);
+
     pending = 0;
     context.depth = FB_DEPTH;
     fail_pages = 1;
     fh_command(&context, FB_NATIVE, 0, "()I", NULL);
     assert(context.command_error == GW_E_CAPACITY &&
            !strcmp(exception_type, "java/lang/OutOfMemoryError"));
+
     fail_pages = 0;
     context.depth = pending = 0;
     context.emergency = 1;
     fh_command(&context, FB_NATIVE, 0, "()I", NULL);
     assert(context.command_error == GW_E_CAPACITY &&
            !atomic_load(&slot->request));
+
     context.emergency = pending = 0;
     atomic_store(&slot->request, INT_MAX);
     atomic_store(&slot->response, INT_MAX);
@@ -280,6 +292,7 @@ static void scenario(unsigned test) {
     assert(error.code == GW_E_BRIDGE && !entry);
     return;
   }
+
   assert(pushed == 1 && popped == 1 && dropped == 1 && !context.module &&
          !context.local_depth);
   if (gw_dlopen_is_quarantined()) {
@@ -301,17 +314,21 @@ static void *watch_pending(void *unused) {
   while (!atomic_load_explicit(&published, memory_order_acquire)) {
     sched_yield();
   }
+
   struct fb_call *call = &bridge.ctx[0].call[0];
   int sequence = atomic_load_explicit(&call->request, memory_order_acquire);
   assert(sequence != atomic_load(&call->response));
+
   gw_dlopen_quarantine();
   fb_event_notify(&bridge.ctx[0].host_event);
   usleep(25000); /* Test observation window, not a production deadline. */
+
   assert(!atomic_load(&returned) && context.depth == 1);
   assert(sequence != atomic_load(&call->response));
   int *borrowed = (int *)call->args[0].l;
   assert(*borrowed == 73 && !released && !dropped && !popped);
   assert(write(monitor_fd, "P", 1) == 1);
+
   if (!lose_reply) {
     *borrowed = 94;
     call->result.i = *borrowed;
@@ -326,6 +343,7 @@ static void pending_case(int lost) {
   assert(!pipe(channel));
   pid_t pid = fork();
   assert(pid >= 0);
+
   if (!pid) {
     close(channel[0]);
     monitor_fd = channel[1];
@@ -336,21 +354,25 @@ static void pending_case(int lost) {
     atomic_store(&stall, 1);
     pthread_t watcher;
     assert(!pthread_create(&watcher, NULL, watch_pending, NULL));
+
     jvalue result = fh_command(&context, FB_NATIVE, 0, "()I", args);
     atomic_store(&returned, 1);
     assert(!lost && result.i == 94 && borrowed == 94 && !context.depth);
     assert(!pthread_join(watcher, NULL));
     assert(gw_dlopen_is_quarantined());
+
     fh_command(&context, FB_NATIVE, 0, "()I", NULL);
     assert(context.command_error == GW_E_QUARANTINED);
     assert(write(monitor_fd, "D", 1) == 1);
     _exit(0);
   }
+
   close(channel[1]);
   struct pollfd event = {.fd = channel[0], .events = POLLIN};
   char stage = 0;
   int ready = poll(&event, 1, 5000);
   int observed = ready > 0 && read(channel[0], &stage, 1) == 1 && stage == 'P';
+
   if (lost || !observed) {
     /* Only the test supervisor terminates its disposable child process. */
     assert(!kill(pid, SIGKILL));
@@ -361,10 +383,12 @@ static void pending_case(int lost) {
       observed = 0;
     }
   }
+
   int status;
   assert(waitpid(pid, &status, 0) == pid);
   close(channel[0]);
   assert(observed);
+
   if (lost) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
   } else {
@@ -387,8 +411,10 @@ int main(void) {
       abort();
     }
   }
+
   pending_case(0);
   pending_case(1);
+
   puts(
       "{\"result\":\"PASS\",\"scenarios\":15,\"cleanup_order\":true,"
       "\"quarantine\":true,\"exception_preserved\":true,"

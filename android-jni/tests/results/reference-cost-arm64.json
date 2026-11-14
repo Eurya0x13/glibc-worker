@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-14",
+  "device": {
+    "model": "V2239A",
+    "android": 13,
+    "abi": "arm64-v8a"
+  },
+  "scope": "Independent bionic executable under shell UID; production C reference code and ReleaseSafe Zig store with minimal VM double; no RPC or actual JVM",
+  "clock": "CLOCK_THREAD_CPUTIME_ID",
+  "c_optimization": "-O1",
+  "warmup_trials": 1,
+  "trials_per_case": 10,
+  "references_released_before_measurement": true,
+  "sources_sha256": {
+    "android-jni/src/host/references.c": "e11f1b65cac1b442bacf38f05425953c1fad0bcec336ee15588587a2352a632d",
+    "android-jni/src/host/slot_store.zig": "12496783a64ab43c02ceccac72e9d6274c0e4ffdeae403c7da5ec5b2e3c24162",
+    "android-jni/tests/native/reference_cost.c": "71634c35a177bd7bc0f3ac09e8efde43cec3a9713edd082d1a3b9948880ae08f"
+  },
+  "rows": [
+    {
+      "high_water_refs": 0,
+      "operation": "reference_get",
+      "capacity": 16384,
+      "median_cpu_us": 0.0232695,
+      "min_cpu_us": 0.023077,
+      "max_cpu_us": 0.023577,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 0,
+      "operation": "id_hit_early",
+      "capacity": 16384,
+      "median_cpu_us": 47.742846,
+      "min_cpu_us": 47.559346,
+      "max_cpu_us": 47.963883,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 0,
+      "operation": "id_hit_late",
+      "capacity": 16384,
+      "median_cpu_us": 47.761309,
+      "min_cpu_us": 47.595692,
+      "max_cpu_us": 48.024919000000004,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 0,
+      "operation": "id_miss",
+      "capacity": 16384,
+      "median_cpu_us": 48.552265625000004,
+      "min_cpu_us": 48.17546875,
+      "max_cpu_us": 48.66584375,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 32768,
+      "operation": "reference_get",
+      "capacity": 32832,
+      "median_cpu_us": 0.023693000000000002,
+      "min_cpu_us": 0.023614999999999997,
+      "max_cpu_us": 0.023808,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 32768,
+      "operation": "id_hit_early",
+      "capacity": 32832,
+      "median_cpu_us": 47.397979,
+      "min_cpu_us": 47.302349,
+      "max_cpu_us": 47.754038,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 32768,
+      "operation": "id_hit_late",
+      "capacity": 32832,
+      "median_cpu_us": 95.7233235,
+      "min_cpu_us": 95.27265700000001,
+      "max_cpu_us": 96.11938099999999,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 32768,
+      "operation": "id_miss",
+      "capacity": 32832,
+      "median_cpu_us": 96.56128125,
+      "min_cpu_us": 95.67784375,
+      "max_cpu_us": 98.18990625,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 131072,
+      "operation": "reference_get",
+      "capacity": 131136,
+      "median_cpu_us": 0.025519,
+      "min_cpu_us": 0.025385,
+      "max_cpu_us": 0.0265,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 131072,
+      "operation": "id_hit_early",
+      "capacity": 131136,
+      "median_cpu_us": 47.202479499999995,
+      "min_cpu_us": 47.084727,
+      "max_cpu_us": 47.303766,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 131072,
+      "operation": "id_hit_late",
+      "capacity": 131136,
+      "median_cpu_us": 382.33200150000005,
+      "min_cpu_us": 380.594106,
+      "max_cpu_us": 389.348299,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 131072,
+      "operation": "id_miss",
+      "capacity": 131136,
+      "median_cpu_us": 383.26978125,
+      "min_cpu_us": 382.78478125,
+      "max_cpu_us": 399.30040625,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 262144,
+      "operation": "reference_get",
+      "capacity": 262208,
+      "median_cpu_us": 0.024327,
+      "min_cpu_us": 0.023231,
+      "max_cpu_us": 0.024538,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 262144,
+      "operation": "id_hit_early",
+      "capacity": 262208,
+      "median_cpu_us": 48.6531315,
+      "min_cpu_us": 48.492727,
+      "max_cpu_us": 49.111498,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 262144,
+      "operation": "id_hit_late",
+      "capacity": 262208,
+      "median_cpu_us": 802.203127,
+      "min_cpu_us": 800.08889,
+      "max_cpu_us": 805.478109,
+      "trials": 10
+    },
+    {
+      "high_water_refs": 262144,
+      "operation": "id_miss",
+      "capacity": 262208,
+      "median_cpu_us": 808.639421875,
+      "min_cpu_us": 780.1694375,
+      "max_cpu_us": 812.69715625,
+      "trials": 10
+    }
+  ],
+  "raw_samples_sha256": "7a45dcde31e3e8d1ece8448be9cbbf81af4c7e89cae07488e7e2c1efb0de5b10"
+}

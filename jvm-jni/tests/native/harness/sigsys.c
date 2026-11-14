@@ -18,10 +18,12 @@ static __attribute__((always_inline)) inline void number(char **p, uintptr_t n,
                                                          unsigned base) {
   char tmp[32];
   unsigned i = 0;
+
   do {
     tmp[i++] = "0123456789abcdef"[n % base];
     n /= base;
   } while (n);
+
   while (i) {
     *(*p)++ = tmp[--i];
   }
@@ -48,10 +50,12 @@ static __attribute__((optnone, no_stack_protector)) void handler(
 
 int install_sigsys_diagnostic(int fd) {
   report_fd = fd;
+
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
   sa.sa_sigaction = handler;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
+
   return sigaction(SIGSYS, &sa, NULL);
 }

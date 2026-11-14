@@ -144,12 +144,14 @@ static void validate_stack(void *stack, size_t size, char **args, size_t argc) {
           "startup arguments must contain 1..16 entries");
   require((uintptr_t)stack <= UINTPTR_MAX - size,
           "startup stack address overflow");
+
   const size_t reserved = 4096;
   const size_t words = 1 + argc + 1 + 2 + 1 + BOOTSTRAP_AUX_CAPACITY * 2;
   const size_t frame = words * sizeof(uintptr_t) + 16 + 15;
   require(size >= reserved && size - reserved >= frame,
           "startup stack capacity");
   size_t remaining = size - reserved - frame;
+
   const char *fixed[] = {"LC_ALL=C", "GLIBC_TUNABLES=glibc.pthread.rseq=0",
                          GW_ARCH_PLATFORM};
   for (size_t i = 0; i < argc + 3; i++) {

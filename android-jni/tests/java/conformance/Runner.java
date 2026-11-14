@@ -53,10 +53,12 @@ public final class Runner {
   static void awaitFreeContexts(int expected) throws Exception {
     long deadline = System.nanoTime() + 5_000_000_000L;
     while (NativeBridge.bridgeMetric(19) - NativeBridge.bridgeMetric(18) > expected
-        && System.nanoTime() < deadline)
+        && System.nanoTime() < deadline) {
       Thread.sleep(2);
-    if (NativeBridge.bridgeMetric(19) - NativeBridge.bridgeMetric(18) > expected)
+    }
+    if (NativeBridge.bridgeMetric(19) - NativeBridge.bridgeMetric(18) > expected) {
       throw new AssertionError("Context cleanup incomplete");
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -95,18 +97,21 @@ public final class Runner {
       int limit =
           (Integer) invoke(resources, "failureProbe", new Class<?>[] {int.class, int.class}, 8, 0);
       awaitFreeContexts(busyContexts);
-      if (failureChecks != 5 || !(Boolean) invoke(failureCases, "recovery", new Class<?>[] {}))
+      if (failureChecks != 5 || !(Boolean) invoke(failureCases, "recovery", new Class<?>[] {})) {
         throw new AssertionError("Failure recovery incomplete");
+      }
       awaitFreeContexts(busyContexts);
       int delta = NativeBridge.bridgeMetric(4) - beforeFailures;
-      if (delta != 0)
+      if (delta != 0) {
         throw new AssertionError("Unexpected bridge failure count: " + delta);
+      }
       expectedBridgeErrors += delta;
       System.out.println("AUDIT_FAILURE_TEST {\"cycle\":" + cycle
           + ",\"checks\":6,\"expected_errors\":" + delta + "}");
       int expanded = NativeBridge.bridgeMetric(19);
-      if (expanded < Math.max(32, limit + 8) + 32 + busyContexts)
+      if (expanded < Math.max(32, limit + 8) + 32 + busyContexts) {
         throw new AssertionError("Context storage did not grow");
+      }
       System.out.println("DYNAMIC_CAPACITY_TEST {\"cycle\":" + cycle + ",\"depth\":32,\"threads\":"
           + Math.max(32, limit + 8) + ",\"guest_threads\":32,\"contexts\":" + expanded
           + ",\"initial_contexts\":" + limit + "}");

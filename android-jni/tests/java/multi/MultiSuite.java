@@ -224,8 +224,9 @@ public final class MultiSuite {
   }
 
   static void requireScope(boolean good) {
-    if (!good)
+    if (!good) {
       throw new AssertionError("Execution scope contract");
+    }
   }
 
   static int closeBusy(Loaded target) {
@@ -258,8 +259,9 @@ public final class MultiSuite {
       });
       requireScope(a.integer("route", 2) == 333);
       a.type.getField("peer").set(null, (IntUnaryOperator) depth -> {
-        if (depth == 0)
+        if (depth == 0) {
           return closeBusy(b);
+        }
         return routeTo(b).applyAsInt(depth);
       });
       b.type.getField("peer").set(null, routeTo(a));

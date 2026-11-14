@@ -20,6 +20,7 @@ static int resolve(void *context, const char *path, char image[GW_LOADER_PATH],
   (void)context;
   (void)error;
   (void)unused;
+
   snprintf(image, GW_LOADER_PATH, "%s", path);
   return GW_OK;
 }
@@ -45,6 +46,7 @@ static int close_image(void *context, uint64_t id,
   (void)context;
   (void)id;
   (void)error;
+
   closes++;
   return GW_OK;
 }
@@ -56,9 +58,11 @@ static int find(void *context, uint64_t id, const char *name,
   (void)id;
   (void)binding;
   (void)error;
+
   if (strcmp(name, "answer")) {
     return GW_NOT_FOUND;
   }
+
   *entry = (void *)answer;
   return GW_OK;
 }
@@ -74,6 +78,7 @@ static void module_capacity(void) {
   char paths[FB_MODULES + 1][128];
   struct gw_dlopen_library libraries[FB_MODULES], extra;
   struct gw_loader_error error;
+
   for (size_t i = 0; i <= FB_MODULES; i++) {
     snprintf(paths[i], sizeof paths[i], "%s/%zu", directory, i);
     FILE *file = fopen(paths[i], "w");
@@ -84,14 +89,17 @@ static void module_capacity(void) {
       assert(fb_module_index(libraries[i].handle) == (int)i);
     }
   }
+
   int before = opens;
   assert(api->open(NULL, paths[FB_MODULES], GW_OPEN_GUEST, &extra, &error) ==
          GW_ERROR);
   assert(!extra.handle && error.code == GW_E_CAPACITY && opens == before);
+
   void *entry = NULL;
   assert(api->find(NULL, libraries[63].handle, "answer", NULL, &entry,
                    &error) == GW_OK &&
          ((int (*)(int))entry)(35) == 42);
+
   uint64_t retired = libraries[32].handle;
   assert(api->close(NULL, retired, &error) == GW_OK);
   assert(api->open(NULL, paths[FB_MODULES], GW_OPEN_GUEST, &libraries[32],
@@ -100,6 +108,7 @@ static void module_capacity(void) {
          fb_module_index(libraries[32].handle) == 32);
   assert(api->owns_handle(retired) &&
          api->module_state(retired) == GW_MODULE_STALE);
+
   for (size_t i = 0; i < FB_MODULES; i++) {
     assert(api->close(NULL, libraries[i].handle, &error) == GW_OK);
   }

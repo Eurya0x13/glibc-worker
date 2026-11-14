@@ -57,10 +57,12 @@ static char **baseline_environment(const char *host, char *preload,
                          (int)(slash - host), host) >= (int)size) {
     return NULL;
   }
+
   size_t count = 0;
   while (environ[count]) {
     count++;
   }
+
   char **copy = calloc(count + 2, sizeof *copy);
   if (copy) {
     size_t used = 0;
@@ -71,6 +73,7 @@ static char **baseline_environment(const char *host, char *preload,
     }
     copy[used] = preload;
   }
+
   return copy;
 }
 
@@ -78,6 +81,7 @@ static int wait_baseline(pid_t pid, int *status) {
   struct timespec now, pause = {0, 20000000};
   clock_gettime(CLOCK_MONOTONIC, &now);
   time_t deadline = now.tv_sec + 30;
+
   for (;;) {
     pid_t result = waitpid(pid, status, WNOHANG);
     if (result == pid) {
@@ -92,6 +96,7 @@ static int wait_baseline(pid_t pid, int *status) {
     }
     nanosleep(&pause, NULL);
   }
+
   kill(pid, SIGKILL);
   while (waitpid(pid, status, 0) < 0 && errno == EINTR) {
   }
@@ -103,6 +108,7 @@ static int launcher_baseline(int argc, char **argv) {
   char path[PATH_MAX];
   const char *home = getenv("JAVA_HOME");
   int fd = -1;
+
   if (home && snprintf(path, sizeof path, "%s/launcher-baseline-XXXXXX", home) <
                   (int)sizeof path) {
     fd = mkstemp(path);
@@ -111,10 +117,12 @@ static int launcher_baseline(int argc, char **argv) {
       fcntl(fd, F_SETFD, FD_CLOEXEC);
     }
   }
+
   FILE *log = fd >= 0 ? fdopen(fd, "w+") : NULL;
   if (!log && fd >= 0) {
     close(fd);
   }
+
   if (!baseline || !log) {
     free(baseline);
     if (log) {
@@ -122,11 +130,13 @@ static int launcher_baseline(int argc, char **argv) {
     }
     return 1;
   }
+
   baseline[0] = "/system/bin/linker64";
   for (int i = 0; i < argc; i++) {
     baseline[i + 1] = argv[i];
   }
   baseline[argc - 1] = "dev.glibc.worker.JreBaseline";
+
   posix_spawn_file_actions_t actions;
   int initialized = posix_spawn_file_actions_init(&actions) == 0;
   int rc = initialized
@@ -135,6 +145,7 @@ static int launcher_baseline(int argc, char **argv) {
   if (!rc) {
     rc = posix_spawn_file_actions_adddup2(&actions, fileno(log), 2);
   }
+
   pid_t pid = -1;
   char preload[PATH_MAX + 32];
   char **child_env =
@@ -145,11 +156,13 @@ static int launcher_baseline(int argc, char **argv) {
   if (!rc) {
     rc = posix_spawn(&pid, baseline[0], &actions, NULL, baseline, child_env);
   }
+
   free(child_env);
   if (initialized) {
     posix_spawn_file_actions_destroy(&actions);
   }
   free(baseline);
+
   int status = 0;
   int completed = !rc && wait_baseline(pid, &status);
   struct stat output = {0};
@@ -164,6 +177,7 @@ static int launcher_baseline(int argc, char **argv) {
   int exit_code = completed && WIFEXITED(status)     ? WEXITSTATUS(status)
                   : completed && WIFSIGNALED(status) ? 128 + WTERMSIG(status)
                                                      : -1;
+
   if (size_valid) {
     rewind(log);
     printf("JRE_LAUNCHER_BASELINE_BEGIN\n");
@@ -174,11 +188,13 @@ static int launcher_baseline(int argc, char **argv) {
     }
     printf("\nJRE_LAUNCHER_BASELINE_END exit=%d\n", exit_code);
   }
+
   if (rc || !completed || exit_code != 0 || !size_valid) {
     printf("JRE_LAUNCHER_BASELINE_ERROR spawn=%d completed=%d status=%d\n", rc,
            completed, status);
     rc = 1;
   }
+
   fclose(log);
   return rc;
 }
@@ -190,12 +206,14 @@ int gw_test_pojav_jli(void *libjli, int argc, const char *const *arguments) {
     printf("JRE_JLI_ERROR=missing JLI entry or arguments\n");
     return 1;
   }
+
   char **argv = calloc((size_t)argc + 1, sizeof *argv);
   char **owned = calloc((size_t)argc, sizeof *owned);
   int result = 1;
   if (!argv || !owned) {
     goto done;
   }
+
   for (int i = 0; i < argc; i++) {
     owned[i] = strdup(arguments[i]);
     if (!owned[i]) {
@@ -203,15 +221,18 @@ int gw_test_pojav_jli(void *libjli, int argc, const char *const *arguments) {
     }
     argv[i] = owned[i];
   }
+
 #if JRE_LAUNCHER_JNI_BASELINE
   if (launcher_baseline(argc, argv)) {
     goto done;
   }
 #endif
+
   /* Pojav supplies these legacy launcher labels even for newer target VMs;
    * they do not choose the actual VM version or our loader interface family. */
   result = launch(argc, argv, 0, NULL, 0, NULL, "1.8.0-internal", "1.8",
                   argv[0], "openjdk", JNI_FALSE, JNI_TRUE, JNI_FALSE, 0);
+
 done:
   if (owned) {
     for (int i = 0; i < argc; i++) {

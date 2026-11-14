@@ -31,9 +31,11 @@ static jint foreign_vm(JNIEnv *env, JavaVM **vm) {
 static jint register_fault(JNIEnv *env, jclass owner,
                            const JNINativeMethod *methods, jint count) {
   unsigned call = registration_count++;
+
   if (call < 32 && (fail_registrations & (1u << call))) {
     return JNI_ERR;
   }
+
   return register_original(env, owner, methods, count);
 }
 
@@ -153,13 +155,16 @@ static int find_image(void *context, uint64_t id, const char *symbol,
                       const char *signature, void **entry,
                       struct gw_loader_error *error) {
   (void)context;
+
   if (strcmp(signature, "(J)J") && strcmp(signature, "(I)I") &&
       strcmp(signature, "(D)D")) {
     return gw_dlopen_fail(error, GW_E_ARGUMENT,
                           "Incorrect reflected descriptor");
   }
+
   *entry = dlsym(images[fb_module_index(id)], symbol);
   atomic_fetch_add(&lookups, 1);
+
   return *entry ? GW_OK : GW_NOT_FOUND;
 }
 
@@ -174,6 +179,7 @@ static int resolve_image(void *context, const char *path,
   (void)context;
   (void)error;
   (void)opaque;
+
   snprintf(image, GW_LOADER_PATH, "%s", path);
   return GW_OK;
 }
@@ -182,9 +188,11 @@ static int open_library(JNIEnv *env, const char *path, uint32_t flags,
                         struct gw_loader_library *library,
                         struct gw_loader_error *error) {
   (void)flags;
+
   if (!strstr(path, "libadapter_fixture")) {
     return GW_PASS;
   }
+
   struct gw_dlopen_library result = {0};
   int rc = base->open(env, path, GW_OPEN_GUEST, &result, error);
   library->handle = result.handle;
@@ -288,8 +296,10 @@ JNIEXPORT jint JNICALL
 Java_AdapterTest_vmMismatchProfile(JNIEnv *env, jclass cls, jstring path,
                                    jstring sha, jstring vmsha, jint family) {
   wrong_vm = 1;
+
   int result =
       Java_AdapterTest_installProfile(env, cls, path, sha, vmsha, family);
+
   wrong_vm = 0;
   return result;
 }
@@ -310,9 +320,11 @@ JNIEXPORT jintArray JNICALL Java_AdapterTest_metrics(JNIEnv *env, jclass cls) {
   (void)cls;
   jint values[] = {loads, closes, rejected, lookups};
   jintArray out = (*env)->NewIntArray(env, 4);
+
   if (out) {
     (*env)->SetIntArrayRegion(env, out, 0, 4, values);
   }
+
   return out;
 }
 

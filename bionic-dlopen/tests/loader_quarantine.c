@@ -19,6 +19,7 @@ static int resolve(void *ctx, const char *path, char image[GW_LOADER_PATH],
   (void)ctx;
   (void)error;
   (void)unused;
+
   snprintf(image, GW_LOADER_PATH, "%s", path);
   return GW_OK;
 }
@@ -28,8 +29,10 @@ static int load(void *ctx, uint64_t id, const char *path, int32_t *metadata,
   (void)ctx;
   (void)path;
   (void)metadata;
+
   retained_id = id;
   loads++;
+
   if (phase == 0) {
     gw_dlopen_quarantine();
     return gw_dlopen_fail(error, GW_E_QUARANTINED,
@@ -40,6 +43,7 @@ static int load(void *ctx, uint64_t id, const char *path, int32_t *metadata,
 
 static int close_image(void *ctx, uint64_t id, struct gw_loader_error *error) {
   (void)ctx;
+
   assert(id == retained_id);
   closes++;
   gw_dlopen_quarantine();
@@ -55,6 +59,7 @@ static int find(void *ctx, uint64_t id, const char *symbol, const char *sig,
   (void)sig;
   (void)entry;
   (void)error;
+
   abort(); /* No lookup may reach the transport after quarantine. */
 }
 
@@ -72,6 +77,7 @@ static void *closer(void *ctx) {
 int main(int argc, char **argv) {
   assert(argc == 2);
   phase = atoi(argv[1]);
+
   api = gw_dlopen_query(GW_DLOPEN_ABI_V1, sizeof *api);
   struct gw_dlopen_config config = {
       .transport = {load, close_image, find, current},
@@ -79,10 +85,12 @@ int main(int argc, char **argv) {
   struct gw_loader_error error;
   assert(gw_dlopen_configure(&config, &error) == GW_OK);
   assert(gw_dlopen_activate(&error) == GW_OK);
+
   char path[] = "/tmp/gw-quarantine-XXXXXX";
   int fd = mkstemp(path);
   assert(fd >= 0);
   close(fd);
+
   struct gw_dlopen_library library;
   int opened = api->open(NULL, path, GW_OPEN_GUEST, &library, &error);
   if (phase == 0) {
@@ -102,11 +110,13 @@ int main(int argc, char **argv) {
       while (api->module_state(retained_id) != GW_MODULE_CLOSING) {
         sched_yield();
       }
+
       /* Wake the closer without freeing its outstanding borrow. */
       gw_dlopen_quarantine();
       assert(!pthread_join(thread, NULL));
       assert(close_result == GW_ERROR && close_error.code == GW_E_QUARANTINED &&
              !closes);
+
       if (phase == 3) {
         assert(gw_dlopen_scope_leave(retained_id));
       } else {
@@ -115,6 +125,7 @@ int main(int argc, char **argv) {
     }
     assert(api->module_state(retained_id) == GW_MODULE_CLOSING);
   }
+
   assert(gw_dlopen_is_quarantined() && !gw_dlopen_enter(retained_id));
   void *entry = (void *)(uintptr_t)1;
   assert(api->find(NULL, retained_id, "symbol", NULL, &entry, &error) ==
@@ -129,7 +140,9 @@ int main(int argc, char **argv) {
          error.code == GW_E_QUARANTINED);
   assert(gw_dlopen_configure(&config, &error) == GW_ERROR &&
          error.code == GW_E_QUARANTINED);
+
   unlink(path);
+
   printf("QUARANTINE_TEST result=PASS phase=%d retained=1 no_process_exit=1\n",
          phase);
 }

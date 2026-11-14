@@ -7,7 +7,10 @@
    Re-entrant by design: a native call may re-enter Java and issue deeper
    commands, each on its own stable call slot, growing on demand. While blocked
    the thread pumps its own inbound JNI callbacks via full_host_poll, so the
-   Guest is never stalled waiting on this thread. */
+   Guest is never stalled waiting on this thread. No failure escapes as a C
+   return code: every failed path records c->command_error with c->diagnostic
+   text (plus the typed Java error where the caller must observe one), leaving
+   the rollback decision to the caller. */
 jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
                   jvalue *args) {
   jvalue zero = {0};

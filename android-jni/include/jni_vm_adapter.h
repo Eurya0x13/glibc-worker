@@ -16,6 +16,8 @@ struct gw_jni_vm_adapter_v1 {
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* Freezes one adapter per process: GW_OK only before the first bridge start;
+   a later registration of a different table is refused. */
 int gw_jni_register_vm_adapter(const struct gw_jni_vm_adapter_v1 *);
 #ifdef __cplusplus
 }

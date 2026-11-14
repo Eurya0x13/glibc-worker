@@ -8,6 +8,7 @@ static int failed(JNIEnv *env, const char *message) {
     (*env)->ThrowNew(env, type, message);
     (*env)->DeleteLocalRef(env, type);
   }
+
   return -1;
 }
 
@@ -109,6 +110,7 @@ JNIEXPORT jlong JNICALL Java_benchmark_PayloadModule_arrayAcquire(
     JNIEnv *env, jclass cls, jbyteArray array) {
   (void)cls;
   jbyte *pointer = (*env)->GetByteArrayElements(env, array, NULL);
+
   if (pointer) {
     pointer[0] = 13;
     pointer[(*env)->GetArrayLength(env, array) - 1] = 27;

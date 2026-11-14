@@ -65,6 +65,14 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 
 原始延迟、完整性校验、热状态和生命周期必须一并保留。诊断 APK 与普通 APK 分开解读；库内计算、真实 JVM 工作、allocator 和调度不能都记为桥成本，微基准结果不能直接换算游戏收益。
 
+跨修订评审可用 `coverage/review_changes.py`：`--baseline` / `--candidate` 指定保留的 ARM64 APK，`--baseline-ref` / `--candidate-ref` 指定对应功能检查器的 Git 修订，`--device` 和 `--output` 指定设备与全新结果目录。默认十对平衡顺序、普通 JIT，每轮新进程。脚本核对 benchmark 类、Guest 基准 DSO 和固定 JRE 的散列；全部轮次通过各自的功能检查后才汇总，并在最后恢复候选包做严格冒烟。
+
+检查器修订不等于 APK 构建来源证明。跨修订的覆盖夹具、启动代码、GNU runtime 和预热状态可能不同，这类结果只能描述保留制品的整体表现，不能单独归因于某个提交。当前 scalar/callback 基准使用缓存的 methodID，且计时调用来自新建的 Host 工作线程；它不覆盖重复 ID 查找、owner 上下文的控制扫描或深层重入成本。
+
+已保留的 ARM64 十对结果见 [runtime-performance-arm64.json](results/runtime-performance-arm64.json)，引用存储组件的独立 CPU 测量见 [reference-cost-arm64.json](../../android-jni/tests/results/reference-cost-arm64.json)。后者使用最小 VM 替身，不能当作真实 JNI 的完整延迟。
+
+ID 全池扫描替换为专用索引后的组件 A/B、OOM/类身份回归，以及固定 JRE17 严格覆盖和冒烟记录见 [id-index-arm64.json](../../android-jni/tests/results/id-index-arm64.json)；该结果不更新或替代此前 owner 扫描及 8 线程往返的待定位信号。
+
 ## 安装包边界
 
 `tests/scripts/check-sdk.py` 接受四个显式安装前缀、`--ndk` 与 `--abi`，复制到新的位置后编译/链接 C 和 C++ 静态 SDK 消费者。它检查导出包的相对依赖、附带的 libffi 和公开 C linkage，不启动 VM。输出默认在本项目 `build/sdk-check/`。

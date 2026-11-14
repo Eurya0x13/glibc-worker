@@ -5,10 +5,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
+
 from host_build import build
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -87,6 +88,7 @@ def main():
     subprocess.run(command, check=True)
     run = subprocess.run(
         [str(executable)],
+        check=False,
         capture_output=True,
         text=True,
         timeout=120,
@@ -103,6 +105,8 @@ def main():
     assert result["result"] == "PASS" and result["backend"] == backend
     assert result["references"] == 32768
     assert result["weak_refs"] == result["outstanding_allocations"] == 0
+    assert result["index_oom_cases"] == 64 and result["indexed_growth"] == 4096
+    assert result["class_identity_and_id_reuse"]
     rows.append(result)
     summary.write_text(
         json.dumps(
@@ -116,6 +120,7 @@ def main():
                     ).hexdigest()
                     for name in (
                         "src/host/slot_store.zig",
+                        "src/host/slot_index.zig",
                         "src/host/resource_limits.h",
                         "src/host/references.c",
                         "tests/native/slot_store_test.c",

@@ -16,6 +16,7 @@ jmethodID gw_host_describe_method, gw_host_declaring_method;
 static size_t attempts, fail_at = SIZE_MAX, outstanding, failures, weak_count;
 static int collected, pending_exception, string_releases;
 static const char *reflection_signature;
+static size_t same_calls;
 
 static void *allocate(void *context, size_t size, size_t alignment) {
   (void)context;
@@ -23,6 +24,7 @@ static void *allocate(void *context, size_t size, size_t alignment) {
     failures++;
     return NULL;
   }
+
   void *p;
   if (alignment < sizeof(void *)) {
     alignment = sizeof(void *);
@@ -30,6 +32,7 @@ static void *allocate(void *context, size_t size, size_t alignment) {
   if (posix_memalign(&p, alignment, size)) {
     return NULL;
   }
+
   outstanding++;
   return p;
 }
@@ -54,6 +57,7 @@ static void storage_failures(void) {
     fail_at = fault;
     struct gw_slot_store *s = gw_slot_create(&config);
     uint64_t tokens[160] = {0};
+
     if (s) {
       for (size_t i = 0; i < 160; i++) {
         uint64_t *p = gw_slot_insert(s, (int)(i % 3), &tokens[i]);
@@ -67,21 +71,26 @@ static void storage_failures(void) {
           *p = i + 1;
         }
       }
+
       assert(!gw_slot_destroy(s));
       for (size_t i = 0; i < 160; i++) {
         assert(*(uint64_t *)gw_slot_get(s, tokens[i]) == i + 1);
         assert(gw_slot_erase(s, tokens[i]));
         assert(!gw_slot_get(s, tokens[i]) && !gw_slot_erase(s, tokens[i]));
       }
+
       for (int owner = 0; owner < 3; owner++) {
         uint64_t token = 123;
         assert(!gw_slot_owned(s, owner, 0, &token) && !token);
       }
+
       assert(gw_slot_destroy(s));
     }
+
     fail_at = SIZE_MAX;
     assert(!outstanding);
   }
+
   assert(failures >= 8);
 }
 
@@ -94,7 +103,9 @@ static void generations_and_owners(void) {
   uint64_t stale[128];
   for (size_t i = 0; i < 128; i++) {
     assert(gw_slot_insert(s, 1, &stale[i]));
+    assert(gw_slot_index_insert(s, stale[i], 1, 7));
     assert(gw_slot_erase(s, stale[i]));
+    assert(!gw_slot_index_candidate(s, 1, 7, 0) && !gw_slot_index_at(s, 0));
     for (size_t j = 0; j <= i; j++) {
       assert(!gw_slot_get(s, stale[j]));
     }
@@ -140,6 +151,77 @@ static void generations_and_owners(void) {
   assert(!outstanding);
 }
 
+/* Rollback must leave neither a secondary key nor dense membership behind,
+   including failures growing collision vectors and both hash tables. */
+static void index_failures(void) {
+  for (size_t fault = 0; fault < 64; fault++) {
+    struct gw_slot_store *s = gw_slot_create(&config);
+    assert(s);
+    uint64_t tokens[160];
+    fail_at = attempts + fault;
+    for (size_t i = 0; i < 160; i++) {
+      if (!gw_slot_insert(s, -1, &tokens[i])) {
+        fail_at = SIZE_MAX;
+        assert(gw_slot_insert(s, -1, &tokens[i]));
+      }
+      if (!gw_slot_index_insert(s, tokens[i], (int)(i % 2), i % 8)) {
+        assert(!gw_slot_index_at(s, i));
+        uint64_t stale = tokens[i];
+        assert(gw_slot_erase(s, stale) && !gw_slot_get(s, stale));
+        fail_at = SIZE_MAX;
+        assert(gw_slot_insert(s, -1, &tokens[i]));
+        assert(tokens[i] != stale);
+        assert(gw_slot_index_insert(s, tokens[i], (int)(i % 2), i % 8));
+      }
+      assert(gw_slot_index_at(s, i) == tokens[i]);
+      size_t before = attempts;
+      assert(!gw_slot_index_insert(s, tokens[i], 77, 88));
+      assert(attempts == before);
+    }
+    fail_at = SIZE_MAX;
+    for (size_t i = 0; i < 160; i++) {
+      int found = 0;
+      uint64_t token;
+      for (size_t n = 0;
+           (token = gw_slot_index_candidate(s, (int)(i % 2), i % 8, n)); n++) {
+        assert(gw_slot_get(s, token));
+        found += token == tokens[i];
+      }
+      assert(found == 1);
+    }
+    for (size_t i = 0; i < 160; i += 2) {
+      assert(gw_slot_erase(s, tokens[i]));
+      assert(!gw_slot_index_insert(s, tokens[i], 0, 0));
+    }
+    uint64_t token;
+    size_t remaining = 0;
+    while ((token = gw_slot_index_at(s, 0))) {
+      assert(gw_slot_erase(s, token));
+      remaining++;
+    }
+    assert(remaining == 80 && !gw_slot_index_candidate(s, 1, 1, 0));
+    assert(gw_slot_destroy(s) && !outstanding);
+  }
+}
+
+static void index_growth(void) {
+  struct gw_slot_store *s = gw_slot_create(&config);
+  assert(s);
+  uint64_t tokens[4096];
+  for (size_t i = 0; i < 4096; i++) {
+    assert(gw_slot_insert(s, -1, &tokens[i]));
+    assert(gw_slot_index_insert(s, tokens[i], (int)(i % 2), i));
+  }
+  assert(!gw_slot_destroy(s));
+  for (size_t i = 4096; i-- > 0;) {
+    assert(gw_slot_index_candidate(s, (int)(i % 2), i, 0) == tokens[i]);
+    assert(!gw_slot_index_candidate(s, (int)(i % 2), i, 1));
+    assert(gw_slot_erase(s, tokens[i]));
+    assert(!gw_slot_index_candidate(s, (int)(i % 2), i, 0));
+  }
+  assert(!gw_slot_index_at(s, 0) && gw_slot_destroy(s) && !outstanding);
+}
+
 static void initial_reservations(void) {
   const size_t sizes[] = {GW_HANDLE_INITIAL_CAPACITY,
                           GW_REGISTRATION_INITIAL_CAPACITY};
@@ -150,6 +232,7 @@ static void initial_reservations(void) {
     assert(s && gw_slot_capacity(s) == sizes[variant]);
     uint64_t *tokens = calloc(sizes[variant] + 1, sizeof *tokens);
     assert(tokens);
+
     size_t before = attempts;
     void *first = NULL;
     for (size_t i = 0; i < sizes[variant]; i++) {
@@ -159,13 +242,16 @@ static void initial_reservations(void) {
         first = p;
       }
     }
+
     assert(attempts == before); /* No allocation while the reserve has room. */
     assert(gw_slot_insert(s, -1, &tokens[sizes[variant]]));
     assert(attempts > before && gw_slot_capacity(s) == sizes[variant] + 64);
     assert(gw_slot_get(s, tokens[0]) == first);
+
     for (size_t i = 0; i <= sizes[variant]; i++) {
       assert(gw_slot_erase(s, tokens[i]));
     }
+
     size_t peak = gw_slot_capacity(s);
     before = attempts;
     uint64_t reused;
@@ -173,6 +259,7 @@ static void initial_reservations(void) {
            attempts == before);
     assert(gw_slot_erase(s, reused) && gw_slot_destroy(s) && !outstanding);
     free(tokens);
+
     if (!variant) {
       const size_t faults[] = {0, 1, 128, 256, 512};
       for (size_t i = 0; i < sizeof faults / sizeof *faults; i++) {
@@ -192,9 +279,11 @@ static void dynamic_owners(void) {
   assert(stable && gw_slot_insert(s, 1024, &expanded));
   uint64_t found;
   assert(gw_slot_owned(s, 1024, 0, &found) && found == expanded);
+
   fail_at = attempts;
   assert(!gw_slot_insert(s, 8192, &last) && !last);
   fail_at = SIZE_MAX;
+
   assert(gw_slot_get(s, first) == stable && gw_slot_get(s, expanded));
   assert(gw_slot_insert(s, 8192, &last));
   assert(gw_slot_erase(s, expanded) && gw_slot_erase(s, first) &&
@@ -208,6 +297,7 @@ struct vm_class {
 
 static jweak new_weak(JNIEnv *env, jobject object) {
   (void)env;
+
   struct vm_class *weak = malloc(sizeof *weak);
   assert(weak);
   *weak = *(struct vm_class *)object;
@@ -224,14 +314,17 @@ static void delete_weak(JNIEnv *env, jweak weak) {
 
 static jboolean same_object(JNIEnv *env, jobject a, jobject b) {
   (void)env;
+  same_calls++;
   int ai = a ? ((struct vm_class *)a)->identity : 0;
   int bi = b ? ((struct vm_class *)b)->identity : 0;
+
   if (collected && ai == 1) {
     ai = 0;
   }
   if (collected && bi == 1) {
     bi = 0;
   }
+
   return ai == bi;
 }
 
@@ -265,6 +358,7 @@ static jclass error_class(JNIEnv *env, const char *name) {
   assert(!strcmp(name, "java/lang/IllegalArgumentException") ||
          !strcmp(name, "java/lang/IllegalStateException") ||
          !strcmp(name, "java/lang/OutOfMemoryError"));
+
   return (jclass)(uintptr_t)1;
 }
 
@@ -272,6 +366,7 @@ static jint throw_error(JNIEnv *env, jclass cls, const char *message) {
   (void)env;
   (void)cls;
   (void)message;
+
   pending_exception = 1;
   return JNI_OK;
 }
@@ -333,16 +428,20 @@ static void references(void) {
   assert(!atomic_load(&counters.live_global) &&
          !atomic_load(&counters.live_weak));
   struct vm_class a = {1}, alias = {1}, b = {2};
+  size_t comparisons = same_calls;
   jobject method = fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_METHOD,
                              "(I)I", (jclass)&a);
+  assert(same_calls == comparisons);
   assert(method && fh_add_id(&contexts[1], (void *)(uintptr_t)17, H_METHOD,
                              "(I)I", (jclass)&alias) == method);
+  assert(same_calls == comparisons + 1);
   jobject other = fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_METHOD,
                             "(I)I", (jclass)&b);
   jobject field =
       fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_FIELD, "I", (jclass)&a);
   assert(other && other != method && field && field != method &&
          weak_count == 3);
+  assert(same_calls == comparisons + 2);
   assert(fh_id(&contexts[0], method, H_METHOD) == (void *)(uintptr_t)17);
   char too_long[FB_SIG + 1];
   memset(too_long, 'I', FB_SIG);
@@ -351,9 +450,18 @@ static void references(void) {
                     (jclass)&a));
   assert(weak_count == 3);
   collected = 1;
+  comparisons = same_calls;
   sweep_ids(&env, 0);
+  assert(same_calls == comparisons + 3);
   assert(weak_count == 1 && !fh_id(&contexts[0], method, H_METHOD));
   assert(fh_id(&contexts[0], other, H_METHOD) == (void *)(uintptr_t)17);
+  struct vm_class replacement = {3};
+  jobject reused = fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_METHOD,
+                             "(I)I", (jclass)&replacement);
+  assert(reused && reused != method && reused != field && reused != other &&
+         weak_count == 2);
+  assert(fh_add_id(&contexts[0], (void *)(uintptr_t)17, H_METHOD, "(I)I",
+                   (jclass)&replacement) == reused);
   sweep_ids(&env, 1);
   assert(!weak_count && !atomic_load(&counters.id_cache_weak));
   free(tokens);
@@ -367,9 +475,11 @@ static void reflection_boundaries(void) {
   memset(text, 'I', sizeof text);
   text[FB_SIG - 1] = 0;
   reflection_signature = text;
+
   const char *value = fh_describe(&c, (jobject)(uintptr_t)1);
   assert(strlen(value) == FB_SIG - 1 && !pending_exception &&
          string_releases == 1);
+
   text[FB_SIG - 1] = 'I';
   text[FB_SIG] = 0;
   value = fh_describe(&c, (jobject)(uintptr_t)1);
@@ -380,16 +490,22 @@ static void reflection_boundaries(void) {
 int main(void) {
   storage_failures();
   generations_and_owners();
+  index_failures();
+  index_growth();
   initial_reservations();
   dynamic_owners();
   references();
   reflection_boundaries();
+
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\",\"references\":%u,"
       "\"oom_cases\":48,\"injected_failures\":%zu,\"generation_exhaustion\":"
       "true,\"initial_handles\":16384,\"initial_registrations\":256,"
       "\"initial_oom_cases\":5,"
-      "\"owner_swap_remove\":true,\"outstanding_allocations\":%zu,\"weak_"
+      "\"owner_swap_remove\":true,\"index_oom_cases\":64,\"indexed_growth\":"
+      "4096,"
+      "\"class_identity_and_id_reuse\":true,\"outstanding_allocations\":%zu,"
+      "\"weak_"
       "refs\":%zu}\n",
       "zig", 32768u, failures, outstanding, weak_count);
   return 0;

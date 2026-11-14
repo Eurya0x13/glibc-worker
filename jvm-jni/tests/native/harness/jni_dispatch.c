@@ -35,8 +35,10 @@ static uintptr_t add_handle(struct handle h) {
   if (next_handle >= sizeof handles / sizeof handles[0]) {
     return 0;
   }
+
   uintptr_t token = next_handle++;
   handles[token] = h;
+
   return token;
 }
 

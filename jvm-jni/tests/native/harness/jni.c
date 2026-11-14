@@ -101,6 +101,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   __android_log_print(ANDROID_LOG_INFO, "GlibcWorker",
                       "HOST_JNI_ONLOAD pid=%d uid=%d", getpid(), getuid());
   (void)vm;
+
   return JNI_VERSION_1_6;
 }
 

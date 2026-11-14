@@ -11,6 +11,7 @@ static int status = -1;
 static void *unbound_thread(void *arg) {
   JavaVM *vm = arg;
   void *env = (void *)(uintptr_t)1;
+
   jint rc = (*vm)->GetEnv(vm, &env, JNI_VERSION_1_6);
   return (void *)(uintptr_t)(rc == JNI_EDETACHED && env == NULL &&
                              marker == 19);
@@ -19,6 +20,7 @@ static void *unbound_thread(void *arg) {
 static jint invoke_v(JNIEnv *env, jclass cls, jmethodID method, ...) {
   va_list args;
   va_start(args, method);
+
   jint result = (*env)->CallStaticIntMethodV(env, cls, method, args);
   va_end(args);
   return result;

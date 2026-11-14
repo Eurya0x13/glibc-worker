@@ -46,6 +46,7 @@ static inline uint64_t gw_handoff_clock(clockid_t clock) {
   struct timespec value;
   int rc = clock_gettime(clock, &value);
   errno = saved;
+
   return rc ? UINT64_MAX
             : (uint64_t)value.tv_sec * UINT64_C(1000000000) + value.tv_nsec;
 }

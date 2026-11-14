@@ -138,6 +138,7 @@ static inline int gw_rpc_choose_sample(struct gw_rpc_row *row) {
 static inline void gw_rpc_scope_error(struct gw_rpc_scope *scope) {
   scope->valid = 0;
   scope->clock_failed = 1;
+
   gw_rpc_add(&scope->row->stage[scope->stage].clock_errors, 1);
   if (scope->api >= 0) {
     gw_rpc_add(&scope->row->api[scope->api].clock_errors, 1);
@@ -212,6 +213,7 @@ static inline void gw_rpc_notify_classify(struct gw_rpc_scope *scope, long rc) {
   if (!scope->row || scope->row != gw_rpc_current || rc < 0) {
     return;
   }
+
   unsigned outcome =
       rc == 0 ? GW_RPC_NOTIFY_ZERO_RETURN : GW_RPC_NOTIFY_POSITIVE_RETURN;
   scope->classified = &scope->row->notify[outcome];
@@ -342,6 +344,7 @@ struct gw_rpc_token {
 static inline struct gw_rpc_token gw_rpc_begin(void) {
   struct gw_rpc_row *row = gw_rpc_current;
   struct gw_rpc_token token = {.row = row};
+
   if (row) {
     gw_rpc_add(&row->started, 1);
     gw_rpc_add(&row->inflight, 1);

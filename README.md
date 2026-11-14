@@ -28,4 +28,4 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 
 当前真实验证仍主要覆盖 Android HotSpot。公开 JNI 层已与 JRE 私有接口分离，这不等于 ART 的完整 JNI 桥已验证。Pojav 与真实模组接入在外部验证工程，本工作区不包含启动器源码。
 
-依赖下载和源码缓存分别归所属项目的 `vendor/`、`work/`，构建输出归各自 `build/`；根目录不保存这些缓存。代码格式见 [STYLE](docs/STYLE.md)，项目边界与 review 顺序见 [REVIEW_GUIDE](docs/REVIEW_GUIDE.md)。当前实现限制、失败语义及待审阅清单见 [AUDIT](docs/AUDIT.md)。
+依赖下载和源码缓存分别归所属项目的 `vendor/`、`work/`，构建输出归各自 `build/`；根目录不保存这些缓存。代码格式见 [STYLE](docs/STYLE.md)，项目边界、契约文档与 review 顺序见 [REVIEW_GUIDE](docs/REVIEW_GUIDE.md)。

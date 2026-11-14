@@ -29,14 +29,27 @@ struct gw_binding_callbacks {
 };
 
 struct gw_binding_store;
+/* Validate the callbacks — the signature window must fit inside each object —
+   and reserve initial_capacity slots; NULL reports invalid arguments or
+   memory. */
 struct gw_binding_store *gw_binding_store_create(
     const struct gw_binding_callbacks *);
+/* Addressable object count, occupied plus vacant. */
 size_t gw_binding_store_capacity(struct gw_binding_store *);
+/* Find or create the binding for (module, guest function, signature of
+   exactly length NUL-terminated bytes); *created separates a fresh prepare
+   from an existing hit, and the return carries OK, MEMORY, ARGUMENT or the
+   prepare's own status. */
 int gw_binding_store_get(struct gw_binding_store *, uint64_t, uintptr_t,
                          const char *, size_t, void **, int *);
+/* Remove one freshly created entry whose code address was never exposed;
+   BUSY when retire refuses because the closure may still execute. */
 int gw_binding_store_discard(struct gw_binding_store *, uint64_t, uintptr_t,
                              const char *, size_t);
+/* Retire every binding of one module (unload path); continues past refusals
+   and reports BUSY if any closure was still active. */
 int gw_binding_store_release(struct gw_binding_store *, uint64_t);
+/* Free the store; BUSY while any module still owns entries. */
 int gw_binding_store_destroy(struct gw_binding_store *);
 
 #pragma GCC visibility pop

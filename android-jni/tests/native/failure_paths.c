@@ -30,6 +30,7 @@ void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
     errno = ENOMEM;
     return MAP_FAILED;
   }
+
   return __real_mmap(p, n, prot, flags, fd, off);
 }
 
@@ -79,6 +80,7 @@ static jclass find_class(JNIEnv *e, const char *name) {
                : !strcmp(name, "java/lang/IllegalArgumentException")
                    ? FB_FAILURE_ARGUMENT
                    : FB_FAILURE_STATE;
+
   return (jclass)(uintptr_t)last_class;
 }
 
@@ -117,7 +119,13 @@ static void delete_weak(JNIEnv *e, jweak v) {
   (void)v;
   weaks_deleted++;
 }
+
+static jboolean same_object(JNIEnv *e, jobject a, jobject b) {
+  (void)e;
+  return a == b;
+}
 static const struct JNINativeInterface vm = {.ExceptionCheck = has_exception,
+                                             .IsSameObject = same_object,
                                              .ExceptionClear = clear_exception,
                                              .ExceptionOccurred = exception,
                                              .FindClass = find_class,
@@ -132,10 +140,12 @@ static JNIEnv environment = &vm;
 static void *server(void *unused) {
   (void)unused;
   gw_host_current = &service_context;
+
   while (!atomic_load(&stop_server)) {
     int action = atomic_load(&mode);
     struct fb_context *w = &bridge.ctx[1];
     int state = atomic_load_explicit(&w->state, memory_order_acquire);
+
     if (action == 1 && state == FB_GUEST_ATTACH) {
       w->attach_result = JNI_ENOMEM;
       atomic_store_explicit(&w->state, FB_ATTACH_FAILED, memory_order_release);
@@ -148,6 +158,7 @@ static void *server(void *unused) {
       atomic_store_explicit(&w->state, FB_RUNNING, memory_order_release);
       fb_event_notify(&w->host_event);
     }
+
     for (int i = -1; i < fb_frame_capacity(&bridge.ctx[0]); i++) {
       struct fb_rpc *r =
           i < 0 ? &bridge.ctx[0].emergency : fb_rpc_at(&bridge.ctx[0], i);
@@ -222,6 +233,33 @@ int main(void) {
   free(tokens);
   sweep_ids(&environment, 1);
 
+  /* A free handle slot is not enough: index growth can fail independently.
+     Preserve the pending exception and roll back both the token and weak. */
+  jobject anchor =
+      fh_add_ref(&service_context, (jobject)(uintptr_t)99, H_GLOBAL);
+  CHECK(anchor);
+  int weak_created_before = weaks_created, weak_deleted_before = weaks_deleted;
+  pending = FB_FAILURE_ARGUMENT;
+  atomic_store(&fail_memory, 1);
+  CHECK(!fh_add_id(&service_context, (void *)(uintptr_t)77, H_METHOD, "()I",
+                   (jclass)(uintptr_t)88));
+  atomic_store(&fail_memory, 0);
+  CHECK(pending == FB_FAILURE_ARGUMENT &&
+        weaks_created == weak_created_before + 1 &&
+        weaks_deleted == weak_deleted_before + 1 &&
+        !atomic_load(&bridge.id_cache_weak));
+  pending = 0;
+  jobject recovered_id = fh_add_id(&service_context, (void *)(uintptr_t)77,
+                                   H_METHOD, "()I", (jclass)(uintptr_t)88);
+  CHECK(recovered_id && atomic_load(&bridge.id_cache_weak) == 1);
+  CHECK(fh_add_id(&service_context, (void *)(uintptr_t)77, H_METHOD, "()I",
+                  (jclass)(uintptr_t)88) == recovered_id);
+  sweep_ids(&environment, 1);
+  CHECK(!atomic_load(&bridge.id_cache_weak) &&
+        fh_ref(&service_context, anchor) == (jobject)(uintptr_t)99);
+  fh_drop_token(anchor);
+  sweep_ids(&environment, 1);
+
   pending = FB_FAILURE_ARGUMENT;
   fh_throw(&environment, FB_FAILURE_MEMORY, "must preserve original");
   CHECK(pending == FB_FAILURE_ARGUMENT);
@@ -280,6 +318,7 @@ int main(void) {
   CHECK(!atomic_load(&bridge.live_local) && !atomic_load(&bridge.live_global));
   printf(
       "{\"result\":\"PASS\",\"checks\":%u,\"depth_recovery\":true,\"oom_"
-      "rollback\":true,\"context_status\":true}\n",
+      "rollback\":true,\"id_index_oom_rollback\":true,\"context_status\":true}"
+      "\n",
       checks);
 }

@@ -99,6 +99,7 @@ static inline struct fb_context *fb_context_at(struct full_bridge *b, int i) {
   if (i < FB_CONTEXTS) {
     return &b->ctx[i];
   }
+
   return fb_pages_at(&b->contexts, (unsigned)(i - FB_CONTEXTS),
                      sizeof(struct fb_context), 0);
 }
@@ -112,9 +113,11 @@ static inline int fb_ensure_frame(struct fb_context *c, int depth) {
   if (depth < 0 || depth >= INT_MAX - FB_PAGE_ITEMS - FB_DEPTH) {
     return 0;
   }
+
   if (depth < FB_DEPTH) {
     return 1;
   }
+
   if (!fb_pages_at(&c->frames, (unsigned)(depth - FB_DEPTH),
                    sizeof(struct fb_frame), 1)) {
     return 0;
@@ -141,6 +144,7 @@ static inline struct fb_call *fb_call_at(struct fb_context *c, int depth) {
   if (depth < FB_DEPTH) {
     return &c->call[depth];
   }
+
   struct fb_frame *frame = fb_frame_at(c, depth);
   return frame ? &frame->call : NULL;
 }
@@ -152,6 +156,7 @@ static inline struct fb_rpc *fb_rpc_at(struct fb_context *c, int depth) {
   if (depth < FB_DEPTH) {
     return &c->rpc[depth];
   }
+
   struct fb_frame *frame = fb_frame_at(c, depth);
   return frame ? &frame->rpc : NULL;
 }
@@ -191,6 +196,7 @@ static inline int fb_reserve_context(struct full_bridge *b) {
         return i;
       }
     }
+
     if (count > INT_MAX - FB_PAGE_ITEMS) {
       return -1;
     }
@@ -198,6 +204,7 @@ static inline int fb_reserve_context(struct full_bridge *b) {
                      sizeof(struct fb_context), 1)) {
       return -1;
     }
+
     int next = count + FB_PAGE_ITEMS;
     int old = atomic_load_explicit(&b->context_capacity, memory_order_relaxed);
     while (old < next && !atomic_compare_exchange_weak_explicit(

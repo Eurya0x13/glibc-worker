@@ -36,6 +36,7 @@ static uint64_t diagnostic_clock(clockid_t id) {
 
 static void fail(JNIEnv *env, const char *message) {
   jclass type = (*env)->FindClass(env, "java/lang/AssertionError");
+
   if (type) {
     (*env)->ThrowNew(env, type, message);
     (*env)->DeleteLocalRef(env, type);
@@ -181,6 +182,7 @@ JNIEXPORT jlong JNICALL Java_benchmark_PayloadModule_validate(
     fail(env, "Payload full-buffer validation/call count failed");
     return -1;
   }
+
   return (jlong)copied_elements;
 }
 

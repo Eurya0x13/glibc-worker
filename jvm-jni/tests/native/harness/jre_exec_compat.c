@@ -14,6 +14,7 @@ __attribute__((constructor)) static void configure_jre_subprocess(void) {
       fputs("JRE_EXEC_COMPAT_ERROR=heap tagging opt-out refused\n", stderr);
       _exit(125);
     }
+
     fputs("JRE_EXEC_COMPAT heap_tagging=disabled\n", stderr);
   }
 #endif

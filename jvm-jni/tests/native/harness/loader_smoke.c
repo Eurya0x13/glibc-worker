@@ -35,6 +35,7 @@ static void check(int value, const char *name) {
   if (!value) {
     failures++;
   }
+
   printf("LOADER_BACKEND_TEST %s=%s\n", name, value ? "PASS" : "FAIL");
 }
 

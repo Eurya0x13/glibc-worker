@@ -34,9 +34,11 @@ static int exception(JNIEnv *env, const char *stage) {
   if (!(*env)->ExceptionCheck(env)) {
     return 0;
   }
+
   printf("JRE_EXCEPTION stage=%s\n", stage);
   (*env)->ExceptionDescribe(env);
   (*env)->ExceptionClear(env);
+
   return 1;
 }
 
@@ -108,10 +110,12 @@ JNIEXPORT jint JNICALL Java_dev_glibc_worker_JreEntry_run(JNIEnv *env,
       vm == launched_job->art) {
     return 1;
   }
+
   printf(
       "JRE_CREATE_RESULT=0 hotspot_vm=%p hotspot_env=%p art_vm=%p distinct=1 "
       "owner=libjli tid=%ld\n",
       (void *)vm, (void *)env, (void *)launched_job->art, syscall(SYS_gettid));
+
   return execute_bridge(launched_job, vm, env);
 }
 
@@ -123,12 +127,14 @@ static int prepare_pojav(struct jre_job *job, const char *vm_path) {
     return 1;
   }
   *slash = 0;
+
   snprintf(search, sizeof search, "%s:%s/%s/jli:%s/%s:%s", vm_directory,
            job->home, JRE_BOOT_LIBRARY_PATH, job->home, JRE_BOOT_LIBRARY_PATH,
            job->args[2]);
   if (setenv("LD_LIBRARY_PATH", search, 1)) {
     return 1;
   }
+
   void *libdl = dlopen("libdl.so", RTLD_NOW);
   void (*update)(const char *) =
       libdl ? (void *)dlsym(libdl, "android_update_LD_LIBRARY_PATH") : NULL;
@@ -142,12 +148,14 @@ static int prepare_pojav(struct jre_job *job, const char *vm_path) {
   if (libdl) {
     dlclose(libdl);
   }
+
   snprintf(jli, sizeof jli, "%s/%s/libjli.so", job->home,
            JRE_BOOT_LIBRARY_PATH);
   if (access(jli, R_OK)) {
     snprintf(jli, sizeof jli, "%s/%s/jli/libjli.so", job->home,
              JRE_BOOT_LIBRARY_PATH);
   }
+
   job->libjli = dlopen(jli, RTLD_NOW | RTLD_GLOBAL);
   if (!job->libjli) {
     printf("JRE_JLI_ERROR=%s\n", dlerror());
@@ -158,6 +166,7 @@ static int prepare_pojav(struct jre_job *job, const char *vm_path) {
 static int preload_pojav(struct jre_job *job) {
   static const char *names[] = {"libverify.so", "libjava.so", "libnet.so",
                                 "libnio.so"};
+
   for (unsigned i = 0; i < sizeof names / sizeof names[0]; i++) {
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s/%s/%s", job->home, JRE_BOOT_LIBRARY_PATH,
@@ -167,6 +176,7 @@ static int preload_pojav(struct jre_job *job) {
       return 1;
     }
   }
+
   return 0;
 }
 
@@ -175,6 +185,7 @@ static int launch_jli(struct jre_job *job, JavaVMOption *options, int count) {
   if (count > 24) {
     return 1;
   }
+
   snprintf(executable, sizeof executable, "%s/bin/java", job->home);
   snprintf(host, sizeof host, "%s/libworker_host.so", job->args[2]);
   const char *argv[28] = {executable};
@@ -183,14 +194,17 @@ static int launch_jli(struct jre_job *job, JavaVMOption *options, int count) {
   }
   argv[count + 1] = "dev.glibc.worker.JreEntry";
   argv[count + 2] = host;
+
   launched_job = job;
   jint rc = gw_test_pojav_jli(job->libjli, count + 3, argv);
   launched_job = NULL;
+
   JavaVM *listed = NULL;
   jsize remaining = -1;
   jint enum_rc = job->list_vms(&listed, 1, &remaining);
   printf("JRE_JLI_RESULT=%d owner=libjli\n", rc);
   printf("JRE_VM_ENUM stage=destroyed rc=%d count=%d\n", enum_rc, remaining);
+
   if (rc == 0 && enum_rc == JNI_OK && remaining == 0) {
     printf("JRE_DESTROY_RESULT=0 owner=libjli confirmed_by=vm-enumeration\n");
     return job->rc;

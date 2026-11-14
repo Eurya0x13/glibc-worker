@@ -80,9 +80,11 @@ static jint destroy_vm(JavaVM *vm) {
 static jint attach_vm(JavaVM *vm, JNIEnv **env, void *args) {
   (void)vm;
   (void)args;
+
   if (env) {
     *env = NULL;
   }
+
   return JNI_ERR; /* Real ART attach and new virtual contexts unsupported. */
 }
 
@@ -127,6 +129,7 @@ static jint call_int(JNIEnv *env, jclass cls, jmethodID method, ...) {
   va_start(args, method);
   jint result = call_int_v(env, cls, method, args);
   va_end(args);
+
   return result;
 }
 
@@ -149,7 +152,9 @@ static jint get_vm(JNIEnv *env, JavaVM **vm) {
   if (!owner || env != &proxy_env || !vm) {
     return JNI_ERR;
   }
+
   *vm = &proxy_vm;
+
   return JNI_OK;
 }
 /* All unlisted JNI slots are NULL: deliberately a smoke harness, not an API

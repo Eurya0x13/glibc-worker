@@ -18,12 +18,15 @@ static void invalid(unsigned test) {
   for (size_t i = 0; i < 17; i++) {
     args[i] = "loader";
   }
+
   void *stack = region;
   size_t bytes = size, count = 1;
   char **input = args;
+
   char large[32768];
   memset(large, 'x', sizeof large - 1);
   large[sizeof large - 1] = 0;
+
   switch (test) {
     case 0:
       count = 0;
@@ -59,6 +62,7 @@ static void invalid(unsigned test) {
     default:
       abort();
   }
+
   gw_bootstrap_stack(image, stack, bytes, input, count);
   _exit(99);
 }
@@ -71,6 +75,7 @@ int main(void) {
   assert(mapping != MAP_FAILED);
   region = mapping + page;
   assert(!mprotect(region, size, PROT_READ | PROT_WRITE));
+
   for (unsigned test = 0; test < 10; test++) {
     memset(region, 0x5a, size);
     pid_t pid = fork();
@@ -86,6 +91,7 @@ int main(void) {
       assert((unsigned char)region[j] == 0x5a);
     }
   }
+
   image.base = (void *)(uintptr_t)0x100000;
   image.entry = (void *)(uintptr_t)0x101000;
   image.eh.e_phoff = 64;
@@ -95,6 +101,7 @@ int main(void) {
     for (size_t i = 0; i < count; i++) {
       args[i] = i ? "--guest" : "ld.so";
     }
+
     uintptr_t *sp = gw_bootstrap_stack(image, region, size - 7, args, count);
     assert(!((uintptr_t)sp & 15) && (char *)sp >= region + 4096);
     assert(*sp++ == count);
@@ -105,6 +112,7 @@ int main(void) {
     assert(!strcmp((char *)*sp++, "LC_ALL=C"));
     assert(!strcmp((char *)*sp++, "GLIBC_TUNABLES=glibc.pthread.rseq=0"));
     assert(!*sp++);
+
     Elf64_auxv_t *aux = (void *)sp;
     int execfn = 0, random = 0, phdr = 0;
     for (size_t i = 0; aux[i].a_type; i++) {
@@ -123,6 +131,7 @@ int main(void) {
     }
     assert(execfn && random && phdr);
   }
+
   assert(!munmap(mapping, size + 2 * page));
   puts(
       "{\"result\":\"PASS\",\"invalid_no_write_cases\":10,\"valid_argc\":[1,16]"

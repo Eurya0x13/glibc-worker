@@ -29,6 +29,7 @@ static int resolve(void *ctx, const char *path, char image[GW_LOADER_PATH],
   (void)ctx;
   (void)error;
   (void)unused;
+
   snprintf(image, GW_LOADER_PATH, "%s", path);
   return GW_OK;
 }
@@ -39,6 +40,7 @@ static int load(void *ctx, uint64_t id, const char *image, int32_t *metadata,
   (void)id;
   (void)image;
   (void)error;
+
   *metadata = 0;
   return GW_OK;
 }
@@ -47,6 +49,7 @@ static int close_image(void *ctx, uint64_t id, struct gw_loader_error *error) {
   (void)ctx;
   (void)id;
   (void)error;
+
   closes++;
   return GW_OK;
 }
@@ -59,11 +62,13 @@ static int find(void *ctx, uint64_t id, const char *name, const char *sig,
   (void)sig;
   (void)entry;
   (void)error;
+
   return GW_NOT_FOUND;
 }
 
 static uint64_t current(void *ctx) {
   (void)ctx;
+
   if (probe_pin) {
     uint64_t id = probe_pin;
     probe_pin = 0;
@@ -71,6 +76,7 @@ static uint64_t current(void *ctx) {
       abort();
     }
   }
+
   if (probe_scope) {
     uint64_t id = probe_scope;
     probe_scope = 0;
@@ -78,6 +84,7 @@ static uint64_t current(void *ctx) {
       abort();
     }
   }
+
   return 0; /* No innermost-module shortcut can detect these cycles. */
 }
 
@@ -104,14 +111,18 @@ static void *close_next(void *opaque) {
   if (!gw_dlopen_scope_enter(p->own)) {
     abort();
   }
+
   meet(&p->cycle->ready);
+
   struct gw_loader_error error;
   p->result = api->close(NULL, p->target, &error);
   p->error = error.code;
   p->target_state = api->module_state(p->target);
   atomic_fetch_add(&p->cycle->completed, 1);
+
   /* Nobody releases its scope until every close has returned. */
   meet(&p->cycle->returned);
+
   if (!gw_dlopen_scope_leave(p->own)) {
     abort();
   }
@@ -125,13 +136,16 @@ static void cycle(const struct gw_dlopen_library *modules, unsigned count) {
   unsigned before = closes;
   CHECK(!pthread_barrier_init(&shared.ready, NULL, count + 1));
   CHECK(!pthread_barrier_init(&shared.returned, NULL, count));
+
   for (unsigned i = 0; i < count; i++) {
     p[i].cycle = &shared;
     p[i].own = modules[i].handle;
     p[i].target = modules[(i + 1) % count].handle;
     CHECK(!pthread_create(&threads[i], NULL, close_next, &p[i]));
   }
+
   meet(&shared.ready);
+
   while (atomic_load(&shared.completed) != count) {
     unsigned closing = 0;
     for (unsigned i = 0; i < count; i++) {
@@ -146,11 +160,13 @@ static void cycle(const struct gw_dlopen_library *modules, unsigned count) {
     }
     sched_yield();
   }
+
   for (unsigned i = 0; i < count; i++) {
     CHECK(!pthread_join(threads[i], NULL));
     CHECK(p[i].result == GW_ERROR && p[i].error == GW_E_BUSY);
     CHECK(p[i].target_state == GW_MODULE_LIVE);
   }
+
   CHECK(closes == before && !gw_dlopen_is_quarantined());
   CHECK(!pthread_barrier_destroy(&shared.ready));
   CHECK(!pthread_barrier_destroy(&shared.returned));
@@ -159,12 +175,14 @@ static void cycle(const struct gw_dlopen_library *modules, unsigned count) {
 static void pinned_target(uint64_t owner, uint64_t target) {
   struct gw_loader_error error;
   unsigned before = closes;
+
   CHECK(gw_dlopen_enter(target));
   CHECK(gw_dlopen_scope_enter(owner));
   CHECK(api->close(NULL, target, &error) == GW_ERROR &&
         error.code == GW_E_BUSY);
   CHECK(api->module_state(target) == GW_MODULE_LIVE && closes == before);
   CHECK(gw_dlopen_scope_leave(owner));
+
   /* Probe changes the caller's scopes after close's first validation. */
   probe_scope = owner;
   CHECK(api->close(NULL, target, &error) == GW_ERROR &&
@@ -172,6 +190,7 @@ static void pinned_target(uint64_t owner, uint64_t target) {
   CHECK(api->module_state(target) == GW_MODULE_LIVE && closes == before);
   CHECK(gw_dlopen_scope_leave(owner));
   gw_dlopen_leave(target);
+
   /* The target can also gain a borrower while the lock is released. */
   CHECK(gw_dlopen_scope_enter(owner));
   probe_pin = target;
@@ -191,6 +210,7 @@ int main(void) {
   struct gw_loader_error error;
   CHECK(gw_dlopen_configure(&config, &error) == GW_OK);
   CHECK(gw_dlopen_activate(&error) == GW_OK);
+
   char directory[] = "/tmp/gw-close-waits-XXXXXX";
   CHECK(mkdtemp(directory));
   char paths[3][128];
@@ -202,20 +222,24 @@ int main(void) {
     CHECK(api->open(NULL, paths[i], GW_OPEN_GUEST, &modules[i], &error) ==
           GW_OK);
   }
+
   cycle(modules, 2);
   cycle(modules, 3);
   pinned_target(modules[0].handle, modules[1].handle);
+
   CHECK(gw_dlopen_scope_enter(modules[0].handle));
   CHECK(api->close(NULL, modules[1].handle, &error) == GW_OK); /* No wait. */
   CHECK(gw_dlopen_scope_leave(modules[0].handle));
   CHECK(api->close(NULL, modules[0].handle, &error) == GW_OK);
   CHECK(api->close(NULL, modules[2].handle, &error) == GW_OK);
   CHECK(closes == 3);
+
   for (unsigned i = 0; i < 3; i++) {
     CHECK(!unlink(paths[i]));
   }
   CHECK(!rmdir(directory));
   CHECK(gw_dlopen_stop(&error) == GW_OK);
+
   printf(
       "{\"result\":\"PASS\",\"checks\":%u,\"cycle_sizes\":[2,3],"
       "\"pin_wait_refused\":true,\"probe_rechecked\":true,"

@@ -43,9 +43,11 @@ static void *foreign_shutdown(void *arg) {
 
 static void *host_child(void *arg) {
   (void)arg;
+
   int initial = host_marker;
   host_marker = 62;
   errno = 48;
+
   return (void *)(uintptr_t)(initial == 61 && host_marker == 62 && errno == 48);
 }
 

@@ -29,6 +29,7 @@ void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
     errno = ENOMEM;
     return MAP_FAILED;
   }
+
   return __real_mmap(p, n, prot, flags, fd, off);
 }
 
@@ -86,6 +87,7 @@ static jmethodID get_method(JNIEnv *env, jclass cls, const char *name,
   (void)cls;
   (void)name;
   (void)sig;
+
   return (jmethodID)(uintptr_t)1;
 }
 
@@ -129,6 +131,7 @@ static int install(JNIEnv *e, const char *dir, const char *path,
   (void)e;
   (void)dir;
   (void)path;
+
   return mode == 3 ? gw_dlopen_fail(error, GW_E_BRIDGE, "install failed")
                    : GW_OK;
 }
@@ -142,10 +145,12 @@ static const struct gw_jni_vm_adapter_v1 adapter = {
 
 static void *foreign_lifecycle(void *unused) {
   (void)unused;
+
   assert(full_host_state() == GW_HOST_STARTED);
   assert(full_host_ready() == JNI_ERR);
   assert(full_host_shutdown() == JNI_ERR);
   assert(!gw_host_current);
+
   return NULL;
 }
 
@@ -156,6 +161,7 @@ static void *race_start(void *unused) {
   (void)unused;
   int rc = pthread_barrier_wait(&start_barrier);
   assert(!rc || rc == PTHREAD_BARRIER_SERIAL_THREAD);
+
   if (full_host_start(&startup, &env, &options) == JNI_OK) {
     atomic_fetch_add(&winners, 1);
     struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
@@ -165,11 +171,13 @@ static void *race_start(void *unused) {
     assert(full_host_ready() == JNI_OK);
     assert(full_host_shutdown() == JNI_OK);
   }
+
   return NULL;
 }
 
 static void run_case(void) {
   assert(full_host_state() == GW_HOST_NEW);
+
   if (mode == 8) {
     pthread_t threads[2];
     assert(!pthread_barrier_init(&start_barrier, NULL, 2));
@@ -184,9 +192,11 @@ static void run_case(void) {
     assert(created == 2 && deleted == created);
     return;
   }
+
   assert(full_host_shutdown() == JNI_ERR && full_host_ready() == JNI_ERR);
   assert(full_host_start(NULL, &env, &options) == JNI_ERR);
   assert(full_host_state() == GW_HOST_NEW);
+
   struct gw_host_bridge_config selected = options;
   if (mode == 3 || mode == 6) {
     assert(gw_jni_register_vm_adapter(&adapter) == GW_OK);
@@ -203,12 +213,14 @@ static void run_case(void) {
       assert(!pthread_join(t, NULL));
       assert(full_host_start(&startup, &env, &selected) == JNI_ERR);
     }
+
     struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
     if (mode != 7) {
       hello->args[12].j = FB_JNI_ACK;
       assert(fb_loader_acknowledge(hello));
       atomic_store(&startup.phase, 2);
     }
+
     int ready = full_host_ready();
     if (mode == 7) {
       assert(ready == JNI_ERR);
@@ -246,6 +258,7 @@ static void run_case(void) {
       assert(stopped == (mode ? JNI_ERR : JNI_OK));
     }
   }
+
   if (mode) {
     assert(full_host_state() == GW_HOST_QUARANTINED);
     /* Image policy is released before the injected join failure, after all
@@ -256,6 +269,7 @@ static void run_case(void) {
     assert(created == 2 && deleted == created);
     assert(gw_host_bridge); /* Published mapping intentionally retained. */
   }
+
   assert(full_host_shutdown() == JNI_ERR && full_host_ready() == JNI_ERR);
   assert(full_host_start(&startup, &env, &selected) == JNI_ERR);
   assert(gw_jni_register_vm_adapter(&adapter) == GW_ERROR);
@@ -276,6 +290,7 @@ int main(void) {
       return 1;
     }
   }
+
   puts(
       "{\"result\":\"PASS\",\"scenarios\":9,\"singleton\":true,"
       "\"concurrent_start_excluded\":true,"

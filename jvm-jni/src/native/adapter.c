@@ -182,6 +182,7 @@ static int verify_running_vm(JNIEnv *env) {
   if ((*env)->GetJavaVM(env, &selected) != JNI_OK || !selected) {
     return 0;
   }
+
   jint (*enumerate)(JavaVM **, jsize, jsize *) =
       (void *)dlsym(gw_jvm.libjava, "JNI_GetCreatedJavaVMs");
   Dl_info source = {0}, target = {0};
@@ -190,6 +191,7 @@ static int verify_running_vm(JNIEnv *env) {
       source.dli_fbase != target.dli_fbase) {
     return 0;
   }
+
   jsize count = 0;
   return enumerate(&listed, 1, &count) == JNI_OK && count == 1 &&
          listed == selected && source.dli_fname &&

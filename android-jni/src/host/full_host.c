@@ -49,6 +49,7 @@ static struct host_slot *host_slot(int id, int create) {
   if (!w) {
     return NULL;
   }
+
   uintptr_t value =
       atomic_load_explicit(&w->host_private, memory_order_acquire);
   if (!value && create) {
@@ -64,6 +65,7 @@ static struct host_slot *host_slot(int id, int create) {
       free(fresh);
     }
   }
+
   struct host_slot *slot = (void *)value;
 #if GW_RPC_PROFILE
   if (slot) {
@@ -90,6 +92,7 @@ static int jni_prepare(struct shared *shared, JNIEnv *env) {
   if (gw_host_jni_version < JNI_VERSION_1_6) {
     return JNI_ERR;
   }
+
   jni_shared = shared;
   struct fb_call *hello = &fb_context_at(gw_host_bridge, 0)->call[0];
   hello->args[10].j = FB_JNI_HELLO;
@@ -155,6 +158,7 @@ static struct gw_rpc_row *metric_row(int guest, unsigned context) {
   if (!w) {
     return NULL;
   }
+
   return (void *)atomic_load_explicit(
       guest ? &w->guest_metrics : &w->host_metrics, memory_order_acquire);
 }
@@ -941,7 +945,9 @@ int full_host_ready(void) {
   if (!lifecycle_on_owner(GW_HOST_STARTED)) {
     return JNI_ERR;
   }
+
   int result = accept_guest();
+
   if (result == JNI_OK) {
     atomic_store_explicit(&lifecycle, GW_HOST_READY, memory_order_release);
   } else {
@@ -956,6 +962,7 @@ static int shutdown_requests_idle(struct fb_context *w) {
           atomic_load(&w->emergency.response)) {
     return 0;
   }
+
   for (int depth = 0; depth < fb_frame_capacity(w); depth++) {
     struct fb_call *call = fb_call_at(w, depth);
     struct fb_rpc *rpc = fb_rpc_at(w, depth);
@@ -965,6 +972,7 @@ static int shutdown_requests_idle(struct fb_context *w) {
       return 0;
     }
   }
+
   return 1;
 }
 
@@ -979,6 +987,7 @@ static int shutdown_contexts_idle(void) {
     fprintf(stderr, "JNI shutdown refused: owner still executing\n");
     return 0;
   }
+
   for (int i = 0; i < fb_context_capacity(gw_host_bridge); i++) {
     struct fb_context *w = fb_context_at(gw_host_bridge, i);
     int state = atomic_load_explicit(&w->state, memory_order_acquire);
@@ -993,6 +1002,7 @@ static int shutdown_contexts_idle(void) {
       return 0;
     }
   }
+
   return 1;
 }
 

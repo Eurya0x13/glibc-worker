@@ -1,14 +1,14 @@
 """Invoke the project's build graph for native test fixtures."""
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 
 
-def build(output, target="native"):
+def build(output, target="native", project=PROJECT):
     compiler = shutil.which(os.environ.get("ZIG", "zig"))
     if not compiler:
         raise SystemExit("Install Zig 0.16.0 for Host resource tests")
@@ -18,7 +18,7 @@ def build(output, target="native"):
         compiler,
         "build",
         "--build-file",
-        str(PROJECT / "build.zig"),
+        str(Path(project) / "build.zig"),
         "--prefix",
         str(prefix),
         "--cache-dir",

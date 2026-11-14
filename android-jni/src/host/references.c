@@ -27,6 +27,7 @@ static struct handle *insert_handle(int owner, uint64_t *token) {
     handles = fh_slot_create(sizeof(struct handle), _Alignof(struct handle),
                              FB_CONTEXTS, GW_HANDLE_INITIAL_CAPACITY);
   }
+
   return gw_slot_insert(handles, owner, token);
 }
 
@@ -35,6 +36,7 @@ static void handle_error(struct host_context *c, enum fb_failure kind,
   if (gw_host_bridge) {
     atomic_fetch_add(&gw_host_bridge->errors, 1);
   }
+
   if (c) {
     c->marshal_error = kind;
     fh_throw(c->env, kind, message);
@@ -68,6 +70,7 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
     handle_error(c, FB_FAILURE_ARGUMENT, "Invalid JNI reference owner or kind");
     return NULL;
   }
+
   pthread_mutex_lock(&handles_lock);
   uint64_t token;
   struct handle *h = insert_handle(kind == H_LOCAL ? c->id : -1, &token);
@@ -79,6 +82,7 @@ jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
     adjust_count(kind, 1);
   }
   pthread_mutex_unlock(&handles_lock);
+
   if (!h) {
     handle_error(c, FB_FAILURE_MEMORY,
                  "Cannot allocate bridge reference token");
@@ -105,13 +109,14 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
                  "Invalid bridge ID kind or descriptor");
     return NULL;
   }
-  for (size_t i = 0; i < gw_slot_capacity(handles); i++) {
-    uint64_t token;
-    struct handle *h = gw_slot_at(handles, i, &token);
-    if (h && h->kind == kind && h->value == value &&
-        (*env)->IsSameObject(env, h->clazz, clazz)) {
+  uint64_t candidate;
+  for (size_t i = 0; (candidate = gw_slot_index_candidate(handles, kind,
+                                                          (uintptr_t)value, i));
+       i++) {
+    struct handle *h = gw_slot_get(handles, candidate);
+    if ((*env)->IsSameObject(env, h->clazz, clazz)) {
       pthread_mutex_unlock(&handles_lock);
-      return (jobject)(uintptr_t)token;
+      return (jobject)(uintptr_t)candidate;
     }
   }
 
@@ -129,8 +134,15 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
     h->owner = -1;
     h->clazz = weak;
     memcpy(h->sig, sig ? sig : "", sig ? strlen(sig) + 1 : 1);
-    atomic_fetch_add(&gw_host_bridge->id_cache_weak, 1);
-  } else {
+    if (!gw_slot_index_insert(handles, token, kind, (uintptr_t)value)) {
+      gw_slot_erase(handles, token);
+      token = 0;
+      h = NULL;
+    } else {
+      atomic_fetch_add(&gw_host_bridge->id_cache_weak, 1);
+    }
+  }
+  if (!h) {
     (*env)->DeleteWeakGlobalRef(env, weak);
   }
   pthread_mutex_unlock(&handles_lock);
@@ -146,14 +158,17 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
 void sweep_ids(JNIEnv *env, int all) {
   pthread_mutex_lock(&handles_lock);
 
-  for (size_t i = 0; i < gw_slot_capacity(handles); i++) {
-    uint64_t token;
-    struct handle *h = gw_slot_at(handles, i, &token);
+  size_t position = 0;
+  uint64_t token;
+  while ((token = gw_slot_index_at(handles, position))) {
+    struct handle *h = gw_slot_get(handles, token);
     if (h && h->kind >= H_METHOD &&
         (all || (*env)->IsSameObject(env, h->clazz, NULL))) {
       (*env)->DeleteWeakGlobalRef(env, h->clazz);
       gw_slot_erase(handles, token);
       atomic_fetch_sub(&gw_host_bridge->id_cache_weak, 1);
+    } else {
+      position++;
     }
   }
   if (all && gw_slot_destroy(handles)) {
@@ -203,6 +218,7 @@ void *fh_id(struct host_context *c, jobject t, int kind) {
   struct handle *h = get_handle(t);
   void *v = h && h->kind == kind ? h->value : NULL;
   pthread_mutex_unlock(&handles_lock);
+
   if (!v) {
     handle_error(c, FB_FAILURE_STATE, "Stale or mismatched JNI ID token");
   }
@@ -220,6 +236,7 @@ void fh_drop_token(jobject token) {
   if (!token) {
     return;
   }
+
   pthread_mutex_lock(&handles_lock);
   struct handle *h = get_handle(token);
   if (h) {
@@ -237,6 +254,7 @@ void fh_drop_locals(struct host_context *c, int level) {
   size_t position = 0;
   uint64_t token;
   struct handle *h;
+
   while ((h = gw_slot_owned(handles, c->id, position, &token))) {
     if (h->level >= level) {
       retire_handle(h, token);

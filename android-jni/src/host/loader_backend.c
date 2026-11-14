@@ -204,6 +204,7 @@ static int find_entry(JNIEnv *env, uint64_t id, const char *symbol,
     return gw_loader_fail(error, GW_E_ARGUMENT,
                           "Explicit, valid JNI method descriptor required");
   }
+
   return base_api()->find(env, id, symbol, descriptor, entry, error);
 }
 

@@ -35,7 +35,19 @@ binding 的全部模块共用一个存储池；每模块的哈希表索引 Guest
 
 引用令牌的高 32 位是代数，低 32 位是索引加一，零表示 null。达到 `UINT32_MAX` 后永久退役该槽，不能回绕复活旧 token。引用/注册池可表示最多 4,294,967,232 个槽位，实际首先受可分配内存限制；binding 受地址空间、分配器及哈希表表示范围限制，没有另设业务硬上限。令牌仅在当前 store/桥生命周期内有效，不得跨关闭或进程持久化，也不能解引用。
 
-空块保留到 store 销毁并优先复用；释放不自动收缩峰值容量，避免地址搬迁、代数重置及频繁分配。初始容量不是性能上限：ID 去重、类身份匹配和清扫仍扫描已分配容量，并用 JNI `IsSameObject` 判断身份。动态扩容没有消除这些路径的成本，也不作为性能提升证据。单 Guest、单次注册 64 方法、255 字节描述符、上下文和重入限制继续适用。
+空块保留到 store 销毁并优先复用；释放不自动收缩峰值容量，避免地址搬迁、代数重置及频繁分配。初始容量不是性能上限：注册类身份匹配仍扫描注册记录容量，并用 JNI `IsSameObject` 判断身份；ID 索引的规则见下文。单 Guest、单次注册 64 方法、255 字节描述符限制继续适用；动态上下文和重入帧仍受线程栈、内存与索引范围约束。
+
+引用令牌解析与 ID 去重是两条不同路径：已有令牌的 `fh_ref` / `fh_id` 直接定位槽位；`fh_add_id` 在共享 `handles_lock` 内查询 Zig 二级索引，键为 `(kind, VM ID value)`，再用 `IsSameObject` 核对候选的 weak 类身份。不能直接用 jclass/jweak 的地址作为类身份，也不能只凭 VM ID 值合并不同类或 method/field。
+
+索引使用哈希表和连续向量；通常每个键仅有一个内联 token，同键不同类的额外 token 才需要增长候选向量，没有链表或逐 ID 对象分配。查找平均成本取决于相同键的候选数，不再遍历 global/local 引用槽。另一个连续 token 向量只列出当前已索引 ID，清扫访问这些 ID，swap-remove 后重读当前位置；普通引用池的容量和历史峰值不再放大 ID 清扫。
+
+索引存储按 ID 数增长，未使用索引的普通引用不进入哈希表；每个 64 槽块增加一个 64 位标志，删除时只对已索引 token 更新索引。代数令牌与对象地址保持原契约。索引扩容失败会撤回本次 slot、删除新建 weak 引用，保留原异常或抛 OOM；删除不分配内存，store 销毁时释放索引容量。新增 ID 的平均插入成本包含哈希表/向量增长，不承诺每次插入都为严格常数时间。
+
+`python3 android-jni/tests/reference_cost.py --output PATH` 隔离测量生产 C/Zig 引用路径：以 0 / 32,768 / 131,072 / 262,144 个 global 令牌制造高水位，释放后比较直接解析、早期/后期 ID 命中和 ID 未命中，每组预热一轮、保留十轮。它使用最小 VM 替身，不包含 RPC、真实 VM 或游戏成本。Android ARM64 可显式提供 `--android-ndk`、`--jni-include`、`--ffi-include` 和 `--device`；此时在 shell UID 下运行独立 bionic 程序，不等同于应用调度环境。`--build-only` 只构建，不占用设备。
+
+保留相同夹具的修改前后二进制及各自 `inputs.json` 后，使用 `tests/compare_reference_cost.py --device SERIAL --baseline OLD_BINARY --candidate NEW_BINARY --output NEW_DIRECTORY` 做十对平衡 A/B。报告给出每轮十个 trial 的平均每操作 CPU 成本中位数，既不是单调用 P50，也不是 JNI/RPC 的完整往返延迟。
+
+`reference_cost.py --source-ref COMMIT --build-only` 可从 Git 提取指定修订的 Host 存储/引用生产源码，以当前同一夹具和工具链构建控制组；公共协议/JNI 头仍使用当前工作区，不能将它当作完整旧 runtime 的重建。输入记录包含生产源码、夹具和二进制散列。已保留的 ARM64 十对索引前后对照与严格 JNI 回归见 [id-index-arm64.json](../tests/results/id-index-arm64.json)。
 
 ## 所有权、失败和释放
 

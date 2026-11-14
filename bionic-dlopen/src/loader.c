@@ -53,6 +53,9 @@ static _Thread_local struct {
   unsigned count;
 } scopes[FB_MODULES];
 
+/* True when this thread holds at least one executing scope on the exact
+   id; a retired generation of the same slot never counts. Reads only the
+   thread-local scope table, so it needs no module lock. */
 static int scope_held(uint64_t id) {
   int index = fb_module_index(id);
   return index >= 0 && scopes[index].id == id && scopes[index].count;
@@ -69,6 +72,7 @@ static int check_close_scopes(const struct module *m,
         error, GW_E_BUSY,
         "Cannot close a module held by this thread's execution scope");
   }
+
   if (m->active) {
     for (unsigned i = 0; i < FB_MODULES; i++) {
       if (scopes[i].count) {
@@ -148,6 +152,7 @@ static int module_state(uint64_t id) {
   struct module *m = get_module(id);
   int result = m ? m->state : GW_MODULE_STALE;
   pthread_mutex_unlock(&lock);
+
   return result;
 }
 
@@ -169,6 +174,7 @@ int gw_dlopen_enter(uint64_t id) {
   int ok = !quarantined && state == READY && m &&
            (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE) &&
            m->active < INT_MAX;
+
   if (ok) {
     m->active++;
     m->pins++;
@@ -185,6 +191,7 @@ void gw_dlopen_leave(uint64_t id) {
   if (m && m->pins > 0) {
     m->pins--;
     m->active--;
+
     if (!m->active && m->state == GW_MODULE_CLOSING) {
       pthread_cond_broadcast(&quiescent);
     }
@@ -192,12 +199,20 @@ void gw_dlopen_leave(uint64_t id) {
   pthread_mutex_unlock(&lock);
 }
 
+/* Takes one executing-scope borrow on a LOADING or LIVE module while the
+   backend is READY and records it on the calling thread, stacking
+   recursive and ancestor entries into one per-slot count. Unlike a plain
+   enter the borrow is thread-bound - it cannot be released on or moved to
+   another thread - and the live record pins the module's slot against a
+   later generation. Returns 0 without side effects when refused, so a
+   failed enter must not be paired with leave. */
 int gw_dlopen_scope_enter(uint64_t id) {
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
   int ok = !quarantined && state == READY && m &&
            (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE) &&
            m->active < INT_MAX;
+
   if (ok) {
     int index = fb_module_index(id);
     /* A live scope prevents this module slot from being reused. */
@@ -213,6 +228,11 @@ int gw_dlopen_scope_enter(uint64_t id) {
   return ok;
 }
 
+/* Releases one executing scope on the calling thread. A stale, unheld or
+   foreign-thread id returns 0 without consuming another thread's scope or
+   a transferable pin; only this thread's own record is decremented. The
+   final release of a CLOSING module wakes the closer thread, exactly as
+   the final plain leave does. */
 int gw_dlopen_scope_leave(uint64_t id) {
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
@@ -223,6 +243,7 @@ int gw_dlopen_scope_leave(uint64_t id) {
     if (!scopes[index].count) {
       scopes[index].id = 0;
     }
+
     m->active--;
     if (!m->active && m->state == GW_MODULE_CLOSING) {
       pthread_cond_broadcast(&quiescent);

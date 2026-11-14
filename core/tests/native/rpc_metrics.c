@@ -31,6 +31,7 @@ static uint64_t histogram_count(const struct gw_rpc_counters *counter) {
   for (unsigned i = 0; i < GW_RPC_HISTOGRAM_BINS; i++) {
     count += counter->latency_ns[i];
   }
+
   return count;
 }
 
@@ -45,6 +46,7 @@ static uint64_t monotonic(void) {
   if (clock_gettime(CLOCK_MONOTONIC, &value)) {
     abort();
   }
+
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) +
          (uint64_t)value.tv_nsec;
 }

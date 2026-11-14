@@ -47,7 +47,7 @@ add_custom_command(OUTPUT ${binding_objects}
           --global-cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/build/zig-global-cache
           host-store -Dtarget=${zig_target} -Dcpu=baseline
   DEPENDS build.zig src/host/host_store.zig src/host/binding_store.zig src/host/binding_store.h
-          src/host/slot_store.zig src/host/slot_store.h VERBATIM)
+          src/host/slot_store.zig src/host/slot_index.zig src/host/slot_store.h VERBATIM)
 set_source_files_properties(${binding_objects} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
 add_custom_target(android_jni_binding_store DEPENDS ${binding_objects})
 install(FILES third_party/zig/LICENSE

@@ -212,6 +212,7 @@ int fh_binding_retire(struct binding *b) {
     atomic_fetch_add(&gw_host_bridge->errors, 1);
     return 0;
   }
+
   ffi_closure_free(b->closure);
   atomic_fetch_sub(&gw_host_bridge->live_closures, 1);
   return 1;
@@ -234,10 +235,12 @@ struct binding *make_binding(uint64_t module, uintptr_t guest, const char *sig,
     binding_error(error, GW_BINDING_ARGUMENT);
     return NULL;
   }
+
   pthread_mutex_lock(&bindings_lock);
   int created, status;
   struct binding *b = binding_get(module, guest, sig, &created, &status);
   pthread_mutex_unlock(&bindings_lock);
+
   if (!b) {
     binding_error(error, status);
   }
@@ -254,6 +257,7 @@ void fh_bindings_finish(void) {
   pthread_mutex_lock(&bindings_lock);
   binding_finish();
   pthread_mutex_unlock(&bindings_lock);
+
   pthread_mutex_lock(&registrations_lock);
   if (gw_slot_destroy(registrations)) {
     registrations = NULL;
@@ -268,6 +272,7 @@ static uint64_t new_registration(JNIEnv *env, jclass cls, uint64_t module) {
                                    _Alignof(struct registered_class), 0,
                                    GW_REGISTRATION_INITIAL_CAPACITY);
   }
+
   uint64_t token = 0;
   struct registered_class *record = gw_slot_insert(registrations, -1, &token);
   if (record) {
@@ -304,6 +309,7 @@ static uint64_t own_registration(JNIEnv *env, jclass cls, uint64_t module,
       return token;
     }
   }
+
   uint64_t token = new_registration(env, cls, module);
   pthread_mutex_unlock(&registrations_lock);
   return token;
@@ -318,6 +324,7 @@ static void finish_registration(JNIEnv *env, uint64_t token, int published) {
   if (record) {
     record->published |= published;
     record->pending--;
+
     if (!record->pending && !record->published) {
       (*env)->DeleteWeakGlobalRef(env, record->clazz);
       gw_slot_erase(registrations, token);
