@@ -1,0 +1,13 @@
+*.iml
+*.pyc
+**/__pycache__/
+**/.ruff_cache/
+**/.gradle/
+**/.cxx/
+**/.externalNativeBuild/
+**/local.properties
+**/.idea/
+.DS_Store
+**/build/
+**/vendor/
+**/work/

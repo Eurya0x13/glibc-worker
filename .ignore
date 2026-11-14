@@ -1,0 +1,7 @@
+**/build/
+**/vendor/
+**/work/
+**/__pycache__/
+**/.gradle/
+**/.ruff_cache/
+**/local.properties

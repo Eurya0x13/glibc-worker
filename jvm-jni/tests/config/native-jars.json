@@ -1,0 +1,65 @@
+[
+  {
+    "id": "snappy",
+    "name": "snappy-java",
+    "version": "1.1.10.12",
+    "url": "https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12.jar",
+    "jar_sha256": "1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732",
+    "sources_url": "https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12-sources.jar",
+    "sources_sha256": "e1824abac0dd76c849b8b67291d6e465cd02306a211d562a34e73c83cc0b5ef2",
+    "targets": {
+      "arm64-v8a": {
+        "resource": "org/xerial/snappy/native/Linux/aarch64/libsnappyjava.so",
+        "sha256": "d2540392eb2d856e425685a0314d0a6d641379ecd74d7d7f1475391d90fb1e54",
+        "bytes": 208976
+      },
+      "x86_64": {
+        "resource": "org/xerial/snappy/native/Linux/x86_64/libsnappyjava.so",
+        "sha256": "1b6b9db29b2603be5bb69bf76af473731499a92db3defab605ef98d4656583e4",
+        "bytes": 281272
+      }
+    }
+  },
+  {
+    "id": "lz4",
+    "name": "lz4-java",
+    "version": "1.8.0",
+    "url": "https://repo.maven.apache.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar",
+    "jar_sha256": "d74a3334fb35195009b338a951f918203d6bbca3d1d359033dc33edd1cadc9ef",
+    "sources_url": "https://repo.maven.apache.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0-sources.jar",
+    "sources_sha256": "53ac09a2d80ba5d0b7078f9cbc572dd4a5377a37d08b3333dd4b2ffe2143650f",
+    "targets": {
+      "arm64-v8a": {
+        "resource": "net/jpountz/util/linux/aarch64/liblz4-java.so",
+        "sha256": "25f2e16f54b0232d281fc882ba88c3fb6a4d4ae80c9df35d3c3e19457be8b7cc",
+        "bytes": 86081
+      },
+      "x86_64": {
+        "resource": "net/jpountz/util/linux/amd64/liblz4-java.so",
+        "sha256": "9008c9b9ae43485c1b6a2c87e3109b1b6ec99684f5f6b3b935026dc001fed77f",
+        "bytes": 154886
+      }
+    }
+  },
+  {
+    "id": "rocksdb",
+    "name": "rocksdbjni",
+    "version": "10.2.1",
+    "url": "https://repo.maven.apache.org/maven2/org/rocksdb/rocksdbjni/10.2.1/rocksdbjni-10.2.1.jar",
+    "jar_sha256": "4358a08bb96652dca35247137ec42db26e6b71f0a02633a3d7508cf2971f2f8b",
+    "sources_url": "https://repo.maven.apache.org/maven2/org/rocksdb/rocksdbjni/10.2.1/rocksdbjni-10.2.1-sources.jar",
+    "sources_sha256": "f12dd98275abb1372dfda15242e814845999cb8146b5fdfdc91d097411270c74",
+    "targets": {
+      "arm64-v8a": {
+        "resource": "librocksdbjni-linux-aarch64.so",
+        "sha256": "d66c468122db1d520d4b0ccc71c58907254b4dd3ce27b882f1f275a0a3b577f7",
+        "bytes": 14511248
+      },
+      "x86_64": {
+        "resource": "librocksdbjni-linux64.so",
+        "sha256": "5f72e5df43909a8eed04f9d0f2eccb77f7de12c1de3451f52143602848f02379",
+        "bytes": 14937536
+      }
+    }
+  }
+]

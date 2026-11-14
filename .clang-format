@@ -1,0 +1,16 @@
+BasedOnStyle: Google
+ColumnLimit: 80
+PointerAlignment: Right
+SortIncludes: Never
+StatementMacros: [ECHO]
+SeparateDefinitionBlocks: Always
+AllowShortFunctionsOnASingleLine: Empty
+InsertBraces: true
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+---
+Language: Java
+BasedOnStyle: Google
+ColumnLimit: 100
+IndentWidth: 2
+InsertBraces: true

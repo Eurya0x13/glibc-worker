@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.webp binary
+
+# Preserve whitespace in upstream patches and third-party license texts.
+*.patch -whitespace
+**/third_party/** -whitespace

@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+set(_gw_android_jni_prefix "${PACKAGE_PREFIX_DIR}")
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(GlibcWorkerDlopen CONFIG)
+if(NOT TARGET glibc_worker::android_ffi)
+  add_library(glibc_worker::android_ffi STATIC IMPORTED)
+  set_target_properties(glibc_worker::android_ffi PROPERTIES
+    IMPORTED_LOCATION "${_gw_android_jni_prefix}/@CMAKE_INSTALL_LIBDIR@/libgw_android_jni_ffi.a")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/GlibcWorkerAndroidJniTargets.cmake")

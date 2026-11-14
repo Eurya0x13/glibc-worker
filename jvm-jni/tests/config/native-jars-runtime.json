@@ -1,0 +1,10 @@
+{
+  "arm64-v8a": {
+    "libgcc_s.so.1": "b2b3539221f4c1731d6938bfc61fed055094e8d0a527adae10f2721b1c514536",
+    "libstdc++.so.6": "0b91710f234dc87156a5e417057469ceaaa09c72f1869897b7800ed91ac5670e"
+  },
+  "x86_64": {
+    "libgcc_s.so.1": "48f9006ee9317226590951988123fdf905370c6700b94609fb68c357b4164f6f",
+    "libstdc++.so.6": "700faad3e61d01015e1b19ba8aa5558597ed5f72fb54ba55aadcf87796dc0cdf"
+  }
+}

@@ -1,0 +1,13 @@
+This runtime uses GNU glibc 2.44, rebuilt from the published source archive:
+https://ftp.gnu.org/gnu/libc/glibc-2.44.tar.xz
+SHA256: 37f600f2bef3c5e8300147059568b2a2e40a7ad6ccc65ce942556d49429cc667
+
+The source-access runtime applies patches shipped in this project's patches/ directory:
+- access uses faccessat(AT_FDCWD, path, mode).
+- clone3 fallback and NPTL adjustments are adapted from termux-pacman/glibc-packages,
+  commit 3d99b6682f8c74ad82bda39315325189d8d34966.
+https://github.com/termux-pacman/glibc-packages/tree/3d99b6682f8c74ad82bda39315325189d8d34966/gpkg/glibc
+
+The complete build steps and modifications are supplied with this project's source.
+This is a limited prototype, not a complete Termux distribution or JNI compatibility layer.
+GNU glibc is licensed under the GNU Lesser General Public License; see COPYING.LIB.

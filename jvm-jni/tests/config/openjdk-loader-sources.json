@@ -1,0 +1,1167 @@
+{
+  "schema_version": 1,
+  "scope": "OpenJDK GA 8-27, one pinned JDK28 early-access snapshot and five pinned maintenance snapshots; source audit only, not runtime compatibility",
+  "files": [
+    {
+      "major": 8,
+      "baseline": "ga",
+      "repo": "openjdk/jdk8u",
+      "ref": "jdk8-b132",
+      "kind": "library_java",
+      "path": "jdk/src/share/classes/java/lang/ClassLoader.java",
+      "sha256": "d1caa1232825f46806b43f786cf4b0fcdc7ba69bdd28233c49fa19b936cec232"
+    },
+    {
+      "major": 8,
+      "baseline": "ga",
+      "repo": "openjdk/jdk8u",
+      "ref": "jdk8-b132",
+      "kind": "native_c",
+      "path": "jdk/src/share/native/java/lang/ClassLoader.c",
+      "sha256": "48599a24a2e6f93efe314b7fd6428994a99dcc0d0c4b0b1f7000d7dc4d84c242"
+    },
+    {
+      "major": 8,
+      "baseline": "ga",
+      "repo": "openjdk/jdk8u",
+      "ref": "jdk8-b132",
+      "kind": "vm_cpp",
+      "path": "hotspot/src/share/vm/prims/jvm.cpp",
+      "sha256": "e2d1784e6c5d9aa65549c1739a7dffc5d039bb9c20a50556a93898ee7906a142"
+    },
+    {
+      "major": 8,
+      "baseline": "ga",
+      "repo": "openjdk/jdk8u",
+      "ref": "jdk8-b132",
+      "kind": "lookup_cpp",
+      "path": "hotspot/src/share/vm/prims/nativeLookup.cpp",
+      "sha256": "362db152c89d7fe522452828877c47fb11546f40460b7760b7b368633f5bdb57"
+    },
+    {
+      "major": 9,
+      "baseline": "ga",
+      "repo": "openjdk/jdk9u",
+      "ref": "jdk-9+181",
+      "kind": "library_java",
+      "path": "jdk/src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "2221deaa5e03f986288befe63a7b4304f797dc94830204957359bdbd0fb5c869"
+    },
+    {
+      "major": 9,
+      "baseline": "ga",
+      "repo": "openjdk/jdk9u",
+      "ref": "jdk-9+181",
+      "kind": "native_c",
+      "path": "jdk/src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "1d94078c84abb25537a030718de5f958f643f09c080b9ce0bcca2277f96c9555"
+    },
+    {
+      "major": 9,
+      "baseline": "ga",
+      "repo": "openjdk/jdk9u",
+      "ref": "jdk-9+181",
+      "kind": "vm_cpp",
+      "path": "hotspot/src/share/vm/prims/jvm.cpp",
+      "sha256": "4c7d0c8e469e56361276e8f210b82dceeab81ec839f6220e13bab1fae482b603"
+    },
+    {
+      "major": 9,
+      "baseline": "ga",
+      "repo": "openjdk/jdk9u",
+      "ref": "jdk-9+181",
+      "kind": "lookup_cpp",
+      "path": "hotspot/src/share/vm/prims/nativeLookup.cpp",
+      "sha256": "d7ec4eb02f1a60d6fcdbe73f1baa796dfca7a077ecc4b0a588ece2f89770d3aa"
+    },
+    {
+      "major": 10,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-10+46",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "7f8498eb7e95872e856783aca8d9a6562826d1e68d442c58a7da1c82dc94674c"
+    },
+    {
+      "major": 10,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-10+46",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "a9ebeedcd4593c4f1f1f198bf7553cdfca0eafc08d0293408150a345bb1d531d"
+    },
+    {
+      "major": 10,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-10+46",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "018dc1d0c12be7c8c2cbd115aa50b3de72b2e423eafe8242f8533ec4d9c3289c"
+    },
+    {
+      "major": 10,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-10+46",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "7fd0bf00564c903f0876c4bd8f049d85b3a7ad95fb2a1039be15a5877108320e"
+    },
+    {
+      "major": 11,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-11+28",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "53785e1ad47fc474df1ffe0ad9d24e1064f522504f8800d19e0f7352097db3be"
+    },
+    {
+      "major": 11,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-11+28",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "a9ebeedcd4593c4f1f1f198bf7553cdfca0eafc08d0293408150a345bb1d531d"
+    },
+    {
+      "major": 11,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-11+28",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "9508dd53cade1d508a2cfa7d8d8d5de67e57a7ecde682f420c664bace1f2ed4b"
+    },
+    {
+      "major": 11,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-11+28",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "c6add52fb468c551362a8b10133c561c7abc5e4a21aac34d09679384b82b93c1"
+    },
+    {
+      "major": 12,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-12+33",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "31a23e5d49b809aaa62c16e33d862958a62dc35b3a97a9290d9a29bac506918c"
+    },
+    {
+      "major": 12,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-12+33",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "a9ebeedcd4593c4f1f1f198bf7553cdfca0eafc08d0293408150a345bb1d531d"
+    },
+    {
+      "major": 12,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-12+33",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "53c3405334799f8f7366927313586732255c64f03dcd33829557341e711d7f6e"
+    },
+    {
+      "major": 12,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-12+33",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "756372c1dc6f2403460556831949639ede95d458c3cf14e8d337c16b5dd87714"
+    },
+    {
+      "major": 13,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-13+33",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "9b3545e1334f1d0df2a645eacd66e41f8e55034560ed730abaebde572c3ac693"
+    },
+    {
+      "major": 13,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-13+33",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "a9ebeedcd4593c4f1f1f198bf7553cdfca0eafc08d0293408150a345bb1d531d"
+    },
+    {
+      "major": 13,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-13+33",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "6bf0d30a7960f27320a91dd4baa6ce7ac53d2ce390c318d09ab31b037e8c7020"
+    },
+    {
+      "major": 13,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-13+33",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "ca41443f4e7e20eb4f6fd081c3910299cb95573bdd4071ce27cc79ce907ffb37"
+    },
+    {
+      "major": 14,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-14+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "a78de0c893fd9de8022fa60f74ba35ceadde0c75b325db884b7f07e29c103f2b"
+    },
+    {
+      "major": 14,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-14+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "c35ccf5661112c083b27e63097790dfe23103709bf90735aeb75510909024f76"
+    },
+    {
+      "major": 14,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-14+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "994a90673741bef5ab512ed6fb97169dd5caf6c0e40dc6cb05a2b72b3b5fa776"
+    },
+    {
+      "major": 14,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-14+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "079826e4027c493ee165788fb0096a43a6b8646c56d42d18ee6a544630bac298"
+    },
+    {
+      "major": 15,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-15+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "1734ef2c323c13173cbe3398966040a8294422656382655c68e786d3d44bb5c1"
+    },
+    {
+      "major": 15,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-15+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "47def304358b37ec8397e91b0c0da8a0e8e95c0aee7871503ac43f99027d8ef0"
+    },
+    {
+      "major": 15,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-15+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "468365c46a4f2866bb9dfc78c9736cf6b5e85400b4c9a4fb8406e1b6b8ede3ef"
+    },
+    {
+      "major": 15,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-15+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "9bf83f039c19bd0aa6189427a582768e3a9527822c085e93bf6207ec024551fb"
+    },
+    {
+      "major": 16,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-16+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "c18c37af1853b162546ce879a20d14c9936d4858e32911df0a3df86554d6ff18"
+    },
+    {
+      "major": 16,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-16+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "cda20804e95bb7098c753cb63768f36a68c0e311256c25b7be6b63e5a013a36a"
+    },
+    {
+      "major": 16,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-16+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "d91a856349348d5b5300e4660c01202c2d32a15d80700fe63fb108d62af09639"
+    },
+    {
+      "major": 16,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-16+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "5b5777ad658a109aaa814223013106aea314850edc59a778da0cafd32fe45213"
+    },
+    {
+      "major": 17,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-17+35",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "4766685000b7449e1875e935f2ae2570908a0ed766a1516d508f1958a0d6938c"
+    },
+    {
+      "major": 17,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-17+35",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "47def304358b37ec8397e91b0c0da8a0e8e95c0aee7871503ac43f99027d8ef0"
+    },
+    {
+      "major": 17,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-17+35",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "544851a3785d63c97f5ffd14020c68e9193d604fbfaaa6ffffa3977ea901446d"
+    },
+    {
+      "major": 17,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-17+35",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "9dd7e32c1424d4f1dd07b5dcc588ec512f0faed119340cd36f8ac715ce1e259b"
+    },
+    {
+      "major": 18,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-18+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "5e2942f6d2e300001d2f8aa35c9f0db59f490a714ac22bf22b60bfff6f40ce96"
+    },
+    {
+      "major": 18,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-18+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "d9b384ed0492ed4c9ba6320a097d5ee0d1a25ec76cc2a233e7efa2e44729a1b6"
+    },
+    {
+      "major": 18,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-18+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "a6f3c5855c280be068476c22b36b0c8a3aeab5efbea1e289fccaa3df0d36e914"
+    },
+    {
+      "major": 18,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-18+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "ddd105313f612e83d1f4a3a064a06c0d0355e0e651a283e33e0f76c821f23afb"
+    },
+    {
+      "major": 19,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-19+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "580fdac5c3e7c0a0bd9c9aae150e2b68e6f6baf4b5d517607f10bf68e5bb04b0"
+    },
+    {
+      "major": 19,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-19+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "451fbf87a624ca3518b25eecb2561701b2d05aa1ec3acf44c0f9cd52b0080671"
+    },
+    {
+      "major": 19,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-19+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "79acb8a9b26b6d3d6a64a7d84f2308cc6c8b11d2649efad242f14d34b287bd74"
+    },
+    {
+      "major": 19,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-19+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "b812696dfe1125dcb482e59ec5b55dc6dfd703592e6b343612407eec4a39cd6d"
+    },
+    {
+      "major": 20,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-20+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "dc6345dce48e7fccb36fb33a80d462dd301fdbe73299df503a029bae04cb4d49"
+    },
+    {
+      "major": 20,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-20+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "75549e652ada82c64b4199d92f5423287fb59aa20cff382dbd95e432830fe6bf"
+    },
+    {
+      "major": 20,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-20+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "364c9c40df0402d3bec61917046f68c904274a92a4c0f956774fa9dfe0999105"
+    },
+    {
+      "major": 20,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-20+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "73a08cd716293af81ed9d38c78998e4cca4a62c19aea66039eab061b71a98a51"
+    },
+    {
+      "major": 21,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-21+35",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "dc6345dce48e7fccb36fb33a80d462dd301fdbe73299df503a029bae04cb4d49"
+    },
+    {
+      "major": 21,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-21+35",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "75549e652ada82c64b4199d92f5423287fb59aa20cff382dbd95e432830fe6bf"
+    },
+    {
+      "major": 21,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-21+35",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "5e9f8d57f352a77fee6d29a443e391a7b35053ceb01e6ec71f191e769cc979d4"
+    },
+    {
+      "major": 21,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-21+35",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "1a62a8aadd1cac5c229aea62abd9bb7dae349171de7ef0a4ec436bcd492f6d8e"
+    },
+    {
+      "major": 22,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-22+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "dc6345dce48e7fccb36fb33a80d462dd301fdbe73299df503a029bae04cb4d49"
+    },
+    {
+      "major": 22,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-22+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "75549e652ada82c64b4199d92f5423287fb59aa20cff382dbd95e432830fe6bf"
+    },
+    {
+      "major": 22,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-22+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "bea6b9d7729b0b19d9a10ee149ff35e4da48eedde4994693bda0225a72822a72"
+    },
+    {
+      "major": 22,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-22+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "beec1d2a8b13f00bf7111071a37bb435a4192f54f3568f1c573aaf0a7fee138b"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "dc6345dce48e7fccb36fb33a80d462dd301fdbe73299df503a029bae04cb4d49"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "75549e652ada82c64b4199d92f5423287fb59aa20cff382dbd95e432830fe6bf"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "1654c62a834405f49bb1376e21b44cb963aa7bc600ac3f9c0fe8620045bec34c"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "beec1d2a8b13f00bf7111071a37bb435a4192f54f3568f1c573aaf0a7fee138b"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "305124cedbf81913d5e552d58294b9652f1d42f45d3d8d98ae6aa7332c8ac250"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "875d9021df95a8608f79a2ae50d185d1694adbd239f225e8f49c046a6f5c140d"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "68ecf2c6a38cf52474b26db821b204f8c089fd5697d179c5787f7f33fbc4c236"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "305124cedbf81913d5e552d58294b9652f1d42f45d3d8d98ae6aa7332c8ac250"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "02a35b13d4f80c9c7673a47343b4ed4b85187c514c735d72e2b83f54dc8a4eb5"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "4d2f36eddabceab7a3288fb89bf6812377782b5d9a86a1f161ee88b732b2ed85"
+    },
+    {
+      "major": 8,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk8u",
+      "ref": "b661ee6ff840d6922aa7424a4d8f24760b21cf26",
+      "kind": "library_java",
+      "path": "jdk/src/share/classes/java/lang/ClassLoader.java",
+      "sha256": "5532158478805d6bb6341d25a267e1ef5463b26362a24b278f67b0b186ae5b63"
+    },
+    {
+      "major": 8,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk8u",
+      "ref": "b661ee6ff840d6922aa7424a4d8f24760b21cf26",
+      "kind": "native_c",
+      "path": "jdk/src/share/native/java/lang/ClassLoader.c",
+      "sha256": "d4da83330355d7657a011458f5ac8f4d73f753461cf6a82ccf61683b1b349135"
+    },
+    {
+      "major": 11,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk11u",
+      "ref": "d001c53e35a816f26718845b5d26a877878a7f5d",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "f316fd38d573534227901fabbe91a54256c5ca5ed66675a55d37d73cb00880b1"
+    },
+    {
+      "major": 11,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk11u",
+      "ref": "d001c53e35a816f26718845b5d26a877878a7f5d",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/ClassLoader.c",
+      "sha256": "45d7810ea5816af926b69ea21936a32a1ac3b5bb421efc30d90dd52d52764684"
+    },
+    {
+      "major": 17,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk17u",
+      "ref": "14a8c6288c963d6d61f12227375398d8abafc709",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "d197a7e5dd5d121cf8260a00c4bda770b95bfeebc7648a617b4508aa93d53a2d"
+    },
+    {
+      "major": 17,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk17u",
+      "ref": "14a8c6288c963d6d61f12227375398d8abafc709",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "d9b384ed0492ed4c9ba6320a097d5ee0d1a25ec76cc2a233e7efa2e44729a1b6"
+    },
+    {
+      "major": 17,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk17u",
+      "ref": "14a8c6288c963d6d61f12227375398d8abafc709",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "347f87a7fca3a53fbc049d5982dc2098eed68c26b0295abbc681c4e843d7f56c"
+    },
+    {
+      "major": 21,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk21u",
+      "ref": "70b7fe11759210c7aec57d8913164c9113a72ce5",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "dc6345dce48e7fccb36fb33a80d462dd301fdbe73299df503a029bae04cb4d49"
+    },
+    {
+      "major": 21,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk21u",
+      "ref": "70b7fe11759210c7aec57d8913164c9113a72ce5",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "75549e652ada82c64b4199d92f5423287fb59aa20cff382dbd95e432830fe6bf"
+    },
+    {
+      "major": 21,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk21u",
+      "ref": "70b7fe11759210c7aec57d8913164c9113a72ce5",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 25,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk25u",
+      "ref": "f5ddca134c5ad37e6f623e4379d2ee551686ccee",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "305124cedbf81913d5e552d58294b9652f1d42f45d3d8d98ae6aa7332c8ac250"
+    },
+    {
+      "major": 25,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk25u",
+      "ref": "f5ddca134c5ad37e6f623e4379d2ee551686ccee",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 25,
+      "baseline": "update-snapshot",
+      "repo": "openjdk/jdk25u",
+      "ref": "f5ddca134c5ad37e6f623e4379d2ee551686ccee",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 15,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-15+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "347f87a7fca3a53fbc049d5982dc2098eed68c26b0295abbc681c4e843d7f56c"
+    },
+    {
+      "major": 16,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-16+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "347f87a7fca3a53fbc049d5982dc2098eed68c26b0295abbc681c4e843d7f56c"
+    },
+    {
+      "major": 17,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-17+35",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "347f87a7fca3a53fbc049d5982dc2098eed68c26b0295abbc681c4e843d7f56c"
+    },
+    {
+      "major": 18,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-18+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "347f87a7fca3a53fbc049d5982dc2098eed68c26b0295abbc681c4e843d7f56c"
+    },
+    {
+      "major": 19,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-19+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 20,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-20+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 21,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-21+35",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 22,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-22+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 23,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-23+37",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "daacc198e43203c8bfabaf925569da40964f2758b9f1513dfce88b77e8da8c87"
+    },
+    {
+      "major": 24,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-24+36",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "7d1dde924abc29413f47d7288bce99f230ed67f324b8aeaf2b66f17f98269ff7"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "e36c112d40624ad3d89f147a1e81a9375b18503b610ca79954ac2f3b8e9d6df1"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "58f0abbc80fbef8091650ce6e4fc124188f52621dc54c66dbf1c8b970e564dc8"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "fdfd3a647a86759827ff5422a879c22080b524de28e3a4a0c7b993042d802e10"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "96600a464fcd60801e4cafcf73b193f7a3fb6a0eb383b15cd10c078e48dcedb8"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "e36c112d40624ad3d89f147a1e81a9375b18503b610ca79954ac2f3b8e9d6df1"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "classloader_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "d3410198ea9d25f28217c86651c4f1d1052a2428bac7b12b9dd90c209da1fcb2"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "jni_header",
+      "path": "src/java.base/share/native/include/jni.h",
+      "sha256": "1e03bd83d1662ac00647f7a06c11d32333767ee537803ec1d153e89888414520"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "58f0abbc80fbef8091650ce6e4fc124188f52621dc54c66dbf1c8b970e564dc8"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "a32e217d5da5e2ab40ef9dc00c90ad51d7b6d9e56b3c48c67a6f8a92004abf54"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "76b79f3fb899334b249e3c29819fad221ca180bea442938c513a0e7c5ae68d44"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "e36c112d40624ad3d89f147a1e81a9375b18503b610ca79954ac2f3b8e9d6df1"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "classloader_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "d3410198ea9d25f28217c86651c4f1d1052a2428bac7b12b9dd90c209da1fcb2"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "jni_header",
+      "path": "src/java.base/share/native/include/jni.h",
+      "sha256": "1e03bd83d1662ac00647f7a06c11d32333767ee537803ec1d153e89888414520"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "library_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibraries.java",
+      "sha256": "58f0abbc80fbef8091650ce6e4fc124188f52621dc54c66dbf1c8b970e564dc8"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "lookup_java",
+      "path": "src/java.base/share/classes/jdk/internal/loader/NativeLibrary.java",
+      "sha256": "04c1285dcc6dcb9f5a6b4789c63840b1e0d1af7310aa836f8f3d9f577ff070b2"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "native_c",
+      "path": "src/java.base/share/native/libjava/NativeLibraries.c",
+      "sha256": "4609719b27b65f042cc5fa8ff56ba95e8260c68f0a3896c172d26fbce8c71f02"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "vm_cpp",
+      "path": "src/hotspot/share/prims/jvm.cpp",
+      "sha256": "7ea5b8f1341ee922fdb738f28b1806d95f0bd6251ce735fa6f9185c033060db4"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "lookup_cpp",
+      "path": "src/hotspot/share/prims/nativeLookup.cpp",
+      "sha256": "76b79f3fb899334b249e3c29819fad221ca180bea442938c513a0e7c5ae68d44"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "runtime_java",
+      "path": "src/java.base/share/classes/java/lang/Runtime.java",
+      "sha256": "e36c112d40624ad3d89f147a1e81a9375b18503b610ca79954ac2f3b8e9d6df1"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "classloader_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "dbe7d3f0e5d38e7cc841efde5ebcdee21240712a4db9003f1c993236269f354e"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "jni_header",
+      "path": "src/java.base/share/native/include/jni.h",
+      "sha256": "42330664d1cccf2e4aa7b46e38674a1598f57a9822923aabdeb45649cb25842b"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "classloader_java",
+      "path": "src/java.base/share/classes/java/lang/ClassLoader.java",
+      "sha256": "ff239fa854f210d80c4a363d7a01f7575ad5cbbf8cb80b1fdd8f362ba48691f0"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "jni_header",
+      "path": "src/java.base/share/native/include/jni.h",
+      "sha256": "1e03bd83d1662ac00647f7a06c11d32333767ee537803ec1d153e89888414520"
+    },
+    {
+      "major": 25,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "jdk-25+36",
+      "kind": "version_config",
+      "path": "make/conf/version-numbers.conf",
+      "sha256": "2881cd15ffecd1632b86efccc255cab3512ffae51bce4731d4f2cce8103a1ee7"
+    },
+    {
+      "major": 26,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "4408cd2a07a14243a58cd9d30813302bfbe81133",
+      "kind": "version_config",
+      "path": "make/conf/version-numbers.conf",
+      "sha256": "4e6e369972473b10dc9246cbaf7d4c43b1a489e8f5dc4096332359d3733c9887"
+    },
+    {
+      "major": 27,
+      "baseline": "ga",
+      "repo": "openjdk/jdk",
+      "ref": "815ff4dc327fe17f2433c7d115a5a503af10f3c4",
+      "kind": "version_config",
+      "path": "make/conf/version-numbers.conf",
+      "sha256": "dabd63c55f23a04af40beb89d19853177b0b044bf386620ddf8017a9e950b504"
+    },
+    {
+      "major": 28,
+      "baseline": "development-snapshot",
+      "repo": "openjdk/jdk",
+      "ref": "ce986f721b1d1e4d1503c50b8070a52f6f4e970a",
+      "kind": "version_config",
+      "path": "make/conf/version-numbers.conf",
+      "sha256": "c0facdaa927efc7167f03d0b5913a9b87a87d06ff7a0cb4619b260c18c917b2d"
+    }
+  ]
+}

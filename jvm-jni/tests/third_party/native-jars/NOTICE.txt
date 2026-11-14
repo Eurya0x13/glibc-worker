@@ -1,0 +1,18 @@
+Optional compatibility corpus, original upstream artifacts; see tests/config/native-jars.json.
+
+lz4-java 1.8.0: https://github.com/lz4/lz4-java/tree/1.8.0
+Apache License 2.0; license text in lz4/LICENSE.txt.
+
+snappy-java 1.1.10.12: https://github.com/xerial/snappy-java/tree/v1.1.10.12
+BSD license and embedded native component notices in snappy/LICENSE.
+
+RocksDB JNI 10.2.1: https://github.com/facebook/rocksdb/tree/v10.2.1
+Dual Apache 2.0 / GPLv2 with LevelDB BSD portions; upstream notices in rocksdb/.
+
+GNU C++ support libraries are discovered from the selected compiler and hash-pinned.
+GNU GPLv3 with GCC Runtime Library Exception 3.1; texts in gcc-runtime/.
+The matching GNU libc dependencies use the runtime LGPL notices packaged separately.
+
+License texts were retrieved from these fixed upstream release tags. JARs, source
+JARs and native images are verified and packaged by tests/scripts/prepare-native-jars.py;
+their source bytes are not rewritten by this test harness.

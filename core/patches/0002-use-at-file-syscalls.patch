@@ -1,0 +1,26 @@
+--- a/sysdeps/unix/sysv/linux/unlink.c
++++ b/sysdeps/unix/sysv/linux/unlink.c
+@@ -24,10 +24,6 @@
+ int
+ __unlink (const char *name)
+ {
+-#ifdef __NR_unlink
+-  return INLINE_SYSCALL_CALL (unlink, name);
+-#else
+   return INLINE_SYSCALL_CALL (unlinkat, AT_FDCWD, name, 0);
+-#endif
+ }
+ weak_alias (__unlink, unlink)
+--- a/sysdeps/unix/sysv/linux/readlink.c
++++ b/sysdeps/unix/sysv/linux/readlink.c
+@@ -26,10 +26,6 @@
+ ssize_t
+ __readlink (const char *path, char *buf, size_t len)
+ {
+-#ifdef __NR_readlink
+-  return INLINE_SYSCALL_CALL (readlink, path, buf, len);
+-#else
+   return INLINE_SYSCALL_CALL (readlinkat, AT_FDCWD, path, buf, len);
+-#endif
+ }
+ weak_alias (__readlink, readlink)

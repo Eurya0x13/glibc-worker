@@ -1,0 +1,14 @@
+{
+  "x86_64": {
+    "gnu_triplet": "x86_64-linux-gnu",
+    "guest_cc": "gcc",
+    "ndk_triplet": "x86_64-linux-android",
+    "loader": "ld-linux-x86-64.so.2"
+  },
+  "arm64-v8a": {
+    "gnu_triplet": "aarch64-linux-gnu",
+    "guest_cc": "aarch64-linux-gnu-gcc",
+    "ndk_triplet": "aarch64-linux-android",
+    "loader": "ld-linux-aarch64.so.1"
+  }
+}
