@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-EXTENSIONS = {".c", ".h", ".java", ".py", ".sh"}
+EXTENSIONS = {".c", ".h", ".java", ".py", ".sh", ".zig"}
 TEXT_EXTENSIONS = EXTENSIONS | {".md", ".json", ".kts", ".properties"}
 
 
@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    groups = {"clang-format": [], "shfmt": [], "ruff": []}
+    groups = {"clang-format": [], "shfmt": [], "ruff": [], "zig": []}
 
     for directory in (
         "core",
@@ -71,7 +71,9 @@ def main():
             ):
                 continue
             tool = (
-                "ruff"
+                "zig"
+                if path.suffix == ".zig"
+                else "ruff"
                 if path.suffix == ".py"
                 else "shfmt"
                 if path.suffix == ".sh"
@@ -85,6 +87,8 @@ def main():
             options = ["--dry-run", "--Werror"] if args.check else ["-i"]
         elif name == "shfmt":
             options = ["-i", "2", "-ci", "-bn", "-d" if args.check else "-w"]
+        elif name == "zig":
+            options = ["fmt", *(["--check"] if args.check else [])]
         else:
             options = [
                 "format",

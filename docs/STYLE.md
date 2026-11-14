@@ -10,6 +10,9 @@
 | Python | Ruff formatter，80 列、双引号，对齐 Google Python 风格；配置在 `pyproject.toml` |
 | Kotlin Gradle DSL | Google Kotlin 风格、4 空格、100 列，插件、仓库及长列表按块展开 |
 | JSON | 2 空格，与生成工具一致 |
+| Zig | 固定 Zig 0.16.0 的 `zig fmt`，4 空格 |
+
+维护 Zig 试点源码还需要 Zig 0.16.0；格式脚本会调用 `zig fmt`，普通 C 后端构建不依赖 Zig。
 
 C / 头文件 / Java 的函数、类型定义之间保留一个空行，由
 `SeparateDefinitionBlocks: Always` 自动维护。函数内部按逻辑阶段留空行，避免把检查、分配、调用与清理挤在一起；Python、Bash 与 Kotlin 同样遵守这一分块约定。

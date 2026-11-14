@@ -63,6 +63,25 @@ public final class Runner {
     invoke(c, "load", new Class<?>[] {String.class}, path);
     check(NativeBridge.bridgeMetric(1) == before + 1, "onload_once_cycle_" + cycle);
 
+    Class<?> capacity = l.loadClass("conformance.BindingCapacity");
+    if (capacity.getField("enabled").getBoolean(null)) {
+      int methods = (Integer) invoke(capacity, "verify", new Class<?>[] {});
+      int live = NativeBridge.bridgeMetric(5);
+      if (methods != 1024 || live < 1024) {
+        throw new AssertionError("Binding capacity or invocation failure");
+      }
+      Class<?> resources = l.loadClass("conformance.ResourceCapacity");
+      int classes = (Integer) invoke(resources, "verify", new Class<?>[] {});
+      int references = resources.getField("references").getInt(null);
+      if (classes != 320 || references != 20000) {
+        throw new AssertionError("Resource capacity or invocation failure");
+      }
+      System.out.println("RESOURCE_CAPACITY_TEST {\"cycle\":" + cycle + ",\"classes\":" + classes
+          + ",\"references\":" + references + "}");
+      System.out.println("BINDING_CAPACITY_TEST {\"cycle\":" + cycle + ",\"methods\":" + methods
+          + ",\"live_closures\":" + live + "}");
+    }
+
     if (cycle == 0) {
       invoke(c, "load", new Class<?>[] {String.class},
           new File(path).getParent() + "/libhost_control.so");

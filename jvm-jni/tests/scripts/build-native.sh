@@ -21,6 +21,7 @@ mkdir -p android-jni/build/jni-include
 cp "$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/jni.h" android-jni/build/jni-include/
 sha256sum android-jni/build/jni-include/jni.h >jvm-jni/build/native/jni-header-hash.txt
 python3 jvm-jni/tests/scripts/gen-fixture.py
+python3 android-jni/tests/gen-binding-capacity.py --output jvm-jni/build/native/generated
 python3 jvm-jni/tests/scripts/prepare-zstd.py --fetch-only
 python3 jvm-jni/tests/scripts/prepare-native-jars.py --fetch-only
 python3 jvm-jni/tests/scripts/prepare-jre.py
@@ -29,15 +30,22 @@ python3 jvm-jni/tests/scripts/prepare-native-jars.py
 core/scripts/build-ffi.sh "$ccndk"
 cp "core/build/ffi-android/$GW_ABI/share/licenses/libffi/LICENSE" \
   jvm-jni/build/tests/android/assets/runtime/libffi-LICENSE.txt
+if [[ ${GW_BINDING_BACKEND:-c} == zig ]]; then
+  cp android-jni/third_party/zig/LICENSE \
+    jvm-jni/build/tests/android/assets/runtime/zig-LICENSE.txt
+fi
 python3 android-jni/scripts/gen-jni.py
 python3 jvm-jni/tests/scripts/prepare-sqlite.py
 
-includes=(-Iandroid-jni/include -Icore/include -Iandroid-jni/common -Ibionic-dlopen/include -Ibionic-dlopen -Iandroid-jni/host -Iandroid-jni/guest
-  -Ijvm-jni/native -Icore/bootstrap -Ijvm-jni/tests/native/harness
+includes=(-Iandroid-jni/include -Icore/include -Iandroid-jni/src/common -Ibionic-dlopen/include -Ibionic-dlopen/src -Iandroid-jni/src/host -Iandroid-jni/src/guest
+  -Ijvm-jni/include -Ijvm-jni/src/native -Icore/src/bootstrap -Ijvm-jni/tests/native/harness
   -Iandroid-jni/build -Ijvm-jni/build/native -Ijvm-jni/build/native/generated)
 warnings=(-Wall -Wextra -Werror)
 host_flags=(-fPIC -fno-emulated-tls -O1 -g "${warnings[@]}" "${includes[@]}")
 guest_flags=(-fPIC -O1 -g "${warnings[@]}" "${includes[@]}" -Iandroid-jni/build/jni-include)
+if [[ ${GW_BINDING_BACKEND:-c} == zig ]]; then
+  guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1)
+fi
 lab_sources=(jvm-jni/tests/native/harness/bootstrap.c
   jvm-jni/tests/native/harness/jni.c jvm-jni/tests/native/harness/jni_dispatch.c jvm-jni/tests/native/harness/jre_host.c
   jvm-jni/tests/native/harness/jre_layout_spike.c jvm-jni/tests/native/harness/loader_smoke.c
@@ -65,7 +73,7 @@ cp "$core_out/libglibc_bridge.so" "$out/"
 # 4. GNU Guest program and test DSOs. Never pass the bionic sysroot to GNU cc.
 "$GW_GUEST_CC" "${guest_flags[@]}" -I"core/build/ffi-linux/$GW_ABI/include" \
   jvm-jni/tests/native/harness/worker.c jvm-jni/tests/native/harness/jni_proxy.c \
-  android-jni/guest/full_guest.c android-jni/guest/guest_loader.c \
+  android-jni/src/guest/full_guest.c android-jni/src/guest/guest_loader.c \
   "core/build/ffi-linux/$GW_ABI/lib/libffi.a" -ldl -pthread -o "$out/libguest_worker.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" core/tests/native/guest.c -Icore/tests/native -o "$out/libguest_probe.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" android-jni/tests/native/guest_bench.c \

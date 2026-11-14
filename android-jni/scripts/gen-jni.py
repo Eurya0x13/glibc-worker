@@ -206,6 +206,17 @@ for i, (ret, name, ts) in enumerate(api):
             name, "H_LOCAL"
         )
         h.append(f" r->result.l=fh_add_ref(c,(jobject)value,{kind});")
+        # Only these returned handles are owned here; native parameters may
+        # be borrowed and must never be deleted by the token allocator.
+        if name in ("NewGlobalRef", "NewWeakGlobalRef"):
+            delete = (
+                "DeleteGlobalRef"
+                if name == "NewGlobalRef"
+                else "DeleteWeakGlobalRef"
+            )
+            h.append(
+                f" if(value&&!r->result.l){{(*env)->{delete}(env,value);r->error=2;}}"
+            )
     elif ret in ("jmethodID", "jfieldID"):
         kind = "H_METHOD" if ret == "jmethodID" else "H_FIELD"
         sig = "(const char*)r->a[2].l" if "const char*" in ts else "NULL"

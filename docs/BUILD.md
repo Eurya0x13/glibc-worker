@@ -17,8 +17,16 @@ core 的 GNU 运行时在 `core/build/glibc-runtime/<ABI>/`，两侧 libffi 在 
 
 `GW_CONTEXTS` 默认 16（2..256）、`GW_RPC_PROFILE=0`、`GW_RPC_SPIN_NS=20000`、`GW_FUTEX_WAKE_FILTER=0`、`GW_RPC_READY_POLL=0`。每个项目保存自己的 abi-flags，Host/Guest 必须使用同一份布局和配置。
 
+`GW_BINDING_BACKEND=c|zig` 选择 android-jni 的 Host 资源管理后端（binding、引用/ID、注册类记录），默认 `c`。`zig` 需要固定的 Zig 0.16.0；只替换 Host 存储与索引，不改变共享协议。组合制品的 `build.properties` 记录所选后端。构建与测试约定见 [Zig Host 资源管理](../android-jni/docs/ZIG_BINDINGS.md)。
+
 `GW_JRE_ADAPTER_HEADER` 仅用于 jvm-jni，必须显式选择匹配运行中 libjava 的 profile。未配置不能请求私有钩子。`GW_RUNTIME_OUT` 仅重定向上层兼容制品，不改变各项目自己的编译/安装目录。
 
 旧单 DSO 集成使用 `jvm-jni/build/<ABI>/compat/` 的 `libglibc_bridge.so`、GNU service、helpers 与 bootstrap；模块化集成使用已安装的四个包。不要在同一进程同时加载两种组合，避免重复的单例状态。
 
 真实 VM 冒烟/覆盖入口归 [jvm-jni](../jvm-jni/README.md)。Pojav 集成不属于任何核心项目。
+
+## 源码布局与构建迁移
+
+实现目录为 `core/src/bootstrap/`、`bionic-dlopen/src/`、`android-jni/src/{host,guest,common,java}/`、`jvm-jni/src/{native,java}/`。JVM 公开适配头文件在 `jvm-jni/include/`；安装后的包含路径不因内部搬迁而变化。生成源码写入各项目 build，不回写 src。
+
+Zig 编译规则由 `android-jni/build.zig` 维护；CMake 直接调用 `zig build host-store`，测试脚本也调用同一构建图。Python 不再维护另一份 Zig 编译参数。后续迁移可按各项目的编译、链接、安装边界推进；依赖获取、JNI 表生成、设备测试和报告处理不因迁移构建图而必须改写为 Zig。

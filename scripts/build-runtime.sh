@@ -6,6 +6,11 @@ eval "$(python3 scripts/target.py --shell)"
 ndk=$(python3 scripts/target.py --ndk)
 ccndk="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${GW_NDK_TRIPLET}29-clang"
 contexts=${GW_CONTEXTS:-16}
+binding_backend=${GW_BINDING_BACKEND:-c}
+[[ $binding_backend == c || $binding_backend == zig ]] || {
+  echo 'GW_BINDING_BACKEND must be c or zig' >&2
+  exit 2
+}
 
 [[ $contexts =~ ^[1-9][0-9]*$ && $contexts -ge 2 && $contexts -le 256 ]] || {
   echo 'GW_CONTEXTS must be between 2 and 256' >&2
@@ -96,6 +101,7 @@ fi
 if ((level >= 2)); then
   android-jni/scripts/prepare-build.sh "$ndk" "$ccndk"
   build_project android-jni \
+    -DGW_BINDING_BACKEND="$binding_backend" \
     -DGW_JNI_INCLUDE_DIR="$PWD/android-jni/build/jni-include" \
     -DGW_FFI_INCLUDE_DIR="$PWD/core/build/ffi-android/$GW_ABI/include" \
     -DGW_FFI_LIBRARY="$PWD/core/build/ffi-android/$GW_ABI/lib/libffi.a" \
@@ -110,6 +116,7 @@ if ((level >= 3)); then
 fi
 
 printf '%s\n' "abi=$GW_ABI" "projects=$module" "contexts=$contexts" \
+  "binding_backend=$binding_backend" \
   "rpc_profile=$rpc_profile" "rpc_spin_ns=$rpc_spin_ns" \
   "futex_wake_filter=$wake_filter" "rpc_ready_poll=$ready_poll" >"$out/build.properties"
 (

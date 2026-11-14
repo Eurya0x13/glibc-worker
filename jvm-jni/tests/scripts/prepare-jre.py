@@ -111,8 +111,8 @@ native_jars = os.environ.get("GW_NATIVE_JARS", "0") == "1"
 sources = sorted(
     str(p)
     for base in [
-        root / "android-jni/java",
-        root / "jvm-jni/java",
+        root / "android-jni/src/java",
+        root / "jvm-jni/src/java",
         root / "android-jni/tests/java",
         root / "jvm-jni/tests/java",
         root / "jvm-jni/build/native/generated/java",

@@ -3,44 +3,36 @@
 #include <string.h>
 #include "host_internal.h"
 #include "jni_signature.h"
-#define FH_HANDLES 16384
+#include "slot_store.h"
 
-/* Reference/ID table backing every jobject the bridge hands to the Guest.
-   Locals are frame-scoped per context; method/field IDs are interned until
-   their class unloads. The stored value is the raw VM reference — the
-   caller keeps owning it (deleting it is the table's job via the drop
-   paths, never the receiver's). */
+/* C owns VM references and signatures; the backend owns stable slots and
+   dense per-context local indexes. All accesses hold handles_lock. Tokens
+   are private opaque values, never raw VM pointers or Guest dereferences. */
 struct handle {
   void *value;
-  unsigned generation;
   int kind, owner, level;
-  unsigned local_previous, local_next;
   jweak clazz;
   char sig[FB_SIG];
 };
-static struct handle handles[FH_HANDLES];
-/* Index + 1, with zero as the end marker. Protected by handles_lock. */
-static unsigned local_heads[FB_CONTEXTS];
+static struct gw_slot_store *handles;
 static pthread_mutex_t handles_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Token = (generation << 16) | index + 1; zero is reserved as null. The
-   generation advances on slot reuse so a stale token can never alias the
-   handle that took its place. */
-static jobject token(unsigned i) {
-  return (jobject)(uintptr_t)(((uint64_t)handles[i].generation << 16) |
-                              (i + 1));
+static struct handle *get_handle(jobject token) {
+  return gw_slot_get(handles, (uint64_t)(uintptr_t)token);
 }
 
-/* Validate a token: NULL when out of range or the generation no longer
-   matches (retired and reused slot). */
-static struct handle *get_handle(jobject t) {
-  uintptr_t v = (uintptr_t)t;
-  unsigned i = (v & 65535);
-  if (!i || i > FH_HANDLES) {
-    return NULL;
+static struct handle *insert_handle(int owner, uint64_t *token) {
+  if (!handles) {
+    handles = fh_slot_create(sizeof(struct handle), _Alignof(struct handle),
+                             FB_CONTEXTS, 16384);
   }
-  struct handle *h = &handles[i - 1];
-  return h->kind && h->generation == (v >> 16) ? h : NULL;
+  return gw_slot_insert(handles, owner, token);
+}
+
+static void handle_error(void) {
+  if (gw_host_bridge) {
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+  }
 }
 
 static void adjust_count(int kind, int delta) {
@@ -57,53 +49,33 @@ static void adjust_count(int kind, int delta) {
   }
 }
 
-/* Take a VM reference into the table and return its token. Locals are
-   pushed onto the owning context's list tagged with the current frame
-   level, so frame pops retire exactly that level. Exhaustion returns NULL
-   and counts an error. */
-static jobject fh_add(struct host_context *c, void *value, int kind,
-                      const char *sig) {
+/* On allocation failure the caller retains ownership of the VM reference.
+   Local values may be borrowed (native parameters), so this layer must not
+   delete them. Generated NewGlobalRef/NewWeakGlobalRef callers roll back. */
+jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
   if (!value) {
     return NULL;
   }
-  pthread_mutex_lock(&handles_lock);
-
-  for (unsigned i = 0; i < FH_HANDLES; i++) {
-    if (!handles[i].kind) {
-      struct handle *h = &handles[i];
-      h->generation++;
-      h->kind = kind;
-      h->value = value;
-      h->owner = c ? c->id : -1;
-      h->level = c ? c->local_depth : 0;
-      if (kind == H_LOCAL) {
-        unsigned next = local_heads[c->id];
-        h->local_previous = 0;
-        h->local_next = next;
-        if (next) {
-          handles[next - 1].local_previous = i + 1;
-        }
-        local_heads[c->id] = i + 1;
-      }
-      h->sig[0] = 0;
-      if (sig) {
-        snprintf(h->sig, FB_SIG, "%s", sig);
-      }
-
-      jobject t = token(i);
-      adjust_count(kind, 1);
-      pthread_mutex_unlock(&handles_lock);
-      return t;
-    }
+  if (kind < H_LOCAL || kind > H_WEAK ||
+      (kind == H_LOCAL && (!c || c->id < 0 || c->id >= FB_CONTEXTS))) {
+    handle_error();
+    return NULL;
   }
-
+  pthread_mutex_lock(&handles_lock);
+  uint64_t token;
+  struct handle *h = insert_handle(kind == H_LOCAL ? c->id : -1, &token);
+  if (h) {
+    h->value = value;
+    h->kind = kind;
+    h->owner = c ? c->id : -1;
+    h->level = c ? c->local_depth : 0;
+    adjust_count(kind, 1);
+  }
   pthread_mutex_unlock(&handles_lock);
-  atomic_fetch_add(&gw_host_bridge->errors, 1);
-  return NULL;
-}
-
-jobject fh_add_ref(struct host_context *c, jobject value, int kind) {
-  return fh_add(c, value, kind, NULL);
+  if (!h) {
+    handle_error();
+  }
+  return (jobject)(uintptr_t)token;
 }
 
 /* Intern a method/field ID keyed by (kind, value, same declaring class).
@@ -118,40 +90,42 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
   JNIEnv *env = c->env;
   pthread_mutex_lock(&handles_lock);
 
-  for (unsigned i = 0; i < FH_HANDLES; i++) {
-    if (handles[i].kind == kind && handles[i].value == value &&
-        (*env)->IsSameObject(env, handles[i].clazz, clazz)) {
-      jobject t = token(i);
+  if ((kind != H_METHOD && kind != H_FIELD) ||
+      (sig && strnlen(sig, FB_SIG) >= FB_SIG)) {
+    pthread_mutex_unlock(&handles_lock);
+    handle_error();
+    return NULL;
+  }
+  for (size_t i = 0; i < gw_slot_capacity(handles); i++) {
+    uint64_t token;
+    struct handle *h = gw_slot_at(handles, i, &token);
+    if (h && h->kind == kind && h->value == value &&
+        (*env)->IsSameObject(env, h->clazz, clazz)) {
       pthread_mutex_unlock(&handles_lock);
-      return t;
+      return (jobject)(uintptr_t)token;
     }
   }
 
-  for (unsigned i = 0; i < FH_HANDLES; i++) {
-    if (!handles[i].kind) {
-      jweak weak = (*env)->NewWeakGlobalRef(env, clazz);
-      if (!weak) {
-        pthread_mutex_unlock(&handles_lock);
-        return NULL;
-      }
-      struct handle *h = &handles[i];
-      h->generation++;
-      h->kind = kind;
-      h->value = value;
-      h->clazz = weak;
-      h->owner = -1;
-      h->level = 0;
-      snprintf(h->sig, sizeof h->sig, "%s", sig ? sig : "");
-      atomic_fetch_add(&gw_host_bridge->id_cache_weak, 1);
-      jobject t = token(i);
-      pthread_mutex_unlock(&handles_lock);
-      return t;
-    }
+  jweak weak = (*env)->NewWeakGlobalRef(env, clazz);
+  if (!weak) {
+    pthread_mutex_unlock(&handles_lock);
+    return NULL;
   }
-
+  uint64_t token;
+  struct handle *h = insert_handle(-1, &token);
+  if (h) {
+    h->value = value;
+    h->kind = kind;
+    h->owner = -1;
+    h->clazz = weak;
+    memcpy(h->sig, sig ? sig : "", sig ? strlen(sig) + 1 : 1);
+    atomic_fetch_add(&gw_host_bridge->id_cache_weak, 1);
+  } else {
+    (*env)->DeleteWeakGlobalRef(env, weak);
+    handle_error();
+  }
   pthread_mutex_unlock(&handles_lock);
-  atomic_fetch_add(&gw_host_bridge->errors, 1);
-  return NULL;
+  return (jobject)(uintptr_t)token;
 }
 
 /* Drop ID-cache entries whose declaring class was collected — a cleared
@@ -160,15 +134,18 @@ jobject fh_add_id(struct host_context *c, void *value, int kind,
 void sweep_ids(JNIEnv *env, int all) {
   pthread_mutex_lock(&handles_lock);
 
-  for (unsigned i = 0; i < FH_HANDLES; i++) {
-    struct handle *h = &handles[i];
-    if (h->kind >= H_METHOD &&
+  for (size_t i = 0; i < gw_slot_capacity(handles); i++) {
+    uint64_t token;
+    struct handle *h = gw_slot_at(handles, i, &token);
+    if (h && h->kind >= H_METHOD &&
         (all || (*env)->IsSameObject(env, h->clazz, NULL))) {
       (*env)->DeleteWeakGlobalRef(env, h->clazz);
-      h->clazz = NULL;
-      h->kind = 0;
+      gw_slot_erase(handles, token);
       atomic_fetch_sub(&gw_host_bridge->id_cache_weak, 1);
     }
+  }
+  if (all && gw_slot_destroy(handles)) {
+    handles = NULL;
   }
 
   pthread_mutex_unlock(&handles_lock);
@@ -219,48 +196,39 @@ void *fh_id(jobject t, int kind) {
   return v;
 }
 
-/* Unlink before making the slot reusable: DeleteLocalRef may be followed by
-   another allocation in the same frame, including at the same handle index. */
-static void retire_handle(struct handle *h) {
-  if (h->kind == H_LOCAL) {
-    if (h->local_previous) {
-      handles[h->local_previous - 1].local_next = h->local_next;
-    } else {
-      local_heads[h->owner] = h->local_next;
-    }
-    if (h->local_next) {
-      handles[h->local_next - 1].local_previous = h->local_previous;
-    }
-  }
-
+/* Erasing swaps the last owner index into the removed position; no linked
+   list traversal or allocation is needed to retire a local. */
+static void retire_handle(struct handle *h, uint64_t token) {
   adjust_count(h->kind, -1);
-  h->kind = 0;
+  gw_slot_erase(handles, token);
 }
 
-void fh_drop_token(jobject t) {
-  if (!t) {
+void fh_drop_token(jobject token) {
+  if (!token) {
     return;
   }
-
   pthread_mutex_lock(&handles_lock);
-  struct handle *h = get_handle(t);
+  struct handle *h = get_handle(token);
   if (h) {
-    retire_handle(h);
+    retire_handle(h, (uint64_t)(uintptr_t)token);
   } else {
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
+    handle_error();
   }
   pthread_mutex_unlock(&handles_lock);
 }
 
-/* Retire this context's locals created at "level" or deeper — called when a
-   local frame is popped. */
+/* Only this context's contiguous token vector is visited, regardless of the
+   total handle capacity. Revisit a position after swap-removing its item. */
 void fh_drop_locals(struct host_context *c, int level) {
   pthread_mutex_lock(&handles_lock);
-  for (unsigned entry = local_heads[c->id]; entry;) {
-    struct handle *h = &handles[entry - 1];
-    entry = h->local_next;
+  size_t position = 0;
+  uint64_t token;
+  struct handle *h;
+  while ((h = gw_slot_owned(handles, c->id, position, &token))) {
     if (h->level >= level) {
-      retire_handle(h);
+      retire_handle(h, token);
+    } else {
+      position++;
     }
   }
   pthread_mutex_unlock(&handles_lock);

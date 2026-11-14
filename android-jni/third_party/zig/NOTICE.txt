@@ -1,0 +1,3 @@
+The optional Zig binding backend incorporates standard-library containers and
+hashing from Zig 0.16.0. Their license is preserved in LICENSE. Zig source,
+compiler binaries and build caches are not vendored here.

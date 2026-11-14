@@ -49,8 +49,11 @@ void fh_service(struct host_context *, struct fb_rpc *);
 struct host_context *fh_context(JNIEnv *);
 jvalue fh_command(struct host_context *, int, uintptr_t, const char *,
                   jvalue *);
-struct binding *make_binding(uint64_t, uintptr_t, const char *);
+struct binding *make_binding(uint64_t, uintptr_t, const char *,
+                             struct gw_loader_error *);
 void release_bindings(uint64_t);
+void fh_bindings_finish(void);
+const char *fh_binding_backend(void);
 void release_registrations(JNIEnv *, uint64_t);
 jint fh_register(struct host_context *, jclass, const JNINativeMethod *, jint);
 void fh_array_copy_start(int);

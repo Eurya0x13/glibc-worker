@@ -688,6 +688,7 @@ int full_host_start(struct shared *s, JNIEnv *env,
     return JNI_ERR;
   }
   fh_array_copy_start((options->flags & GW_HOST_DISABLE_ARRAY_COPY_CACHE) == 0);
+  printf("BINDING_REGISTRY backend=%s\n", fh_binding_backend());
 
   gw_host_bridge = mmap(NULL, sizeof *gw_host_bridge, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -938,15 +939,14 @@ static int transport_find(JNIEnv *env, uint64_t id, const char *symbol,
   c->module = id;
   jvalue found = fh_command(c, FB_LOOKUP, 0, symbol, NULL);
   struct binding *b =
-      found.j ? make_binding(id, (uintptr_t)found.j, descriptor) : NULL;
+      found.j ? make_binding(id, (uintptr_t)found.j, descriptor, error) : NULL;
   c->module = previous;
 
   if (!found.j) {
     return GW_NOT_FOUND;
   }
   if (!b) {
-    return gw_loader_fail(error, GW_E_CAPACITY,
-                          "Cannot allocate native trampoline");
+    return GW_ERROR;
   }
   *entry = b->code;
   return GW_OK;
@@ -989,6 +989,7 @@ int full_host_shutdown(void) {
     }
   }
   fh_array_copy_finish();
+  fh_bindings_finish();
   sweep_ids(env, 1);
   if (gw_host_helper_class) {
     (*env)->DeleteGlobalRef(env, gw_host_helper_class);

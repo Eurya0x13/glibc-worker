@@ -22,7 +22,8 @@ patches=(
   patches/0001-use-faccessat.patch
   patches/0002-use-at-file-syscalls.patch
 )
-key=$(cat scripts/build-glibc.sh config/targets.json "${patches[@]}" | sha256sum | cut -c1-16)
+key=$(cat scripts/build-glibc.sh scripts/apply-patches.py config/targets.json \
+  "${patches[@]}" | sha256sum | cut -c1-16)
 root="$PWD/work/glibc-build-$GW_ABI-$key"
 src="$root/src"
 obj="$root/obj"
@@ -31,11 +32,10 @@ mkdir -p "$obj"
 if [[ ! -f $root/patched ]]; then
   mkdir -p "$src"
   tar -xJf "$archive" --strip-components=1 -C "$src"
-  for patchfile in "${patches[@]}"; do
-    git apply --unsafe-paths --directory="$src" "$PWD/$patchfile"
-  done
+  python3 scripts/apply-patches.py --source "$src" "${patches[@]}"
   touch "$root/patched"
 fi
+python3 scripts/apply-patches.py --verify-only --source "$src" "${patches[@]}"
 
 if [[ ! -f $obj/Makefile ]]; then
   arch_options=()

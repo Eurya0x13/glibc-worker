@@ -2,6 +2,8 @@
 
 使用公开 JNI API 的通用桥：真实 Host VM 的引用所有权、异常、JNI 代理、线程配对、回调/重入、libffi 跳板，以及 JNI 装载生命周期。JRE 私有钩子不在本项目。
 
+`src/host/`、`src/guest/`、`src/common/` 和 `src/java/` 分别保存 Host、GNU service、共享内部协议与 Java 辅助类；`include/` 保存公开接口。
+
 Host 与 Guest 分别链接 bionic/GNU libc 和各自的 libffi，不在同一线程切换 TLS。Java 辅助类只有 VM 中立的 `BridgeTypes`、`GuestImages`；Guest 的 JavaVM/JNIEnv 是桥接接口。
 
 ## 独立构建
@@ -33,3 +35,5 @@ GNU 侧由本项目 `build-guest.sh` 单独构建，通过环境变量显式指�
 `tests/native/`、`tests/java/` 保存本项目的 JNI 功能矩阵、引用/异常/线程/重入、SQLite 和数组夹具；由真实 VM 集成宿主组合运行，不复制进 jvm-jni。`tests/check-boundary.py` 可检查已构建 DSO/JAR 没有混入 JRE 私有实现。
 
 已有真实覆盖使用 Android HotSpot；ART 完整 JNI 桥尚未验证，不能把“使用公开 JNI”当作 ART 兼容证明。设计与使用约束见 [装载接口](docs/LOADER_BACKEND.md)，数组副本缓存见 [ARRAY_COPY_CACHE](docs/ARRAY_COPY_CACHE.md)。
+
+Host binding 管理提供可选的 [Zig 试点](docs/ZIG_BINDINGS.md)：默认 `GW_BINDING_BACKEND=c` 保留 512 槽控制后端；`zig` 使用固定地址的分块存储及动态哈希索引。公共 ABI、Guest 协议和 libffi 调用执行继续由原有 C 层维护。

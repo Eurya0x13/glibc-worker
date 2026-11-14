@@ -14,7 +14,7 @@
 - [ ] AUD-06：验证 glibc 补丁关闭 robust-list 登记后的互斥量语义，明确支持契约。
 - [ ] AUD-07：审定 JNI 上下文容量、重入深度、注册所有权和跨依赖库的归属规则。
 - [ ] AUD-08：审定卡死时的 deadline、取消、关闭及进程处置策略。
-- [ ] AUD-09：补完最新 ELF 分类变更的真机回归，按制品散列区分新旧结果。
+- [ ] AUD-09：审定 runner 的状态标记和制品隔离；当前 ELF 修改已完成真机回归，失败尝试不能沿用旧 PASS。
 - [ ] AUD-10：按具体 Android JRE 制品扩展验证，不把桌面适配器测试当作 Android 双 libc 通过。
 - [ ] AUD-11：决定是否继续保留 JRE17 旧名称兼容入口；它们不承载另一套运行时实现。
 
@@ -24,9 +24,9 @@
 | --- | --- | --- | --- |
 | Guest Runtime / 目标 VM | 每进程一套 | 单例；停止后不能重新配置并启动另一套 | AUD-08 |
 | 顶层 Guest 模块 | 32 槽 | 所有模块共享；加载中、已加载、关闭中都占槽；耗尽返回 `GW_E_CAPACITY` | AUD-01 |
-| JNI 函数跳板 | 512 个 | 所有模块共享；按模块、Guest 函数地址和描述符复用；分配失败使查找或注册失败 | AUD-01、AUD-03 |
-| JNI 引用与 ID | 16,384 槽 | local/global/weak 引用与 methodID/fieldID 缓存共用；耗尽返回 NULL 并累计桥错误，未统一抛出 OOM | AUD-01、AUD-03 |
-| 注册类所有权记录 | 256 条 | 所有模块共享；无可用记录使 `RegisterNatives` 失败 | AUD-01、AUD-07 |
+| JNI 函数跳板 | 默认 C 后端共享 512 个；Zig 实验后端按需增长 | 按模块、Guest 函数地址和描述符复用；分配失败使查找或注册失败；Zig 选择同时覆盖引用/ID 和注册类存储 | AUD-01、AUD-03 |
+| JNI 引用与 ID | C 对照 16,384 槽；Zig 按需增长 | local/global/weak 引用与 methodID/fieldID 缓存共用；耗尽返回 NULL 并累计桥错误，未统一抛出 OOM | AUD-01、AUD-03 |
+| 注册类所有权记录 | C 对照 256 条；Zig 按需增长 | 所有模块共享；无可用记录使 `RegisterNatives` 失败 | AUD-01、AUD-07 |
 | 同一 Java 类的注册所有者 | 一个 Guest 模块 | 其他模块不能同时持有该类的 native 注册 | AUD-07 |
 | 单次 `RegisterNatives` | 最多 64 个方法 | 超过返回 `JNI_ERR`；分批仍受共享跳板和注册记录容量约束 | AUD-01、AUD-03 |
 | JNI 上下文 | 默认及当前 ARM64 构建为 16 个 | 包含 owner 上下文，额外剩 15 个；Host 调用线程与 Guest 附着线程共享 | AUD-07 |
@@ -46,10 +46,10 @@
 源码位置：
 
 - [module_id.h](../bionic-dlopen/include/module_id.h)：`FB_MODULES`。
-- [loader.c](../bionic-dlopen/loader.c)：`reserve`、`gw_dlopen_configure`、`gw_dlopen_stop`。
-- [bindings.c](../android-jni/host/bindings.c)：`FH_NATIVE`、`registrations`、`own_registration`、`fh_register`、`release_bindings`。
-- [references.c](../android-jni/host/references.c)：`FH_HANDLES`、`fh_add`、`fh_add_id`。
-- [full_protocol.h](../android-jni/common/full_protocol.h)：`FB_CONTEXTS`、`FB_DEPTH`、`FB_ARGS`。
+- [loader.c](../bionic-dlopen/src/loader.c)：`reserve`、`gw_dlopen_configure`、`gw_dlopen_stop`。
+- [bindings.c](../android-jni/src/host/bindings.c)：`registrations`、`own_registration`、`fh_register`、`release_bindings`；[binding_table.c](../android-jni/src/host/binding_table.c) 保留 512 槽控制后端；[Zig 试点](../android-jni/docs/ZIG_BINDINGS.md) 说明动态后端边界。
+- [references.c](../android-jni/src/host/references.c)：`insert_handle`、`fh_add_ref`、`fh_add_id`；[槽位契约](../android-jni/src/host/slot_store.h)。
+- [full_protocol.h](../android-jni/src/common/full_protocol.h)：`FB_CONTEXTS`、`FB_DEPTH`、`FB_ARGS`。
 - [build-runtime.sh](../scripts/build-runtime.sh)：`GW_CONTEXTS` 的默认值和范围校验。
 
 ## 2. 长度边界与截断
@@ -69,11 +69,11 @@
 AUD-02 的问题并未因公开 `find` 入口有长度检查而消失：
 
 - `fh_describe` 将反射得到的描述符写入固定 256 字节缓冲区。
-- `fh_add_id`、`make_binding_unlocked` 保存描述符时仍存在截断路径。
+- `fh_add_id` 与 binding 准备现已先检查长度再完整复制；这不代表反射与协议路径都已完成审阅。
 - `fh_command` 也会向固定协议缓冲区复制字符串。
 - 必须分别核对各条路径；不能把截断后的描述符继续当作完整类型信息使用。
 
-源码位置：[loader_types.h](../bionic-dlopen/include/loader_types.h)、[loader_backend.c](../android-jni/host/loader_backend.c) 的 `valid_descriptor`、[references.c](../android-jni/host/references.c)、[bindings.c](../android-jni/host/bindings.c)、[full_host.c](../android-jni/host/full_host.c) 的 `fh_command`、[jvm_adapter.h](../jvm-jni/native/jvm_adapter.h)。
+源码位置：[loader_types.h](../bionic-dlopen/include/loader_types.h)、[loader_backend.c](../android-jni/src/host/loader_backend.c) 的 `valid_descriptor`、[references.c](../android-jni/src/host/references.c)、[bindings.c](../android-jni/src/host/bindings.c)、[full_host.c](../android-jni/src/host/full_host.c) 的 `fh_command`、[jvm_adapter.h](../jvm-jni/include/jvm_adapter.h)。
 
 ## 3. 自动 ELF 分类边界
 
@@ -91,7 +91,7 @@ AUD-02 的问题并未因公开 `find` 入口有长度检查而消失：
 
 分类器不是完整 ELF 验证器，不代替实际 GNU/bionic loader 的重定位与符号检查。这些上限目前仍保留，是否扩大或改用其他数据结构由 AUD-01 / AUD-09 审阅，不能仅改回模糊的布尔结果。
 
-源码位置：[elf_route.h](../bionic-dlopen/elf_route.h)、[elf_route.c](../bionic-dlopen/elf_route.c)、[loader.c](../bionic-dlopen/loader.c) 的 `loader_open`。测试：[elf_route.py](../bionic-dlopen/tests/elf_route.py)、[loader_contract.c](../bionic-dlopen/tests/loader_contract.c)。
+源码位置：[elf_route.h](../bionic-dlopen/src/elf_route.h)、[elf_route.c](../bionic-dlopen/src/elf_route.c)、[loader.c](../bionic-dlopen/src/loader.c) 的 `loader_open`。测试：[elf_route.py](../bionic-dlopen/tests/elf_route.py)、[loader_contract.c](../bionic-dlopen/tests/loader_contract.c)。
 
 状态：49 项 ASan/UBSan 元数据检查和纯 C 装载检查通过；最新分类变更的 Android 真机回归未完成，见第 9 节。
 
@@ -106,7 +106,7 @@ AUD-02 的问题并未因公开 `find` 入口有长度检查而消失：
 
 这些是优化缓存的边界，不是数组总大小、进程内存或可传输数据总量的上限。8 MiB 以上的数组不因此被禁止。`JNI_COMMIT` 保持副本占用，直至最终释放；缓存槽耗尽仍应保持原 JNI 语义。
 
-源码位置：[array_copy.c](../android-jni/host/array_copy.c)。契约：[ARRAY_COPY_CACHE.md](../android-jni/docs/ARRAY_COPY_CACHE.md)。
+源码位置：[array_copy.c](../android-jni/src/host/array_copy.c)。契约：[ARRAY_COPY_CACHE.md](../android-jni/docs/ARRAY_COPY_CACHE.md)。
 
 ## 5. core 启动器
 
@@ -126,7 +126,7 @@ AUD-02 的问题并未因公开 `find` 入口有长度检查而消失：
 
 AUD-04 中的 argc 和栈检查是待修缺陷，不是靠调用者遵守文档就应永久保留的设计。
 
-源码位置：[arch.h](../core/include/arch.h)、[loader_image.c](../core/bootstrap/loader_image.c) 的 `gw_bootstrap_map`、`copy_string`、`gw_bootstrap_stack`；边界说明：[core README](../core/README.md)。
+源码位置：[arch.h](../core/include/arch.h)、[loader_image.c](../core/src/bootstrap/loader_image.c) 的 `gw_bootstrap_map`、`copy_string`、`gw_bootstrap_stack`；边界说明：[core README](../core/README.md)。
 
 ## 6. JNI、所有权和生命周期
 
@@ -150,13 +150,14 @@ AUD-04 中的 argc 和栈检查是待修缺陷，不是靠调用者遵守文档�
 | Host/Guest 协议 | 配置必须匹配并成套部署；当前 JNI 能力握手要求 Guest 确认后才 ready |
 | runtime 组合 | 模块化 DSOs 与兼容单 DSO 二选一，不能在同一进程重复装入两套单例状态 |
 
-源码与契约位置：[jni_capabilities.h](../android-jni/common/jni_capabilities.h)、[full_guest.c](../android-jni/guest/full_guest.c)、[guest_loader.c](../android-jni/guest/guest_loader.c)、[full_host.c](../android-jni/host/full_host.c)、[bindings.c](../android-jni/host/bindings.c)、[JvmAdapter.java](../jvm-jni/java/dev/glibc/worker/JvmAdapter.java)、[LOADER_BACKEND.md](../android-jni/docs/LOADER_BACKEND.md)。
+源码与契约位置：[jni_capabilities.h](../android-jni/src/common/jni_capabilities.h)、[full_guest.c](../android-jni/src/guest/full_guest.c)、[guest_loader.c](../android-jni/src/guest/guest_loader.c)、[full_host.c](../android-jni/src/host/full_host.c)、[bindings.c](../android-jni/src/host/bindings.c)、[JvmAdapter.java](../jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java)、[LOADER_BACKEND.md](../android-jni/docs/LOADER_BACKEND.md)。
 
 ## 7. 运行时制品、部署和适配
 
 | 项目 | 当前边界 |
 | --- | --- |
 | glibc 制品 | 固定构建经过补丁的 glibc 2.44，loader/libc 必须配对部署 |
+| 补丁应用验证 | 构建脚本隔离父级 Git 环境，核对反向补丁；跳过补丁或损坏缓存不能当作成功，见 [RUNTIME_PATCHES](../core/docs/RUNTIME_PATCHES.md) |
 | clone3 | 当前 glibc 补丁改走旧 clone 路径 |
 | rseq | 当前补丁和启动环境关闭登记 |
 | robust-list | 当前补丁移除了登记；不能承诺 robust mutex 的 owner-death 恢复语义，需专项实验 |
@@ -175,9 +176,9 @@ AUD-04 中的 argc 和栈检查是待修缺陷，不是靠调用者遵守文档�
 
 robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专项 owner-death 测试结论。AUD-06 应检查支持与拒绝行为，而非仅验证普通 mutex 的加锁解锁。
 
-旧的 [jre17_adapter.h](../jvm-jni/native/jre17_adapter.h) 仅声明转发到通用适配器的兼容名称，不再承载 JRE17 专用实现。维护中的 SDK 消费者使用 [jvm_adapter.h](../jvm-jni/native/jvm_adapter.h)。AUD-11 应明确是否需要旧源码/二进制接口兼容；若删除，应同步清理转发符号、安装清单和相关文档。
+旧的 [jre17_adapter.h](../jvm-jni/include/jre17_adapter.h) 仅声明转发到通用适配器的兼容名称，不再承载 JRE17 专用实现。维护中的 SDK 消费者使用 [jvm_adapter.h](../jvm-jni/include/jvm_adapter.h)。AUD-11 应明确是否需要旧源码/二进制接口兼容；若删除，应同步清理转发符号、安装清单和相关文档。
 
-源码位置：[build-glibc.sh](../core/scripts/build-glibc.sh)、[Termux NPTL 补丁](../core/patches/termux/set-nptl-syscalls.patch)、[clone3 补丁](../core/patches/termux/disable-clone3-glibc244.patch)、[package-runtime.sh](../android-jni/scripts/package-runtime.sh)、[GuestImages.java](../android-jni/java/dev/glibc/worker/GuestImages.java)、[profiles.c](../jvm-jni/native/profiles.c)、[ADAPTER.md](../jvm-jni/docs/ADAPTER.md)。
+源码位置：[build-glibc.sh](../core/scripts/build-glibc.sh)、[Termux NPTL 补丁](../core/patches/termux/set-nptl-syscalls.patch)、[clone3 补丁](../core/patches/termux/disable-clone3-glibc244.patch)、[package-runtime.sh](../android-jni/scripts/package-runtime.sh)、[GuestImages.java](../android-jni/src/java/dev/glibc/worker/GuestImages.java)、[profiles.c](../jvm-jni/src/native/profiles.c)、[ADAPTER.md](../jvm-jni/docs/ADAPTER.md)。
 
 ## 8. 等待、诊断和长期计数
 
@@ -187,13 +188,13 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 | RPC profiling | 默认关闭；开启后约 1/64 采样、64 个直方图桶，保留 16 条最差交接记录 |
 | 通知过滤 / ready polling | 当前默认均关闭；开启时 Host、Guest 必须使用匹配配置 |
 | 模块代数 | 32 位 unsigned；每槽达到 `UINT_MAX` 后不再复用，避免回绕 |
-| 引用 / ID 代数 | 32 位 unsigned，当前无显式耗尽保护；回绕后存在重用旧 token 的风险 |
+| 引用 / ID 代数 | 32 位，达到 `UINT32_MAX` 后永久退役槽位，C/Zig 均不回绕；token 仅在当前 store 生命周期内有效 |
 | RPC 请求序号 | 有符号 32 位 `seq + 1`；到 `INT_MAX` 后存在 C 有符号溢出风险，缺少明确回绕策略 |
 | 统计快照 | 实时原子采样，不是事务视图；采样尾部和计数器不能当作精确的全量性能数据 |
 
-代数和请求序号问题为代码审计发现，未通过运行至回绕次数的压力测试。不能把这里的计数宽度当作已验证的安全运行次数。
+引用槽位通过缩小配置中的代数上限验证耗尽退役，不以运行 2³² 次替代。RPC 请求序号问题仍待处理；不能把计数宽度当作已验证的安全运行次数。
 
-源码位置：[loader.c](../bionic-dlopen/loader.c) 的 `reserve`、[references.c](../android-jni/host/references.c) 的 `token` / 分配路径、[full_host.c](../android-jni/host/full_host.c) 的 `fh_command`、[full_guest.c](../android-jni/guest/full_guest.c) 的 `fg_rpc`、[rpc_metrics.h](../core/include/rpc_metrics.h)、[rpc_handoff.h](../core/include/rpc_handoff.h)、[build-runtime.sh](../scripts/build-runtime.sh)。
+源码位置：[loader.c](../bionic-dlopen/src/loader.c) 的 `reserve`、[references.c](../android-jni/src/host/references.c) 的引用分配路径及 [slot_store.zig](../android-jni/src/host/slot_store.zig)、[full_host.c](../android-jni/src/host/full_host.c) 的 `fh_command`、[full_guest.c](../android-jni/src/guest/full_guest.c) 的 `fg_rpc`、[rpc_metrics.h](../core/include/rpc_metrics.h)、[rpc_handoff.h](../core/include/rpc_handoff.h)、[build-runtime.sh](../scripts/build-runtime.sh)。
 
 ## 9. 已有证据与未完成验证
 
@@ -202,22 +203,24 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 | 验证 | 已有证据 | 尚不能证明 |
 | --- | --- | --- |
 | 桌面 JRE8/11/17/21/25 适配器 | 每个 VM 27 项正常契约断言及 3 项恢复失败断言通过 | 所有 Android JRE 制品、双 libc、所有新增 JNI 能力均兼容 |
-| Android 固定 JRE17 | ELF 最新修改前的回归通过：142 项 Java/JNI、26 项装载、234/235 槽功能触达 | 完整 JNI 规范或所有源码分支覆盖；最新 ELF 修改已在设备通过 |
-| ELF 分类三态与边界 | 49 项 ASan/UBSan 检查和 C 装载检查通过 | 真实 GNU loader 的完整 ELF 验证；最新修改的 Android 运行结果 |
-| 最新 APK | 已构建 | 手机锁屏时安装被系统中止，最新分类变更的真机回归未完成 |
+| Android 固定 JRE17 | 当前 C / Zig 两种后端均通过：142 项 Java/JNI、26 项装载、234/235 槽功能触达；Guest 退出与 VM 销毁完成 | 完整 JNI 规范、所有源码分支或其他 Android JRE 制品 |
+| ELF 分类三态与边界 | 49 项 ASan/UBSan 检查、C 装载检查和当前 Android 组合回归通过 | 真实 GNU loader 的完整 ELF 验证 |
+| Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 默认后端已切换、所有资源上限已取消、任意并发卸载安全或性能提升 |
+| runtime 补丁流程 | 8 项回归检查；修复静默跳过补丁后，C 与 Zig 真机组合均通过 | robust mutex owner-death 恢复语义 |
 
 本地结果在各项目 `build/`，不是源代码发布包的必备文件：
 
 - [桌面适配器结果](../jvm-jni/build/adapter-tests/summary.json)。
-- [ELF 边界结果](../bionic-dlopen/build/test-results/elf-route-tristate.json)。
-- [Android 测试目录](../jvm-jni/build/test-results/multi-jre-final/) 与 [最近一次尝试的日志](../jvm-jni/build/multi-jre-final.log)。
+- [ELF 边界结果](../bionic-dlopen/build/test-results/zig-pilot-elf-route.json)。
+- [C 对照真机结果](../jvm-jni/build/zig-resources/coverage-c-layout/summary.json) 与 [Zig 真机结果](../jvm-jni/build/zig-resources/coverage-zig-layout/summary.json)。
+- [Host 资源管理验证汇总](../android-jni/build/zig-resources/summary.json) 包含桌面、真机及 runtime 制品散列。
 
-特别注意：Android 测试目录中的旧 `summary.json` 仍为 PASS，但它对应较早的 APK；最新安装失败并未覆盖这个旧结果。审阅和后续 runner 改进必须按 APK SHA256 区分，不能只看目录中是否有 PASS。
+历史 Android 测试目录可能仍保留较早 APK 的 PASS summary，失败尝试未必覆盖它。审阅应核对报告中的 APK SHA256；本轮 C / Zig 结果使用不同输出目录及固定 APK，不能只检查目录中是否存在 PASS。
 
 | 记录 | SHA256 |
 | --- | --- |
-| 旧 PASS summary 对应的 APK | `ffdfb21ffac7a50c84bf0ace531e626423e8fd1deabe347c9009854c9a39985e` |
-| 本审计基线下已构建、尚未完成真机回归的 APK | `c8554ce9fb77d7dd4e3f757da5e6d6bed1580141f19414bfeaad46e88f64842a` |
+| 当前 C 对照 PASS APK | `71f538414b08c64106e7eb625a03044c4e1d45f7da9ba396d351d1e082e1f176` |
+| 当前 Zig 扩容 PASS APK | `e7a3b41ebf8071c85c14327cce77937021237c6ba2fabf7ba248d75b178a4b97` |
 
 - [ ] AUD-09 补充：runner 每轮应明确标记正在运行、失败或完成，并隔离旧 summary，避免失败尝试沿用旧 PASS。
 

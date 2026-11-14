@@ -2,6 +2,8 @@
 
 可选的 HotSpot/JRE 接入项目。按经过审阅的装载接口族接入 JRE8–25，维护私有装载钩子、方法签名解析和 libjava 制品校验；通过 android-jni 注册表接入，不被下层反向引用。
 
+`src/native/` 和 `src/java/` 保存适配实现与辅助类；`include/` 保存公开 JVM 适配头文件。
+
 JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；Android 双 libc 完整覆盖目前仍以固定 JRE17 为准。装载适配不等于所有 JNI 新槽位或所有 Android JRE 制品均已验证，具体边界见 [兼容性契约](docs/JRE_COMPATIBILITY.md)。JDK28 不在运行支持范围。
 
 ## 独立构建

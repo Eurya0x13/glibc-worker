@@ -14,6 +14,14 @@ def verify(
     payload_benchmark=None,
     payload_trials=120,
 ):
+    status = re.search(r"^APP_RESULT=(\w+)$", report, re.MULTILINE)
+    if status and status[1] != "PASS":
+        diagnostic = re.search(r"^BLOCKED SIGSYS[^\n]+", report, re.MULTILINE)
+        raise ValueError(
+            "Android probe result="
+            + status[1]
+            + (": " + diagnostic[0] if diagnostic else "")
+        )
     required = [
         "APP_RESULT=PASS",
         "JAVA_ART_RESUMED",
@@ -64,6 +72,53 @@ def verify(
             "attach_future_rejected": True,
         }:
             raise ValueError("JNI capability negotiation failed")
+
+    lifecycle = None
+    if group == "coverage":
+        rows = re.findall(r"^FULL_LIFECYCLE ([^\n]+)$", report, re.MULTILINE)
+        if len(rows) != 1:
+            raise ValueError("Missing unique bridge lifecycle evidence")
+        lifecycle = {
+            key: int(value)
+            for key, value in re.findall(r"(\w+)=(-?\d+)", rows[0])
+        }
+        if any(
+            lifecycle.get(key) != 0
+            for key in ("globals", "weak", "locals", "closures", "errors")
+        ):
+            raise ValueError("Bridge resource leak or error: " + str(lifecycle))
+        if "loads" not in lifecycle or lifecycle["loads"] != lifecycle.get(
+            "unloads"
+        ):
+            raise ValueError("Unbalanced module lifecycle: " + str(lifecycle))
+
+    backend_match = re.search(r"BINDING_REGISTRY backend=(c|zig)", report)
+    binding_backend = backend_match[1] if backend_match else "unreported"
+    capacity_rows = [
+        json.loads(row)
+        for row in re.findall(r"BINDING_CAPACITY_TEST (\{[^\n]+\})", report)
+    ]
+    if group == "coverage" and binding_backend == "zig":
+        if len(capacity_rows) != 3 or any(
+            row["cycle"] != cycle
+            or row["methods"] != 1024
+            or row["live_closures"] < 1024
+            for cycle, row in enumerate(capacity_rows)
+        ):
+            raise ValueError("Missing complete Zig binding capacity cycles")
+
+    resource_rows = [
+        json.loads(row)
+        for row in re.findall(r"RESOURCE_CAPACITY_TEST (\{[^\n]+\})", report)
+    ]
+    if group == "coverage" and binding_backend == "zig":
+        if resource_rows != [
+            {"cycle": cycle, "classes": 320, "references": 20000}
+            for cycle in range(3)
+        ]:
+            raise ValueError(
+                "Missing complete Zig reference/class capacity cycles"
+            )
 
     if payload_benchmark:
         required.append(
@@ -146,6 +201,10 @@ def verify(
         "slot_inventory": slots,
         "coverage_kind": "functional JNI slot reach, not source line or branch coverage",
         "fatal_error_exercised": False,
+        "binding_backend": binding_backend,
+        "binding_capacity": capacity_rows,
+        "resource_capacity": resource_rows,
+        "bridge_lifecycle": lifecycle,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit
         else "strict-checkjni-interpreter",

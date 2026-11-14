@@ -16,9 +16,9 @@ if [[ -n ${GW_ABI_FLAGS_FILE:-} ]]; then
   flags+=("${abi_flags[@]}")
 fi
 "$GW_GUEST_CC" "${flags[@]}" -I"$project_root/include" \
-  -I"$project_root/common" -I"$project_root/guest" \
+  -I"$project_root/src/common" -I"$project_root/src/guest" \
   -I"$GW_CORE_INCLUDE" -I"$GW_DLOPEN_INCLUDE" -I"$GW_JNI_INCLUDE" \
   -I"$(dirname "$GW_JNI_GENERATED")" -I"$GW_FFI_GUEST/include" \
-  "$project_root/guest/service_main.c" "$project_root/guest/full_guest.c" \
-  "$project_root/guest/guest_loader.c" "$GW_FFI_GUEST/lib/libffi.a" \
+  "$project_root/src/guest/service_main.c" "$project_root/src/guest/full_guest.c" \
+  "$project_root/src/guest/guest_loader.c" "$GW_FFI_GUEST/lib/libffi.a" \
   -ldl -pthread -o "$GW_GUEST_OUT"

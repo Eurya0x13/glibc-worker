@@ -44,6 +44,9 @@ JNIEXPORT void conformance_observe_destructor(_Atomic int *p) {
     }                              \
   } while (0)
 #include "fixture_generated.inc"
+#if GW_TEST_BINDING_CAPACITY
+#include "binding_capacity_generated.inc"
+#endif
 
 static jobject new_v(JNIEnv *e, jclass cls, jmethodID ctor, ...) {
   va_list va;
@@ -592,6 +595,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *reserved) {
                             sizeof methods / sizeof methods[0])) {
     return JNI_ERR;
   }
+#if GW_TEST_BINDING_CAPACITY
+  if (binding_capacity_register(e) != JNI_OK) {
+    return JNI_ERR;
+  }
+#endif
 
   (*e)->DeleteLocalRef(e, cls);
   return JNI_VERSION_1_6;

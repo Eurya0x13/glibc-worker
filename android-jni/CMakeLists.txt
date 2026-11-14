@@ -21,15 +21,52 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/host-jni.inc
           --output ${CMAKE_CURRENT_BINARY_DIR}/generated
   DEPENDS scripts/gen-jni.py ${GW_JNI_INCLUDE_DIR}/jni.h VERBATIM)
 add_custom_target(jni_tables DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/generated/host-jni.inc)
-add_library(android_jni_objects OBJECT host/full_host.c host/references.c
-  host/bindings.c host/array_copy.c host/loader_backend.c host/image_policy.c)
+set(GW_BINDING_BACKEND "c" CACHE STRING "Host resource stores: c or experimental zig")
+set_property(CACHE GW_BINDING_BACKEND PROPERTY STRINGS c zig)
+set(binding_objects)
+if(GW_BINDING_BACKEND STREQUAL "zig")
+  find_program(GW_ZIG_EXECUTABLE NAMES zig REQUIRED)
+  set(zig_target native)
+  if(ANDROID)
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+      set(zig_target aarch64-linux-android.29)
+    elseif(ANDROID_ABI STREQUAL "x86_64")
+      set(zig_target x86_64-linux-android.29)
+    else()
+      message(FATAL_ERROR "The Zig binding pilot supports Android ARM64 and x86_64")
+    endif()
+  endif()
+  set(binding_objects ${CMAKE_CURRENT_BINARY_DIR}/host_store.o)
+  add_custom_command(OUTPUT ${binding_objects}
+    COMMAND ${GW_ZIG_EXECUTABLE} build --build-file ${CMAKE_CURRENT_SOURCE_DIR}/build.zig
+            --prefix ${CMAKE_CURRENT_BINARY_DIR}
+            --cache-dir ${CMAKE_CURRENT_BINARY_DIR}/zig-cache
+            --global-cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/build/zig-global-cache
+            host-store -Dtarget=${zig_target} -Dcpu=baseline
+    DEPENDS build.zig src/host/host_store.zig src/host/binding_store.zig src/host/binding_store.h
+            src/host/slot_store.zig src/host/slot_store.h VERBATIM)
+  set_source_files_properties(${binding_objects} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+  add_custom_target(android_jni_binding_store DEPENDS ${binding_objects})
+  install(FILES third_party/zig/LICENSE
+          DESTINATION share/licenses/glibc-worker/android-jni RENAME zig-LICENSE.txt)
+  set(binding_backend src/host/binding_table_zig.c)
+elseif(GW_BINDING_BACKEND STREQUAL "c")
+  set(binding_backend src/host/binding_table.c src/host/slot_store.c)
+else()
+  message(FATAL_ERROR "GW_BINDING_BACKEND must be c or zig")
+endif()
+add_library(android_jni_objects OBJECT src/host/full_host.c src/host/references.c
+  src/host/bindings.c src/host/slot_allocator.c ${binding_backend} src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
 add_dependencies(android_jni_objects jni_tables)
-target_include_directories(android_jni_objects PRIVATE include common host guest
+target_include_directories(android_jni_objects PRIVATE include src/common src/host src/guest
   ${CMAKE_CURRENT_BINARY_DIR} ${GW_JNI_INCLUDE_DIR} ${GW_FFI_INCLUDE_DIR})
 target_link_libraries(android_jni_objects PUBLIC glibc_worker::dlopen)
-add_library(android_jni SHARED $<TARGET_OBJECTS:android_jni_objects>)
-add_library(android_jni_static STATIC $<TARGET_OBJECTS:android_jni_objects>)
+add_library(android_jni SHARED $<TARGET_OBJECTS:android_jni_objects> ${binding_objects})
+add_library(android_jni_static STATIC $<TARGET_OBJECTS:android_jni_objects> ${binding_objects})
 foreach(target android_jni android_jni_static)
+  if(TARGET android_jni_binding_store)
+    add_dependencies(${target} android_jni_binding_store)
+  endif()
   target_include_directories(${target} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include/glibc-worker/android-jni>)
@@ -40,18 +77,18 @@ find_package(Java COMPONENTS Development REQUIRED)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/classes
   COMMAND ${Java_JAVAC_EXECUTABLE} --release 8 -d ${CMAKE_CURRENT_BINARY_DIR}/classes
-          ${CMAKE_CURRENT_SOURCE_DIR}/java/dev/glibc/worker/BridgeTypes.java
-          ${CMAKE_CURRENT_SOURCE_DIR}/java/dev/glibc/worker/GuestImages.java
+          ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/BridgeTypes.java
+          ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/GuestImages.java
   COMMAND ${Java_JAR_EXECUTABLE} cf ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar
           -C ${CMAKE_CURRENT_BINARY_DIR}/classes .
-  DEPENDS java/dev/glibc/worker/BridgeTypes.java java/dev/glibc/worker/GuestImages.java VERBATIM)
+  DEPENDS src/java/dev/glibc/worker/BridgeTypes.java src/java/dev/glibc/worker/GuestImages.java VERBATIM)
 add_custom_target(android_jni_helpers ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar DESTINATION share/glibc-worker/android-jni)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/android-jni)
-install(DIRECTORY common/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/android-jni/internal FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY src/common/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/android-jni/internal FILES_MATCHING PATTERN "*.h")
 install(TARGETS android_jni android_jni_static EXPORT GlibcWorkerAndroidJniTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

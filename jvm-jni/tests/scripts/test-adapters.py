@@ -104,16 +104,17 @@ def build_tests(output, jdk):
         "-I" + str(include / "linux"),
     ]
     sources = [
-        PROJECT / "native" / (name + ".c")
+        PROJECT / "src/native" / (name + ".c")
         for name in ("adapter", "profiles", "calls", "families")
     ]
     sources += [
-        ROOT / "bionic-dlopen/loader.c",
-        ROOT / "bionic-dlopen/elf_route.c",
+        ROOT / "bionic-dlopen/src/loader.c",
+        ROOT / "bionic-dlopen/src/elf_route.c",
         PROJECT / "tests/adapter/native/backend.c",
     ]
     dirs = [
-        PROJECT / "native",
+        PROJECT / "include",
+        PROJECT / "src/native",
         ROOT / "bionic-dlopen/include",
         ROOT / "core/include",
         ROOT / "android-jni/include",
@@ -153,11 +154,11 @@ def build_tests(output, jdk):
         for name in ("AdapterTest", "AdapterBaseline")
     ]
     java += [
-        PROJECT / "java/dev/glibc/worker" / (name + ".java")
+        PROJECT / "src/java/dev/glibc/worker" / (name + ".java")
         for name in ("JvmAdapter", "Jre17Adapter")
     ]
     java += [
-        ROOT / "android-jni/java/dev/glibc/worker" / (name + ".java")
+        ROOT / "android-jni/src/java/dev/glibc/worker" / (name + ".java")
         for name in ("BridgeTypes", "GuestImages")
     ]
     run([jdk / "bin/javac", "--release", "8", "-d", classes, *java])

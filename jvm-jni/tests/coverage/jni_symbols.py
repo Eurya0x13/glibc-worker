@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="jni-symbols-", dir=scratch) as name:
     headers.mkdir()
     classes = work / "classes"
     classes.mkdir()
-    helpers = ROOT / "android-jni/java/dev/glibc/worker"
+    helpers = ROOT / "android-jni/src/java/dev/glibc/worker"
     subprocess.run(
         [
             "javac",
@@ -72,8 +72,8 @@ with tempfile.TemporaryDirectory(prefix="jni-symbols-", dir=scratch) as name:
             str(classes),
             str(source),
             str(work / "SignatureChecks.java"),
-            str(ROOT / "jvm-jni/java/dev/glibc/worker/Jre17Adapter.java"),
-            str(ROOT / "jvm-jni/java/dev/glibc/worker/JvmAdapter.java"),
+            str(ROOT / "jvm-jni/src/java/dev/glibc/worker/Jre17Adapter.java"),
+            str(ROOT / "jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java"),
             str(helpers / "GuestImages.java"),
             str(helpers / "BridgeTypes.java"),
         ],
