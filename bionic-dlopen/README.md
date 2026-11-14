@@ -2,6 +2,8 @@
 
 JNI 无关的 Host 装载层：ELF GNU 标记分类、映像路由、带代数的逻辑句柄、重复 inode 拒绝、借用计数和关闭同步。
 
+`src/` 保存 C 装载器与 ELF 分类实现；`include/` 保存公开装载契约。
+
 ## 独立构建
 
 先安装 core，再构建本项目；只读取 core 的安装包，不读取其源码或测试：
@@ -31,4 +33,8 @@ AUTO 路由只在 ELF 元数据成功解析、没有 GNU 标记时返回 `GW_PAS
 
 `tests/loader_contract.c` 使用普通 C transport 验证 NULL 上下文、非 JNI metadata、查找/调用、重复映像、失败回滚、旧句柄、忙碌关闭和停止约束。它验证 Host 契约，不宣称单独建立双 libc。
 
+`tests/execution_scopes.c` 验证祖先/递归 scope、线程归属和正常跨线程关闭；`close_waits.c` 验证两/三线程的 scope 关闭环拒绝以及无活跃借用目标关闭；`loader_quarantine.c` 覆盖四种隔离场景。执行借用与可转移保活 pin 的区别见 [执行借用规则](docs/EXECUTION_SCOPES.md)。
+
 `tests/elf_route.py` 在 ASan/UBSan 下检查 49 项真实 Android/GNU ELF、无标记映像、损坏和资源上限条件，同时核对分类与错误码；该集成夹具可消费上层测试产生的 DSOs。C contract 另外确保 AUTO 分类失败不会返回 PASS 或调用 Guest transport。真实双 libc 生命周期由 jvm-jni 的集成测试覆盖。
+
+后端每进程只配置一次；STOPPED 与 quarantine 都不可重新配置。stop 只检查并停止装载后端，不取消在途调用，也不销毁 GNU runtime。宿主须先停止生产者、归还借用并关闭模块；close 的借用等待和 transport 执行没有通用期限。watchdog 可标记 quarantine，但这不证明已发布调用停止访问资源，不能据此释放调用栈、buffer 或映像；进程处置由宿主负责。

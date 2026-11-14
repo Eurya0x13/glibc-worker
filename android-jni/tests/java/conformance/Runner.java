@@ -8,6 +8,7 @@ import java.util.*;
 
 public final class Runner {
   static int failures, checks, unsupported;
+  public static int expectedBridgeErrors;
 
   static synchronized void check(boolean b, String name) {
     checks++;
@@ -49,6 +50,15 @@ public final class Runner {
     }
   }
 
+  static void awaitFreeContexts(int expected) throws Exception {
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    while (NativeBridge.bridgeMetric(19) - NativeBridge.bridgeMetric(18) > expected
+        && System.nanoTime() < deadline)
+      Thread.sleep(2);
+    if (NativeBridge.bridgeMetric(19) - NativeBridge.bridgeMetric(18) > expected)
+      throw new AssertionError("Context cleanup incomplete");
+  }
+
   @SuppressWarnings("unchecked")
   static WeakReference<ClassLoader> cycle(String path, int cycle) throws Exception {
     URLClassLoader l = loader();
@@ -62,6 +72,55 @@ public final class Runner {
     }
     invoke(c, "load", new Class<?>[] {String.class}, path);
     check(NativeBridge.bridgeMetric(1) == before + 1, "onload_once_cycle_" + cycle);
+
+    Class<?> capacity = l.loadClass("conformance.BindingCapacity");
+    if (capacity.getField("enabled").getBoolean(null)) {
+      int methods = (Integer) invoke(capacity, "verify", new Class<?>[] {});
+      int live = NativeBridge.bridgeMetric(5);
+      if (methods != 1024 || live < 1024) {
+        throw new AssertionError("Binding capacity or invocation failure");
+      }
+      Class<?> resources = l.loadClass("conformance.ResourceCapacity");
+      int classes = (Integer) invoke(resources, "verify", new Class<?>[] {});
+      int references = resources.getField("references").getInt(null);
+      if (classes != 320 || references != 20000) {
+        throw new AssertionError("Resource capacity or invocation failure");
+      }
+      int beforeFailures = NativeBridge.bridgeMetric(4);
+      Class<?> failureCases = l.loadClass("conformance.FailureCases");
+      int available = NativeBridge.bridgeMetric(18);
+      int busyContexts = NativeBridge.bridgeMetric(19) - available;
+      int failureChecks =
+          (Integer) invoke(failureCases, "verify", new Class<?>[] {int.class}, available);
+      int limit =
+          (Integer) invoke(resources, "failureProbe", new Class<?>[] {int.class, int.class}, 8, 0);
+      awaitFreeContexts(busyContexts);
+      if (failureChecks != 5 || !(Boolean) invoke(failureCases, "recovery", new Class<?>[] {}))
+        throw new AssertionError("Failure recovery incomplete");
+      awaitFreeContexts(busyContexts);
+      int delta = NativeBridge.bridgeMetric(4) - beforeFailures;
+      if (delta != 0)
+        throw new AssertionError("Unexpected bridge failure count: " + delta);
+      expectedBridgeErrors += delta;
+      System.out.println("AUDIT_FAILURE_TEST {\"cycle\":" + cycle
+          + ",\"checks\":6,\"expected_errors\":" + delta + "}");
+      int expanded = NativeBridge.bridgeMetric(19);
+      if (expanded < Math.max(32, limit + 8) + 32 + busyContexts)
+        throw new AssertionError("Context storage did not grow");
+      System.out.println("DYNAMIC_CAPACITY_TEST {\"cycle\":" + cycle + ",\"depth\":32,\"threads\":"
+          + Math.max(32, limit + 8) + ",\"guest_threads\":32,\"contexts\":" + expanded
+          + ",\"initial_contexts\":" + limit + "}");
+      int descriptorChecks = resources.getField("descriptorChecks").getInt(null);
+      if (descriptorChecks != 3) {
+        throw new AssertionError("Descriptor boundary checks incomplete");
+      }
+      System.out.println(
+          "AUDIT_DESCRIPTOR_TEST {\"cycle\":" + cycle + ",\"checks\":" + descriptorChecks + "}");
+      System.out.println("RESOURCE_CAPACITY_TEST {\"cycle\":" + cycle + ",\"classes\":" + classes
+          + ",\"references\":" + references + "}");
+      System.out.println("BINDING_CAPACITY_TEST {\"cycle\":" + cycle + ",\"methods\":" + methods
+          + ",\"live_closures\":" + live + "}");
+    }
 
     if (cycle == 0) {
       invoke(c, "load", new Class<?>[] {String.class},

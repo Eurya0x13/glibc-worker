@@ -7,6 +7,7 @@
 #include <string.h>
 
 /* Disposable test-app startup layout only. Pojav already starts its own JRE. */
+#if JRE_PATH_CACHE_SIZE != 0
 struct cache_check {
   uintptr_t base, address;
   int writable;
@@ -31,7 +32,16 @@ static int check_cache_mapping(struct dl_phdr_info *info, size_t size,
   return 1;
 }
 
+#endif
+
 int gw_spike_set_jre_layout(Dl_info *info, const char *path) {
+#if JRE_PATH_CACHE_SIZE == 0
+  (void)info;
+  (void)path;
+  printf("JRE_LAYOUT_ERROR=private cache unavailable artifact=%s\n",
+         JRE_ARTIFACT_ID);
+  return 1;
+#else
   struct cache_check c = {
       .base = (uintptr_t)info->dli_fbase,
       .address = (uintptr_t)info->dli_fbase + JRE_PATH_CACHE_OFFSET};
@@ -52,4 +62,5 @@ int gw_spike_set_jre_layout(Dl_info *info, const char *path) {
       "JRE_LAYOUT_ADAPTER=private-path-cache offset=0x%lx sha256=%s path=%s\n",
       JRE_PATH_CACHE_OFFSET, JRE_LIBJVM_SHA256, path);
   return 0;
+#endif
 }

@@ -17,6 +17,8 @@ public final class Module {
   public static native int ownTls(int value);
   public static native int depTls(int value);
   public static native int route(int depth);
+  public static native int registerTarget(Class<?> target, int kind);
+  public static native int unregisterTarget(Class<?> target);
 
   public static int javaEcho(int value) {
     return value + 10000;

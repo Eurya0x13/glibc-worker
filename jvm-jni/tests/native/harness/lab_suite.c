@@ -12,6 +12,28 @@ static const char *api_names[FB_APIS] = {
 #include "generated/api-names.inc"
 };
 
+#if GW_RPC_PROFILE
+static int diagnostics_growth(struct full_bridge *bridge) {
+  struct gw_rpc_snapshot totals;
+  struct gw_rpc_breakdown stages;
+  struct gw_handoff_snapshot handoff;
+  unsigned contexts = (unsigned)fb_context_capacity(bridge);
+  if (gw_rpc_diagnostics_snapshot(&totals, sizeof totals) ||
+      gw_rpc_breakdown_snapshot(&stages, sizeof stages) ||
+      gw_rpc_handoff_snapshot(&handoff, sizeof handoff) || !totals.enabled ||
+      !stages.enabled || totals.contexts != contexts ||
+      stages.contexts != contexts || handoff.contexts != contexts ||
+      !totals.host.completed || !totals.guest.completed) {
+    return 1;
+  }
+  printf(
+      "AUDIT_DIAGNOSTICS_TEST {\"result\":\"PASS\",\"contexts\":%u,"
+      "\"profile\":true,\"wake_filter\":%d,\"ready_poll\":%d}\n",
+      contexts, GW_FUTEX_WAKE_FILTER, GW_RPC_READY_POLL);
+  return 0;
+}
+#endif
+
 int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
   jclass cls = (*env)->FindClass(env, "conformance/Runner");
   if (!cls || (*env)->ExceptionCheck(env)) {
@@ -28,6 +50,10 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
     (*env)->ExceptionClear(env);
     rc = -1;
   }
+  jfieldID expected_field =
+      (*env)->GetStaticFieldID(env, cls, "expectedBridgeErrors", "I");
+  int expected_errors =
+      expected_field ? (*env)->GetStaticIntField(env, cls, expected_field) : -1;
   (*env)->DeleteLocalRef(env, path);
   (*env)->DeleteLocalRef(env, cls);
 
@@ -38,6 +64,11 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
     }
     rc = gw_loader_smoke(env, hostpath);
   }
+#if GW_RPC_PROFILE
+  if (!rc) {
+    rc = diagnostics_growth(B);
+  }
+#endif
 
   int touched = 0;
   for (int i = 0; i < FB_APIS; i++) {
@@ -52,14 +83,15 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
       "FULL_LIFECYCLE loads=%d unloads=%d constructors=%d destructors=%d "
       "calls=%d depth=%d "
       "globals=%d weak=%d locals=%d closures=%d threads=%d errors=%d "
+      "expected_errors=%d "
       "coverage=%d/%d\n",
       atomic_load(&B->loads), atomic_load(&B->unloads),
       atomic_load(&B->constructors), atomic_load(&B->destructors),
       atomic_load(&B->native_calls), atomic_load(&B->max_depth),
       atomic_load(&B->live_global), atomic_load(&B->live_weak),
       atomic_load(&B->live_local), atomic_load(&B->live_closures),
-      atomic_load(&B->live_guest_threads), atomic_load(&B->errors), touched,
-      FB_APIS);
+      atomic_load(&B->live_guest_threads), atomic_load(&B->errors),
+      expected_errors, touched, FB_APIS);
   printf(
       "MULTI_LIFECYCLE active=%d peak=%d failed=%d dependency_constructors=%d "
       "dependency_destructors=%d id_cache_weak=%d\n",
@@ -69,8 +101,9 @@ int gw_lab_suite(struct full_bridge *B, JNIEnv *env) {
   printf("GUEST_IMAGE_LIFECYCLE opens=%d closes=%d\n",
          atomic_load(&B->image_opens), atomic_load(&B->image_closes));
 
-  B->suite_rc =
-      rc || atomic_load(&B->errors) || atomic_load(&B->active_modules);
+  B->suite_rc = rc || expected_errors < 0 ||
+                atomic_load(&B->errors) != expected_errors ||
+                atomic_load(&B->active_modules);
   printf("FULL_JNI_SUITE_RESULT=%s java_rc=%d\n", B->suite_rc ? "FAIL" : "PASS",
          rc);
   return B->suite_rc;
@@ -133,6 +166,16 @@ static jint bridge_metric(JNIEnv *env, jclass cls, jint which) {
       /* Test diagnostics: the initial GNU owner, not a Java thread ID. */
       return lab_bridge->ctx[0].guest_tid;
 
+    case 18: {
+      int free_slots = 0;
+      for (int i = 1; i < fb_context_capacity(lab_bridge); i++) {
+        free_slots +=
+            atomic_load(&fb_context_at(lab_bridge, i)->state) == FB_FREE;
+      }
+      return free_slots;
+    }
+    case 19:
+      return fb_context_capacity(lab_bridge);
     default:
       return -1;
   }
@@ -149,6 +192,17 @@ static jint bridge_state(JNIEnv *env, jclass cls, jlong id) {
   (void)cls;
   return gw_loader_query(GW_LOADER_ABI_V1, sizeof(struct gw_loader_api_v1))
       ->module_state((uint64_t)id);
+}
+
+/* Negative-test hook: attempts actual production close from a Java callback.
+   A scope refusal must leave the module and VM registrations untouched. */
+static jint bridge_try_close(JNIEnv *env, jclass cls, jlong id) {
+  (void)cls;
+  struct gw_loader_error error = {0};
+  int result =
+      gw_loader_query(GW_LOADER_ABI_V1, sizeof(struct gw_loader_api_v1))
+          ->close(env, (uint64_t)id, &error);
+  return result == GW_ERROR ? error.code : -100 - result;
 }
 
 static void payload_phase(JNIEnv *env, jclass cls, jint stage, jint operation,
@@ -184,10 +238,12 @@ int gw_lab_prepare(struct full_bridge *bridge, JNIEnv *env,
       {"bridgeMetric", "(I)I", (void *)bridge_metric},
       {"bridgeLastHandle", "()J", (void *)bridge_last},
       {"bridgeHandleState", "(J)I", (void *)bridge_state},
+      {"bridgeTryClose", "(J)I", (void *)bridge_try_close},
       {"processCpuNanos", "()J", (void *)process_cpu_nanos},
       {"payloadPhase", "(III)V", (void *)payload_phase}};
 
-  int rc = (*env)->RegisterNatives(env, cls, metrics, 5);
+  int rc = (*env)->RegisterNatives(env, cls, metrics,
+                                   sizeof metrics / sizeof *metrics);
   (*env)->DeleteLocalRef(env, cls);
   return rc != JNI_OK || gw_loader_smoke_not_ready(env, directory);
 }

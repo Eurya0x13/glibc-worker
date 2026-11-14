@@ -5,11 +5,68 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
 import java.util.function.IntUnaryOperator;
 
 /** Tests the JRE load API; no Guest implementation details in the modules. */
 public final class MultiSuite {
   static int checks, failures;
+
+  public static final class OwnershipTarget {
+    public static native int probe();
+    public static native int other();
+  }
+
+  static int registerTarget(Loaded module, int kind) throws Exception {
+    return (Integer) module.call(
+        "registerTarget", new Class<?>[] {Class.class, int.class}, OwnershipTarget.class, kind);
+  }
+
+  static void requireUnbound() {
+    boolean probe = false, other = false;
+    try {
+      OwnershipTarget.probe();
+    } catch (UnsatisfiedLinkError expected) {
+      probe = true;
+    }
+    try {
+      OwnershipTarget.other();
+    } catch (UnsatisfiedLinkError expected) {
+      other = true;
+    }
+    requireScope(probe && other);
+  }
+
+  static void registrationOwnership(Loaded a, Loaded b) throws Exception {
+    requireScope(registerTarget(a, 1) == 0 && OwnershipTarget.probe() == 3456);
+    boolean registerDenied = false, unregisterDenied = false;
+    try {
+      registerTarget(b, 0);
+    } catch (IllegalStateException expected) {
+      registerDenied = true;
+    }
+    try {
+      b.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class);
+    } catch (IllegalStateException expected) {
+      unregisterDenied = true;
+    }
+    requireScope(registerDenied && unregisterDenied && OwnershipTarget.probe() == 3456);
+    requireScope(
+        (Integer) a.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class)
+        == 0);
+    requireUnbound();
+    requireScope(registerTarget(a, 3) == -1); // Detached worker: shared dependency is ambiguous.
+    requireUnbound();
+    requireScope(registerTarget(a, 4) == -1); // Every entry must resolve, not just the first.
+    requireUnbound();
+    requireScope(registerTarget(a, 2) == 0 && OwnershipTarget.probe() == 111);
+    requireScope(
+        (Integer) a.call("unregisterTarget", new Class<?>[] {Class.class}, OwnershipTarget.class)
+        == 0);
+    requireUnbound();
+    requireScope(registerTarget(b, 1) == 0 && OwnershipTarget.probe() == 3456);
+  }
 
   public static int checkCount() {
     return checks;
@@ -166,6 +223,117 @@ public final class MultiSuite {
     check(errors.isEmpty(), "concurrent_two_libraries_" + errors);
   }
 
+  static void requireScope(boolean good) {
+    if (!good)
+      throw new AssertionError("Execution scope contract");
+  }
+
+  static int closeBusy(Loaded target) {
+    requireScope(NativeBridge.bridgeTryClose(target.handle) == 9);
+    requireScope(NativeBridge.bridgeHandleState(target.handle) == 2);
+    return 0;
+  }
+
+  static IntUnaryOperator routeTo(Loaded module) {
+    return depth -> {
+      try {
+        return module.integer("route", depth);
+      } catch (RuntimeException failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new RuntimeException(failure);
+      }
+    };
+  }
+
+  static void executionScopes(Loaded a, Loaded b) throws Exception {
+    int closures = metric(5), unloads = metric(2), errors = metric(4);
+    try {
+      a.type.getField("peer").set(null, (IntUnaryOperator) depth -> closeBusy(a));
+      requireScope(a.integer("route", 1) == 111);
+      a.type.getField("peer").set(null, routeTo(b));
+      b.type.getField("peer").set(null, (IntUnaryOperator) depth -> {
+        closeBusy(a); // A -> Java -> B -> Java -> close(A).
+        return closeBusy(b);
+      });
+      requireScope(a.integer("route", 2) == 333);
+      a.type.getField("peer").set(null, (IntUnaryOperator) depth -> {
+        if (depth == 0)
+          return closeBusy(b);
+        return routeTo(b).applyAsInt(depth);
+      });
+      b.type.getField("peer").set(null, routeTo(a));
+      requireScope(a.integer("route", 3) == 444); // A -> B -> A -> close(B).
+      a.type.getField("peer").set(null, routeTo(b));
+      b.type.getField("peer").set(
+          null, (IntUnaryOperator) depth -> { throw new IllegalStateException("scope-unwind"); });
+      boolean unwound = false;
+      try {
+        a.integer("route", 2);
+      } catch (IllegalStateException expected) {
+        unwound = "scope-unwind".equals(expected.getMessage());
+      }
+      requireScope(unwound && a.integer("cached", 7) == 10007 && b.integer("cached", 8) == 10008);
+      requireScope(metric(5) == closures && metric(2) == unloads && metric(4) == errors);
+    } finally {
+      a.type.getField("peer").set(null, null);
+      b.type.getField("peer").set(null, null);
+    }
+    System.out.println("AUDIT_SCOPE_TEST {\"result\":\"PASS\",\"cases\":4,"
+        + "\"busy_refusals\":4,\"exception_unwind\":true,\"resources_preserved\":true}");
+  }
+
+  static IntUnaryOperator closePeer(Loaded target, CyclicBarrier ready, CyclicBarrier returned) {
+    return depth -> {
+      try {
+        ready.await(5, TimeUnit.SECONDS);
+        int result = closeBusy(target);
+        // Both native calls stay in flight until both closes have returned.
+        returned.await(5, TimeUnit.SECONDS);
+        return result;
+      } catch (RuntimeException failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new AssertionError("Cross-thread close rendezvous", failure);
+      }
+    };
+  }
+
+  static Thread routeThread(Loaded module, int expected, List<Throwable> errors) {
+    Thread thread = new Thread(() -> {
+      try {
+        requireScope(module.integer("route", 1) == expected);
+      } catch (Throwable failure) {
+        errors.add(failure);
+      }
+    }, "scope-close-" + expected);
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  static void closeWaits(Loaded a, Loaded b) throws Exception {
+    int closures = metric(5), unloads = metric(2), errorsBefore = metric(4);
+    List<Throwable> errors = Collections.synchronizedList(new ArrayList<Throwable>());
+    CyclicBarrier ready = new CyclicBarrier(2), returned = new CyclicBarrier(2);
+    a.type.getField("peer").set(null, closePeer(b, ready, returned));
+    b.type.getField("peer").set(null, closePeer(a, ready, returned));
+    Thread first = routeThread(a, 111, errors), second = routeThread(b, 222, errors);
+    try {
+      first.start();
+      second.start();
+      first.join(10_000);
+      second.join(10_000);
+      requireScope(!first.isAlive() && !second.isAlive() && errors.isEmpty());
+      requireScope(a.integer("cached", 9) == 10009 && b.integer("cached", 10) == 10010);
+      requireScope(metric(5) == closures && metric(2) == unloads && metric(4) == errorsBefore);
+    } finally {
+      a.type.getField("peer").set(null, null);
+      b.type.getField("peer").set(null, null);
+    }
+    System.out.println("AUDIT_CLOSE_WAIT_TEST {\"result\":\"PASS\",\"threads\":2,"
+        + "\"busy_refusals\":2,\"resources_preserved\":true}");
+  }
+
   static void rejectedLoad(String path, Loaded a, Loaded b) throws Exception {
     Loaded rejected = new Loaded();
     int closures = metric(5), failed = metric(12);
@@ -233,6 +401,9 @@ public final class MultiSuite {
         "per_class_method_cache");
 
     crossCalls(a, b);
+    executionScopes(a, b);
+    closeWaits(a, b);
+    registrationOwnership(a, b);
     concurrent(a, b);
     sqlite(directory, a, b);
     rejectedLoad(directory + "/libmulti_reject.so", a, b);
@@ -255,6 +426,7 @@ public final class MultiSuite {
     awaitUnload(neutral, 2, "third_library_unloads_independently");
 
     awaitUnload(a, 1, "first_library_gc_unload");
+    requireScope(OwnershipTarget.probe() == 3456);
     check(metric(14) == depD && b.noarg("named") == 223 && b.integer("cached", 9) == 10009
             && b.noarg("value") == 7,
         "survivor_cache_closure_and_dependency");
@@ -269,6 +441,11 @@ public final class MultiSuite {
         "reload_root_keeps_shared_dependency");
     awaitUnload(again, 1, "reloaded_first_library_unloads");
     awaitUnload(b, 0, "last_owner_unloads");
+    requireUnbound();
+    System.out.println("AUDIT_OWNERSHIP_TEST {\"result\":\"PASS\",\"handoff\":true,"
+        + "\"dependency_context\":true,\"background_top\":true,"
+        + "\"ambiguous_dependency_rejected\":true,\"mixed_batch_rejected\":true,"
+        + "\"old_owner_unload_preserved_new\":true,\"final_owner_unload_unbound\":true}");
     check(metric(14) == depD + 1, "dependency_destroyed_after_last_owner");
 
     Loaded fresh = new Loaded();

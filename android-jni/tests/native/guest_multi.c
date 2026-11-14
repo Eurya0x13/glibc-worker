@@ -3,9 +3,11 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <pthread.h>
 extern void multi_dep_observe(_Atomic int *, _Atomic int *);
 extern int multi_dep_add(int), multi_dep_value(void), multi_dep_tls(int);
 extern uintptr_t multi_dep_cookie(void);
+extern jint multi_dep_native(JNIEnv *, jclass);
 static JavaVM *vm;
 static jmethodID echo, route_java;
 static jobject retained;
@@ -77,6 +79,65 @@ static jint JNICALL route(JNIEnv *e, jclass c, jint depth) {
   return MODULE_ID + (*e)->CallStaticIntMethod(e, c, route_java, depth - 1);
 }
 
+struct registration_job {
+  jclass target;
+  int kind, result, exception;
+};
+
+static jint register_target_methods(JNIEnv *e, jclass target, int kind) {
+  JNINativeMethod m[] = {{"probe", "()I", (void *)identity},
+                         {"other", "()I", (void *)identity}};
+  if (kind == 1 || kind == 3) {
+    m[0].fnPtr = m[1].fnPtr = (void *)multi_dep_native;
+  }
+  if (kind == 4) {
+    m[1].fnPtr = (void *)multi_dep_native;
+  }
+  return (*e)->RegisterNatives(e, target, m, 2);
+}
+
+static void *background_register(void *opaque) {
+  struct registration_job *job = opaque;
+  JNIEnv *e = NULL;
+  job->result = (*vm)->AttachCurrentThread(vm, &e, NULL);
+  if (job->result != JNI_OK) {
+    return NULL;
+  }
+  job->result = register_target_methods(e, job->target, job->kind);
+  job->exception = (*e)->ExceptionCheck(e);
+  if (job->exception) {
+    (*e)->ExceptionClear(e);
+  }
+  (*vm)->DetachCurrentThread(vm);
+  return NULL;
+}
+
+static jint JNICALL register_target(JNIEnv *e, jclass c, jclass target,
+                                    jint kind) {
+  (void)c;
+  if (kind < 2) {
+    return register_target_methods(e, target, kind);
+  }
+  struct registration_job job = {
+      .target = (jclass)(*e)->NewGlobalRef(e, target),
+      .kind = kind,
+      .result = JNI_ERR};
+  if (!job.target) {
+    return JNI_ERR;
+  }
+  pthread_t thread;
+  if (!pthread_create(&thread, NULL, background_register, &job)) {
+    pthread_join(thread, NULL);
+  }
+  (*e)->DeleteGlobalRef(e, job.target);
+  return job.result == JNI_ERR && !job.exception ? -7 : job.result;
+}
+
+static jint JNICALL unregister_target(JNIEnv *e, jclass c, jclass target) {
+  (void)c;
+  return (*e)->UnregisterNatives(e, target);
+}
+
 JNIEXPORT jint JNICALL Java_multi_Module_named(JNIEnv *e, jclass c) {
   (void)e;
   (void)c;
@@ -84,10 +145,16 @@ JNIEXPORT jint JNICALL Java_multi_Module_named(JNIEnv *e, jclass c) {
 }
 
 static JNINativeMethod methods[] = {
-    {"identity", "()I", (void *)identity}, {"cached", "(I)I", (void *)cached},
-    {"add", "(I)I", (void *)add},          {"value", "()I", (void *)value},
-    {"cookie", "()J", (void *)cookie},     {"ownTls", "(I)I", (void *)own_tls},
-    {"depTls", "(I)I", (void *)dep_tls},   {"route", "(I)I", (void *)route}};
+    {"identity", "()I", (void *)identity},
+    {"cached", "(I)I", (void *)cached},
+    {"add", "(I)I", (void *)add},
+    {"value", "()I", (void *)value},
+    {"cookie", "()J", (void *)cookie},
+    {"ownTls", "(I)I", (void *)own_tls},
+    {"depTls", "(I)I", (void *)dep_tls},
+    {"route", "(I)I", (void *)route},
+    {"registerTarget", "(Ljava/lang/Class;I)I", (void *)register_target},
+    {"unregisterTarget", "(Ljava/lang/Class;)I", (void *)unregister_target}};
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *opaque) {
   (void)opaque;

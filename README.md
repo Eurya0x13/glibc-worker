@@ -9,7 +9,9 @@
 | [android-jni](android-jni/README.md) | 公开 JNI 的 Host/Guest 桥、引用/异常/回调、GNU service | core、bionic-dlopen、两侧 libffi |
 | [jvm-jni](jvm-jni/README.md) | 可选的 HotSpot/JRE 私有装载适配与真实 JRE 集成测试 | android-jni |
 
-每个项目都有自己的 `CMakeLists.txt`、`build.sh`、`tests/`、`docs/` 和 `build/`。它们可以分别构建和安装；通过安装的 CMake 包和头文件声明依赖。没有公共 `build/` 或公共测试目录。
+每个项目的实现源码统一放在 `src/`；公开接口放在 `include/`，测试留在 `tests/`。每个项目都有自己的 `CMakeLists.txt`、`build.sh`、`docs/` 和 `build/`。它们可以分别构建和安装；通过安装的 CMake 包和头文件声明依赖。没有公共 `build/` 或公共测试目录。
+
+`android-jni/build.zig` 负责必需的 Zig Host 存储对象的编译；CMake 继续负责跨项目依赖、C/JNI 和 SDK 安装。尚未将四个项目的构建全部迁移到 Zig。
 
 根目录 `scripts/` 只提供工作区组合构建、工具链发现、格式和导出。组合入口调用各项目的构建入口；制品仍归各自项目：
 

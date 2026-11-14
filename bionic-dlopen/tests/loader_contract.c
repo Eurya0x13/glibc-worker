@@ -67,6 +67,48 @@ static uint64_t current_module(void *context) {
   return context ? *(uint64_t *)context : 0;
 }
 
+static void module_capacity(void) {
+  _Static_assert(FB_MODULES == 64, "reviewed module capacity");
+  char directory[] = "/tmp/gw-module-capacity-XXXXXX";
+  assert(mkdtemp(directory));
+  char paths[FB_MODULES + 1][128];
+  struct gw_dlopen_library libraries[FB_MODULES], extra;
+  struct gw_loader_error error;
+  for (size_t i = 0; i <= FB_MODULES; i++) {
+    snprintf(paths[i], sizeof paths[i], "%s/%zu", directory, i);
+    FILE *file = fopen(paths[i], "w");
+    assert(file && !fclose(file));
+    if (i < FB_MODULES) {
+      assert(api->open(NULL, paths[i], GW_OPEN_GUEST, &libraries[i], &error) ==
+             GW_OK);
+      assert(fb_module_index(libraries[i].handle) == (int)i);
+    }
+  }
+  int before = opens;
+  assert(api->open(NULL, paths[FB_MODULES], GW_OPEN_GUEST, &extra, &error) ==
+         GW_ERROR);
+  assert(!extra.handle && error.code == GW_E_CAPACITY && opens == before);
+  void *entry = NULL;
+  assert(api->find(NULL, libraries[63].handle, "answer", NULL, &entry,
+                   &error) == GW_OK &&
+         ((int (*)(int))entry)(35) == 42);
+  uint64_t retired = libraries[32].handle;
+  assert(api->close(NULL, retired, &error) == GW_OK);
+  assert(api->open(NULL, paths[FB_MODULES], GW_OPEN_GUEST, &libraries[32],
+                   &error) == GW_OK);
+  assert(libraries[32].handle != retired &&
+         fb_module_index(libraries[32].handle) == 32);
+  assert(api->owns_handle(retired) &&
+         api->module_state(retired) == GW_MODULE_STALE);
+  for (size_t i = 0; i < FB_MODULES; i++) {
+    assert(api->close(NULL, libraries[i].handle, &error) == GW_OK);
+  }
+  for (size_t i = 0; i <= FB_MODULES; i++) {
+    assert(!unlink(paths[i]));
+  }
+  assert(!rmdir(directory));
+}
+
 int main(void) {
   api = gw_dlopen_query(GW_DLOPEN_ABI_V1, sizeof *api);
   assert(api && !gw_dlopen_query(99, sizeof *api));
@@ -118,6 +160,7 @@ int main(void) {
   assert(api->close(NULL, lib.handle, &error) == GW_OK);
   assert(opens == 3 && closes == 2);
 
+  module_capacity();
   assert(gw_dlopen_stop(&error) == GW_OK);
   assert(api->close(NULL, 42, &error) == GW_PASS);
   unlink(path);

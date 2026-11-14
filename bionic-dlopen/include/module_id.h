@@ -4,7 +4,10 @@
 
 /* Slot count of the module table: a hard capacity, not a growing
    namespace. */
-#define FB_MODULES 32
+#define FB_MODULES 64
+#if FB_MODULES < 1 || FB_MODULES > 255
+#error module index must fit in the handle low byte
+#endif
 /* "GL" in the top 16 bits marks a Guest logical handle, distinguishing it
    from any raw pointer or bionic dlopen handle the caller may hold. */
 #define FB_MODULE_TAG UINT64_C(0x474c000000000000)

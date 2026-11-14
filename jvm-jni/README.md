@@ -2,7 +2,9 @@
 
 可选的 HotSpot/JRE 接入项目。按经过审阅的装载接口族接入 JRE8–25，维护私有装载钩子、方法签名解析和 libjava 制品校验；通过 android-jni 注册表接入，不被下层反向引用。
 
-JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；Android 双 libc 完整覆盖目前仍以固定 JRE17 为准。装载适配不等于所有 JNI 新槽位或所有 Android JRE 制品均已验证，具体边界见 [兼容性契约](docs/JRE_COMPATIBILITY.md)。JDK28 不在运行支持范围。
+`src/native/` 和 `src/java/` 保存适配实现与辅助类；`include/` 保存公开 JVM 适配头文件。
+
+JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；Android ARM64 固定 JRE17/21/25 通过严格 smoke/coverage；固定 JRE8 通过严格 smoke 与正常 JIT coverage，其 VM 的 CheckJNI 数组提交缺陷已独立复现。装载适配不等于所有 JNI 新槽位或所有 Android JRE 制品均已验证，具体边界见 [兼容性契约](docs/JRE_COMPATIBILITY.md)。JDK28 不在运行支持范围。
 
 ## 独立构建
 
@@ -14,7 +16,7 @@ JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；And
 cmake --install build
 ```
 
-输出 `build/libgw_jvm_jni.so/.a`、`jvm-jni-helpers.jar` 和包 `GlibcWorkerJvmJni`。JAR 仅编译本项目的 `JvmAdapter` 与兼容入口 `Jre17Adapter`，通过已安装的 android-jni helper JAR 引用公共类。未指定构建 profile 时生成 unconfigured 配置，启用前必须通过 `gw_jvm_jni_set_profile` 提供审阅后的 profile；不会自动按 JRE 主版本放行。
+输出 `build/libgw_jvm_jni.so/.a`、`jvm-jni-helpers.jar` 和包 `GlibcWorkerJvmJni`。JAR 仅编译本项目的 `JvmAdapter`，通过已安装的 android-jni helper JAR 引用公共类。未指定构建 profile 时生成 unconfigured 配置，启用前必须通过 `gw_jvm_jni_set_profile` 提供审阅后的 profile；不会自动按 JRE 主版本放行。旧 JRE17 头文件、C/Java 转发入口、构建宏及枚举别名已删除；升级 SDK 使用新的安装前缀。
 
 加载本项目 DSO 只注册可选适配器，不立即修改 VM。宿主在初始化时明确请求 `GW_HOST_VM_ADAPTER` 后才安装，停止时恢复。必须使用已运行的同一 VM 的 JNIEnv。
 

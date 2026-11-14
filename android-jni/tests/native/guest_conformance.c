@@ -44,6 +44,10 @@ JNIEXPORT void conformance_observe_destructor(_Atomic int *p) {
     }                              \
   } while (0)
 #include "fixture_generated.inc"
+#if GW_TEST_BINDING_CAPACITY
+#include "failure_fixture.inc"
+#include "binding_capacity_generated.inc"
+#endif
 
 static jobject new_v(JNIEnv *e, jclass cls, jmethodID ctor, ...) {
   va_list va;
@@ -126,8 +130,25 @@ static int classes(JNIEnv *e, jclass module, jbyteArray bytes) {
 
   jobject (*getmodule)(JNIEnv *, jclass) =
       (jobject (*)(JNIEnv *, jclass))((void **)*e)[233];
+  int supported = (*e)->GetVersion(e) >= 0x00090000;
   jobject mod = getmodule(e, module);
-  C(mod);
+  if (supported) {
+    E();
+    C(mod);
+    (*e)->DeleteLocalRef(e, mod);
+  } else {
+    C(!mod && (*e)->ExceptionCheck(e));
+    jthrowable pending = (*e)->ExceptionOccurred(e);
+    (*e)->ExceptionClear(e);
+    jclass unsupported =
+        (*e)->FindClass(e, "java/lang/UnsupportedOperationException");
+    C(unsupported && pending && (*e)->IsInstanceOf(e, pending, unsupported));
+    (*e)->DeleteLocalRef(e, pending);
+    (*e)->DeleteLocalRef(e, unsupported);
+  }
+  dprintf(2,
+          "JNI_MODULE_TEST {\"supported\":%s,\"unsupported_exception\":%s}\n",
+          supported ? "true" : "false", supported ? "false" : "true");
   return 0;
 }
 
@@ -592,6 +613,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *reserved) {
                             sizeof methods / sizeof methods[0])) {
     return JNI_ERR;
   }
+#if GW_TEST_BINDING_CAPACITY
+  if (binding_capacity_register(e) != JNI_OK) {
+    return JNI_ERR;
+  }
+#endif
 
   (*e)->DeleteLocalRef(e, cls);
   return JNI_VERSION_1_6;

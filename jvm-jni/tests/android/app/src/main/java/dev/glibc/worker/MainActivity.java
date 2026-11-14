@@ -137,7 +137,16 @@ public final class MainActivity extends Activity {
         }
       }
       @Override
-      public void onServiceDisconnected(ComponentName name) {}
+      public void onServiceDisconnected(ComponentName name) {
+        // Allow an already sent ResultReceiver to arrive before classifying death.
+        handler.postDelayed(() -> {
+          if (running && generation == token) {
+            finishProbe(false,
+                "APP_RESULT=FAIL\nTest process exited before returning its result.\n"
+                    + readNativeReport(nativeReport));
+          }
+        }, 1000);
+      }
     };
 
     if (!bindService(
@@ -153,12 +162,7 @@ public final class MainActivity extends Activity {
         if (!running || generation != token) {
           return;
         }
-        String partial = "";
-        try {
-          partial = new String(
-              Files.readAllBytes(nativeReport.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception ignored) {
-        }
+        String partial = readNativeReport(nativeReport);
         if (partial.contains("APP_RESULT=BLOCKED")) {
           finishProbe(false, partial);
         } else if (partial.contains("JNI_EXPECTED_FATAL stage=host-forward")
@@ -173,6 +177,15 @@ public final class MainActivity extends Activity {
         }
       }
     }, 500);
+  }
+
+  private static String readNativeReport(File report) {
+    try {
+      return new String(
+          Files.readAllBytes(report.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception unavailable) {
+      return "";
+    }
   }
 
   private void finishProbe(boolean pass, String report) {

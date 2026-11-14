@@ -2,19 +2,48 @@
 
 ## 当前支持边界
 
-目前通过 Android 真机双 libc 完整覆盖的是 `tests/config/targets.json` 固定的 Pojav Android JRE17 制品。生产适配器已实现六个装载接口族；真实桌面 JRE8、11、17、21、25 通过装载契约测试，传输使用主机自身的 libc。Android 分支、其他厂商实现和 OpenJ9 需要另外确认。
+Android ARM64 真机已验证清单中固定的 JRE8、17、21、25 制品。17/21/25 通过 CheckJNI 严格模式的 smoke 与 coverage；8 通过严格 smoke 和正常 JIT 模式的完整 coverage，但其 VM 的 CheckJNI 数组提交路径存在独立可复现的崩溃，不能标为严格 coverage 通过。生产适配器已实现六个装载接口族；真实桌面 JRE8、11、17、21、25 通过装载契约测试，传输使用主机自身的 libc。其他 Android 制品、其他厂商实现和 OpenJ9 需要另外确认。
 
 | 运行验证 | 接口族 | 验证范围 |
 | --- | --- | --- |
-| Temurin 8u512 | CLASSLOADER_8 | 27 项装载/回收断言与 3 项恢复失败断言 |
+| Temurin 8u512 | CLASSLOADER_8 | 31 项装载/回收断言与 3 项恢复失败断言 |
 | 本机 OpenJDK 11.0.25 | CLASSLOADER_10_THROW | 同上 |
 | 本机 OpenJDK 17.0.21.0.3 | NATIVE_LIBRARIES_18 | 同上 |
 | Temurin 21.0.13 / 25.0.5 | NATIVE_LIBRARIES_19 | 各自同上 |
-| 固定 Pojav Android JRE17 | NATIVE_LIBRARIES_15 | ARM64 双 libc、142 项 Java/JNI、26 项 loader、SQLite/zstd、数据重开与完整退出 |
+| 固定 Android JRE8 / 17 / 21 / 25 | CLASSLOADER_8 / NATIVE_LIBRARIES_15 / NATIVE_LIBRARIES_19 | ARM64 双 libc、142 项 Java/JNI、26 项 loader、SQLite/zstd、数据重开与完整退出；8 的严格模式限制见下 |
 
-桌面固定归档见 `tests/config/desktop-jres.json`，本地 VM 必须显式传入目录和接口族。每次结果记录实际 VM 版本、libjava 散列、结构化断言、CheckJNI 日志及无适配器的启动对照。未列入运行矩阵的接口族或 GA 基线不能仅凭源码审计标为运行通过。JDK28 只保留既有源码审计资料，本轮不实现或验证其运行支持。
+桌面固定归档见 `tests/config/desktop-jres.json`，本地 VM 必须显式传入目录和接口族。每次结果记录实际 VM 版本、libjava/libjvm 散列、结构化断言、CheckJNI 日志及无适配器的启动对照。未列入运行矩阵的接口族或 GA 基线不能仅凭源码审计标为运行通过。JDK28 只保留既有源码审计资料，本轮不实现或验证其运行支持。
 
 基础 core、C loader 和公开 JNI 桥保持独立；本项目只转换 VM 私有装载边界。不要为不同 JRE 复制整个 glibc-worker。
+
+## Android 制品识别与候选验证
+
+`tests/config/android-jres.json` 固定 ID、ABI、归档散列、libjava/libjvm 路径及散列、接口族和测试启动策略。`GW_JRE_ARTIFACT` 显式选择；没有按主版本猜测、按当前文件自动生成可信 profile 或失败后尝试其他族的路径。提取缓存每次重新验证两个 ELF 的散列、64 位小端格式和机器架构；安装后再次验证实际文件。生产 install 只接受已驻留 libjava，并验证它关联的 JavaVM 就是当前 JNIEnv 的 VM，同时散列校验实际 VM 映像。
+
+清单内的制品身份与运行结论分开记录，桌面 VM 与 Android VM 不能互相替代。ARM64 真机验证使用 Android 13 普通应用环境；覆盖测试包含 CheckJNI（严格组）、动态资源、Host/Guest 线程、重入、类注册交接、三次加载/卸载、SQLite/zstd、保存重开、Guest 停止及 VM 销毁。
+
+| Android ARM64 制品 | 启动夹具 | 运行结论 |
+| --- | --- | --- |
+| Pojav17 ec28559，17-internal | 已固定的路径缓存修补 | 严格 smoke / coverage 均通过 |
+| AngelAura8，1.8.0_482-internal | Pojav 目录布局 + JLI | 严格 smoke 通过；正常 JIT coverage 通过；严格 coverage 因 VM 的 JNI_COMMIT 缺陷失败 |
+| AngelAura21，21.0.1-internal | Pojav 目录布局 + JLI | 严格 smoke / coverage 均通过 |
+| AngelAura25，25.0.5-internal | 同上，另固定 NDK libc++ | 严格 smoke / coverage 均通过 |
+
+制品、模式、APK/报告散列与反例摘要见 [验证记录](../tests/results/android-jres-arm64.json)。
+
+运行结论只覆盖这些固定制品与上述模式，不代表所有同主版本 JRE 或完整 JNI 规范通过。公开桥在 JRE8 上最高声明 JNI1.8，并测试 GetModule 抛 UnsupportedOperationException；17/21/25 最高声明 JNI10，并测试 GetModule 正常返回。功能触达计数包含明确拒绝路径，不表示宿主支持全部槽。
+
+AngelAura 测试应用将库复制到原始 JRE 目录并标为只读，按 Pojav 的预加载与 JLI_Launch 过程启动应用进程内的 HotSpot。来源固定于 `tests/config/pojav-startup.json`，没有引入完整启动器或修改其产品代码。直接执行私有目录 bin/java 在真机被拒绝，linker64 代理版本查询成功；该子进程探针与同进程的桥测试分别记录。ARM64 exec 子进程还需显式关闭堆指针标记，它不继承应用 manifest 的声明。具体启动条件见 [测试手册](../tests/README.md)。
+
+切换 JRE 时清理旧受管文件、只读文件及空目录；JRE8 遗留的空 lib/ext 也会使 JRE17 拒绝启动。现有 JVM 宿主负责自己启动 JRE，只接入已运行 VM 的适配器，不应再次调用测试夹具创建 VM。JRE17 的私有偏移只用于固定制品，不自动猜测或写入其他制品。
+
+### JRE8 CheckJNI 的明确限制
+
+固定 ARM64 JRE8 开启 CheckJNI 时，GetBooleanArrayElements 返回 isCopy=true，JNI_COMMIT 后的最终释放触发 Scudo abort。同一份 VM、同一套 JNI C 用例在不加载 glibc-worker 的独立进程中复现；不开启 CheckJNI 则完成数据回写。可运行 `tests/scripts/test-array-commit.py` 复核，其 PASS 仅表示成功复现 VM 缺陷，结构化结果同时记录 strict_jni_supported=false。
+
+所核对的 [OpenJDK8 维护快照](https://github.com/openjdk/jdk8u/blob/b661ee6ff840d6922aa7424a4d8f24760b21cf26/hotspot/src/share/vm/prims/jniCheck.cpp) 在 check_wrapped_array_release 中无条件释放 GuardedMemory 副本，包括 JNI_COMMIT；这与 [JNI_COMMIT 保留复制缓冲区的契约](https://docs.oracle.com/en/java/javase/24/docs/specs/jni/functions.html#releaseprimitivetypearrayelements-routines) 不符。项目没有跳过提交/最终释放断言，没有屏蔽崩溃，也没有以关闭 CheckJNI 后的通过替换严格组结果。此制品的正常模式验证为 go，严格数组检查模式为 no-go；需要严格模式的调用方应修复或更换 VM 后重验。
+
+x86_64 制品使用独立的归档和散列，特别是 JRE8 的补丁版本与 ARM64 不同。清单包含它们以便模拟器复现，不能由 ARM64 通过推断其覆盖结果，也不能把 x86_64 的旧结果当作新制品的验证。
 
 ## OpenJDK GA 接口族
 
@@ -70,11 +99,11 @@ JVM_LoadLibrary 本身也不是不变 ABI：8–17 GA 接收 name，18–27 GA �
 
 ## 适配器扩展规则
 
-接口族、制品身份和运行验证分开处理：接口族定义精确类/字段/原型、布尔语义和生命周期；profile 标记审阅后的 libjava 制品；只有实际测试完成才进入对应范围的支持清单。调用方通过构建 profile 或 `gw_jvm_jni_set_profile` 选择，未知族、无效散列、字段或方法不匹配均拒绝。
+接口族、制品身份和运行验证分开处理：接口族定义精确类/字段/原型、布尔语义和生命周期；v2 profile 固定审阅后的 libjava/libjvm 配对制品；只有实际测试完成才进入对应范围的支持清单。调用方通过构建 profile 或 `gw_jvm_jni_set_profile` 选择，未知族、无效散列、字段或方法不匹配均拒绝。
 
 注册前完整解析并核对全部符号、方法和字段；未知形态拒绝，不做有副作用的试调用。验证失败不能 fallback 为 bionic 加载 GNU DSO。保留事务式注册/回滚；无法恢复时丢弃进程。不要为了跨版本而删除散列检查后盲目放行。
 
-旧的 `GW_JRE17_LOAD_THREE_BOOL` 仅作为构建兼容输入保留。新接入使用 `GW_JVM_PROFILE_FAMILY` 或 v1 profile 的 family 字段，不能只按参数数量或 JRE 主版本选择。各族的准确值及生命周期见 [适配器接口](ADAPTER.md)。
+旧的 `GW_JRE17_*` 构建兼容输入与 JRE17 专用名称已删除。接入必须使用 `GW_JVM_PROFILE_FAMILY` 或 v2 profile 的 family 字段，不能只按参数数量或 JRE 主版本选择。各族的准确值及生命周期见 [适配器接口](ADAPTER.md)。
 
 ## 装载之外的必要检查
 

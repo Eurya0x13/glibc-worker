@@ -1,10 +1,17 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <jni.h>
 static _Atomic int count;
 static __thread int tls = 9;
 static _Atomic int *constructed, *destroyed;
 static void *memory;
+
+jint multi_dep_native(JNIEnv *env, jclass cls) {
+  (void)env;
+  (void)cls;
+  return 3456;
+}
 
 __attribute__((constructor)) static void init(void) {
   memory = malloc(32);

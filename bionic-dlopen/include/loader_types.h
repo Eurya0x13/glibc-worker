@@ -31,7 +31,8 @@ enum gw_loader_code {
   GW_E_VERSION,
   GW_E_HANDLE,
   GW_E_BUSY,
-  GW_E_BRIDGE
+  GW_E_BRIDGE,
+  GW_E_QUARANTINED
 };
 
 /* AUTO lets ELF classification pick the domain; GUEST asserts the GNU

@@ -20,6 +20,7 @@ cp "$runtime/libpthread.so.0" "$out/libguest_pthread.so"
 cp "$runtime/libm.so.6" "$out/libguest_math.so"
 mkdir -p "$out/include/internal" "$out/licenses"
 cp "$project/include/"*.h "$out/include/"
-cp "$project/common/"*.h "$out/include/internal/"
+cp "$project/src/common/"*.h "$out/include/internal/"
 cp "$GW_CORE_PROJECT/build/ffi-android/$GW_ABI/share/licenses/libffi/LICENSE" \
   "$out/licenses/libffi-LICENSE.txt"
+cp "$project/third_party/zig/LICENSE" "$out/licenses/zig-LICENSE.txt"

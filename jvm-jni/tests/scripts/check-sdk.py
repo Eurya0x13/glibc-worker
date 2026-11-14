@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 import shutil
 import subprocess
+from zipfile import ZipFile
 
 PROJECT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -23,6 +24,21 @@ for name in ("core", "dlopen", "android_jni", "jvm_jni"):
         shutil.rmtree(destination)
     shutil.copytree(getattr(args, name + "_prefix").resolve(), destination)
     prefixes.append(str(destination))
+
+jvm_prefix = Path(prefixes[3])
+assert not (
+    jvm_prefix / "include/glibc-worker/jvm-jni/jre17_adapter.h"
+).exists()
+header = Path(prefixes[2]) / "include/glibc-worker/android-jni/host_bridge.h"
+assert "GW_HOST_LEGACY_JRE17" not in header.read_text()
+symbols = subprocess.check_output(
+    ["readelf", "-Ws", str(jvm_prefix / "lib/libgw_jvm_jni.so")], text=True
+)
+assert "gw_jre17_adapter_" not in symbols
+with ZipFile(
+    jvm_prefix / "share/glibc-worker/jvm-jni/jvm-jni-helpers.jar"
+) as jar:
+    assert "dev/glibc/worker/Jre17Adapter.class" not in jar.namelist()
 commands = [
     [
         "cmake",

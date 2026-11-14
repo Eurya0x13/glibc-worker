@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include "full_bridge.h"
 #include "lab_suite.h"
+#include "jre-layout.h"
 #include "loader_image.h"
 #include <elf.h>
 #include <errno.h>
@@ -20,11 +21,25 @@
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+#if GW_RPC_PROFILE
+/* This harness is a separate DSO. Header-only event instrumentation uses its
+   own unassigned TLS, never the runtime DSO's private diagnostic state. */
+_Thread_local struct gw_rpc_row *gw_rpc_current
+    __attribute__((visibility("hidden")));
+_Thread_local struct gw_rpc_scope *gw_rpc_scope_current
+    __attribute__((visibility("hidden")));
+#endif
 extern int app_host_callback(int value);
 extern void app_host_jni_dispatch(struct shared *s);
 extern JNIEnv *app_host_jni_env(void);
 extern long launch_guest(unsigned long flags, void *sp, void *entry);
 static __thread int host_marker = 61;
+
+static void *foreign_shutdown(void *arg) {
+  (void)arg;
+  return (void *)(uintptr_t)(full_host_shutdown() == JNI_ERR &&
+                             full_host_state() == GW_HOST_READY);
+}
 
 static void *host_child(void *arg) {
   (void)arg;
@@ -74,12 +89,17 @@ int worker_host_main(int argc, char **argv) {
   require(snprintf(catalog, sizeof catalog, "%s/guest-images.tsv", argv[6]) <
               (int)sizeof catalog,
           "lab image policy paths");
+  char actual_libjava[PATH_MAX];
+  require(snprintf(actual_libjava, sizeof actual_libjava, "%s/%s", argv[6],
+                   JRE_LIBJAVA_PATH) < (int)sizeof actual_libjava,
+          "actual JRE libjava path");
   struct gw_host_bridge_config config = {
-      .abi_version = GW_HOST_BRIDGE_CONFIG_V1,
+      .abi_version = GW_HOST_BRIDGE_CONFIG_V2,
       .struct_size = sizeof config,
-      .flags = GW_HOST_LEGACY_JRE17,
+      .flags = GW_HOST_VM_ADAPTER,
       .native_directory = argv[2],
-      .image_catalog = catalog};
+      .image_catalog = catalog,
+      .jre_library_path = actual_libjava};
   char copy_marker[PATH_MAX];
   require(
       snprintf(copy_marker, sizeof copy_marker, "%s/array-copy-cache-enabled",
@@ -97,6 +117,9 @@ int worker_host_main(int argc, char **argv) {
   }
   require(full_host_start(s, app_host_jni_env(), &config) == JNI_OK,
           "Host bridge and loader configuration");
+  require(full_host_state() == GW_HOST_STARTED &&
+              full_host_start(s, app_host_jni_env(), &config) == JNI_ERR,
+          "one runtime per process");
   struct full_bridge *bridge = (struct full_bridge *)s->full_bridge;
   snprintf(bridge->module_path, sizeof bridge->module_path,
            "%s/libguest_conformance.so", argv[2]);
@@ -270,9 +293,27 @@ int worker_host_main(int argc, char **argv) {
              host_thread_ok && s->guest_libc_found && h1 > h0 && jni_ok &&
              !full_rc;
 
+  pthread_t foreign;
+  void *refused = NULL;
+  require(!pthread_create(&foreign, NULL, foreign_shutdown, NULL),
+          "foreign shutdown probe");
+  require(!pthread_join(foreign, &refused) && refused == (void *)(uintptr_t)1,
+          "foreign shutdown refused without an attached JNIEnv");
   if (full_host_shutdown() != JNI_OK) {
     return 1;
   }
+  int lifecycle_ok = full_host_state() == GW_HOST_STOPPED &&
+                     full_host_shutdown() == JNI_ERR &&
+                     full_host_ready() == JNI_ERR &&
+                     full_host_start(s, app_host_jni_env(), &config) == JNI_ERR;
+  printf(
+      "RUNTIME_LIFECYCLE_TEST {\"result\":\"%s\",\"singleton\":true,"
+      "\"foreign_shutdown_refused\":true,\"stopped\":%s,"
+      "\"restart_refused\":%s}\n",
+      lifecycle_ok ? "PASS" : "FAIL",
+      full_host_state() == GW_HOST_STOPPED ? "true" : "false",
+      lifecycle_ok ? "true" : "false");
+  good = good && lifecycle_ok;
   atomic_store(&s->stop, 1);
   char task[128];
   snprintf(task, sizeof task, "/proc/self/task/%ld", tid);

@@ -6,6 +6,11 @@ eval "$(python3 scripts/target.py --shell)"
 ndk=$(python3 scripts/target.py --ndk)
 ccndk="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${GW_NDK_TRIPLET}29-clang"
 contexts=${GW_CONTEXTS:-16}
+binding_backend=${GW_BINDING_BACKEND:-zig}
+[[ $binding_backend == zig ]] || {
+  echo 'The C resource backend was removed; GW_BINDING_BACKEND must be zig' >&2
+  exit 2
+}
 
 [[ $contexts =~ ^[1-9][0-9]*$ && $contexts -ge 2 && $contexts -le 256 ]] || {
   echo 'GW_CONTEXTS must be between 2 and 256' >&2
@@ -79,7 +84,12 @@ build_project() {
   GW_PROJECT_BUILD="$project_build" "$project/build.sh" "${cmake_args[@]}" \
     -DCMAKE_INSTALL_PREFIX="$project_build/install" \
     -DCMAKE_PREFIX_PATH="$prefix_path" "$@"
-  cmake --install "$project_build"
+  # Recreate only this generated SDK prefix, so deleted public headers and
+  # helper classes cannot survive an incremental source/API migration.
+  rm -rf "$project_build/install.next"
+  cmake --install "$project_build" --prefix "$project_build/install.next"
+  rm -rf "$project_build/install"
+  mv "$project_build/install.next" "$project_build/install"
   prefix_path="$project_build/install${prefix_path:+;$prefix_path}"
 }
 
@@ -96,6 +106,7 @@ fi
 if ((level >= 2)); then
   android-jni/scripts/prepare-build.sh "$ndk" "$ccndk"
   build_project android-jni \
+    -DGW_BINDING_BACKEND="$binding_backend" \
     -DGW_JNI_INCLUDE_DIR="$PWD/android-jni/build/jni-include" \
     -DGW_FFI_INCLUDE_DIR="$PWD/core/build/ffi-android/$GW_ABI/include" \
     -DGW_FFI_LIBRARY="$PWD/core/build/ffi-android/$GW_ABI/lib/libffi.a" \
@@ -110,6 +121,7 @@ if ((level >= 3)); then
 fi
 
 printf '%s\n' "abi=$GW_ABI" "projects=$module" "contexts=$contexts" \
+  "binding_backend=$binding_backend" \
   "rpc_profile=$rpc_profile" "rpc_spin_ns=$rpc_spin_ns" \
   "futex_wake_filter=$wake_filter" "rpc_ready_poll=$ready_poll" >"$out/build.properties"
 (

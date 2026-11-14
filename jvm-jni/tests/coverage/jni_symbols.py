@@ -21,7 +21,7 @@ public class SignatureFixture {
     }
 }
 """
-checks = """import dev.glibc.worker.Jre17Adapter;
+checks = """import dev.glibc.worker.JvmAdapter;
 import regression_names.SignatureFixture;
 import java.nio.file.*;
 import java.util.Objects;
@@ -30,7 +30,7 @@ public class SignatureChecks {
         int count = 0;
         for (String row : Files.readAllLines(Paths.get(args[0]))) {
             String[] fields = row.split("\\t");
-            String actual = Jre17Adapter.nativeSignature(fields[0], SignatureFixture.class);
+            String actual = JvmAdapter.nativeSignature(fields[0], SignatureFixture.class);
             if (!fields[1].equals(actual))
                 throw new AssertionError(fields[0] + " expected=" + fields[1] + " actual=" + actual);
             count++;
@@ -40,7 +40,7 @@ public class SignatureChecks {
             "Java_regression_1names_SignatureFixture__1overloaded",
             "not_a_JNI_symbol"
         }) {
-            if (Jre17Adapter.nativeSignature(symbol, SignatureFixture.class) != null)
+            if (JvmAdapter.nativeSignature(symbol, SignatureFixture.class) != null)
                 throw new AssertionError("Expected unresolved short name: " + symbol);
             count++;
         }
@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="jni-symbols-", dir=scratch) as name:
     headers.mkdir()
     classes = work / "classes"
     classes.mkdir()
-    helpers = ROOT / "android-jni/java/dev/glibc/worker"
+    helpers = ROOT / "android-jni/src/java/dev/glibc/worker"
     subprocess.run(
         [
             "javac",
@@ -72,8 +72,7 @@ with tempfile.TemporaryDirectory(prefix="jni-symbols-", dir=scratch) as name:
             str(classes),
             str(source),
             str(work / "SignatureChecks.java"),
-            str(ROOT / "jvm-jni/java/dev/glibc/worker/Jre17Adapter.java"),
-            str(ROOT / "jvm-jni/java/dev/glibc/worker/JvmAdapter.java"),
+            str(ROOT / "jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java"),
             str(helpers / "GuestImages.java"),
             str(helpers / "BridgeTypes.java"),
         ],

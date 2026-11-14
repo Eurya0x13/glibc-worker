@@ -1,0 +1,16 @@
+Test launcher adaptation
+
+pojav_jli.c adapts the JLI_Launch call and prototype from PojavLauncher
+commit b12ad048157b3aa255d078c235dd4571e1900309, jre_launcher.c.
+The Oracle copyright and GPL version 2 with Classpath exception header is
+retained in that file. The remaining subprocess baseline, argument ownership
+and reporting code was added for this project's test harness.
+
+jre_host.c follows the preload/layout sequence in JREUtils.java and utils.c;
+this is test-only startup scaffolding, not a packaged Pojav integration.
+Exact upstream source paths and hashes are in tests/config/pojav-startup.json.
+
+LICENSE contains GPL version 2 with the Classpath exception, from java.base
+legal/LICENSE in the pinned angelaura-21-arm64 archive. That archive's identity
+is recorded in tests/config/android-jres.json. The test APK also includes the
+selected JRE's own legal files.
