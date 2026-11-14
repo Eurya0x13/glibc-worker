@@ -14,7 +14,7 @@ transport 的 load/close/find/current-module 不规定 JavaVM、JNIEnv 或 JNI �
 
 AUTO 根据 ELF GNU 标记分类；显式 GUEST 需要调用者确认 ABI。GW_PASS 允许原平台继续；GW_ERROR 表示 Guest 操作失败，不得用同一 GNU 文件盲目尝试 bionic loader。已经退休的 Guest tag 仍由 owns_handle 识别，避免错误 fallback。
 
-同一设备/inode 不能重复活跃打开。加载失败回滚模块状态；代数让旧句柄在槽位重用后仍被拒绝。固定槽容量是 32，不是无限运行时命名空间。
+同一设备/inode 不能重复活跃打开。安全完成的加载失败回滚模块状态；代数让旧句柄在槽位重用后仍被拒绝。固定槽容量是 32，不是无限运行时命名空间。
 
 ## 并发和关闭
 
@@ -22,9 +22,17 @@ AUTO 根据 ELF GNU 标记分类；显式 GUEST 需要调用者确认 ABI。GW_P
 
 有模块正在加载、运行或关闭时，stop 不能成功。观察器在后端锁内被调用，只用于轻量计数；不得重入 loader 或执行阻塞工作。错误对象由调用方持有，路径和符号只在单次调用期间借用。
 
+## 不可恢复的清理失败
+
+transport 无法确认回滚或卸载安全时，调用 `gw_dlopen_quarantine()`。该状态不可撤销，`gw_dlopen_is_quarantined()` 可供宿主检查；本层不会终止进程。宿主必须停止使用该 Guest 桥并丢弃承载它的进程，不能在同进程重新配置或重试恢复。
+
+隔离后 Guest open/find/close、activate/configure/stop 返回 `GW_ERROR` 和 `GW_E_QUARANTINED`，enter 拒绝新借用。等待借用结束的 close 会被唤醒并退出，不再调用 teardown。出错事务保留 LOADING 或 CLOSING 槽及资源，不复用句柄；已有借用仍可 leave。普通平台句柄仍可 PASS，隔离不会把 GNU 库改交给 bionic。
+
+transport 仍须负责保留可能被 VM 或 Guest 线程引用的映像、入口和上下文。隔离不是终止后台线程、取消在途调用或阻止任意原生代码执行的沙箱；后台线程与缓存入口的同步要求仍然成立。
+
 ## 验证
 
-CTest 的 `loader_contract` 使用纯 C transport 检查事务、代数、忙碌关闭及停止约束，不宣称独立建立双 libc。真实 ELF 分类测试显式指定输入，不依赖固定上层路径：
+CTest 的 `loader_contract` 使用纯 C transport 检查事务、代数、忙碌关闭及停止约束；`quarantine_0..2` 检查失败装载、失败关闭与等待关闭中的终态隔离和资源保留。它们不宣称独立建立双 libc。真实 ELF 分类测试显式指定输入，不依赖固定上层路径：
 
 ```sh
 python3 tests/elf_route.py --libraries /path/to/test-dsos \

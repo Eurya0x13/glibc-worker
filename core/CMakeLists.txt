@@ -18,7 +18,7 @@ set_target_properties(core PROPERTIES OUTPUT_NAME glibc_worker_core)
 include(CTest)
 if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
-  foreach(probe wait_events rpc_handoff ready_poll runtime_patches)
+  foreach(probe wait_events rpc_handoff ready_poll runtime_patches audit_boundaries)
     add_test(NAME ${probe} COMMAND ${Python3_EXECUTABLE}
              ${CMAKE_CURRENT_SOURCE_DIR}/tests/${probe}.py)
   endforeach()

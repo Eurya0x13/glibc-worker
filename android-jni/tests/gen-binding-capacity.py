@@ -36,12 +36,35 @@ def main():
         f'    if (Class{i}.probe(31) != 31) throw new AssertionError("class {i}");'
         for i in range(320)
     ]
+    short_type, long_type = "B" * 221, "A" * 230
+    prefix = "conformance/ResourceCapacity$"
+    assert len("(L" + prefix + short_type + ";)V") == 255
+    assert len("L" + prefix + long_type + ";") > 255
+    descriptor_members = (
+        f"  public static final class {short_type} {{}}\n"
+        f"  public static final class {long_type} {{}}\n"
+        f"  private static void accepted({short_type} value) {{}}\n"
+        f"  private static void rejected({long_type} value) {{}}\n"
+        f"  private static {long_type} rejectedField;\n"
+        "  private static native boolean descriptorProbe(Object member, boolean field);\n"
+        "  public static int descriptorChecks;\n"
+    )
+    descriptor_calls = (
+        f'    if (!descriptorProbe(ResourceCapacity.class.getDeclaredMethod("accepted", {short_type}.class), false)) throw new AssertionError("255-byte method");\n'
+        f'    try {{ descriptorProbe(ResourceCapacity.class.getDeclaredMethod("rejected", {long_type}.class), false); throw new AssertionError("method truncation"); }} catch (IllegalArgumentException expected) {{}}\n'
+        '    try { descriptorProbe(ResourceCapacity.class.getDeclaredField("rejectedField"), true); throw new AssertionError("field truncation"); } catch (IllegalArgumentException expected) {}\n'
+        "    descriptorChecks = 3;\n"
+    )
     (java / "ResourceCapacity.java").write_text(
         "package conformance;\npublic final class ResourceCapacity {\n"
         "  public static int references;\n"
         + "\n".join(resource_classes)
-        + "\n  public static int verify() {\n"
+        + "\n"
+        + descriptor_members
+        + "\n  public static int verify() throws Exception {\n"
         + "\n".join(resource_calls)
+        + "\n"
+        + descriptor_calls
         + '\n    if (references != 20000) throw new AssertionError("reference capacity");\n'
         + "    return 320;\n  }\n}\n"
     )
@@ -59,6 +82,12 @@ def main():
     native.append("""
 /* Each nested class has a real VM registration, but shares the same Guest
    target/signature. This stresses class ownership separately from closures. */
+static jboolean descriptor_probe(JNIEnv *e, jclass cls, jobject member, jboolean field) {
+  (void)cls;
+  return field ? ((*e)->FromReflectedField(e, member) != NULL) :
+                 ((*e)->FromReflectedMethod(e, member) != NULL);
+}
+
 static int resource_capacity_register(JNIEnv *e) {
   JNINativeMethod probe = {"probe", "(I)I", (void *)binding_method0};
   for (int i = 0; i < 320; i++) {
@@ -72,6 +101,8 @@ static int resource_capacity_register(JNIEnv *e) {
   }
   jclass cls = (*e)->FindClass(e, "conformance/ResourceCapacity");
   if (!cls) return JNI_ERR;
+  JNINativeMethod descriptor = {"descriptorProbe", "(Ljava/lang/Object;Z)Z", (void *)descriptor_probe};
+  if ((*e)->RegisterNatives(e, cls, &descriptor, 1) != JNI_OK) return JNI_ERR;
   jobject *refs = calloc(20000, sizeof *refs);
   if (!refs) { (*e)->DeleteLocalRef(e, cls); return JNI_ERR; }
   int count = 0;

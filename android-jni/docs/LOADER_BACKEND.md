@@ -8,6 +8,7 @@
 | --- | --- |
 | `include/loader_backend.h` | v1 JNI 装载函数表、显式方法描述符和结构化错误 |
 | `host/loader_backend.c` | JNI 版本/描述符检查，转换 C transport 与 JNI 结果 |
+| `host/loader_transport.c`、`host/command.c` | 装卸载事务相位、异常保留和 RPC 命令提交 |
 | `include/host_bridge.h` | Host 配置与公共桥接生命周期 |
 | `include/jni_vm_adapter.h` | 可选 VM 扩展的注册、安装与恢复 |
 | `host/image_policy.c`、`GuestImages` | 按原始内容匹配已安装映像或显式使用直接路径 |
@@ -51,13 +52,25 @@ AUTO 分类损坏或不支持的 ELF 返回 IMAGE，分类器资源上限返回 
 
 当前进程只支持一次配置、一套 Guest 和一个目标 VM。初始化失败后的完整重试、GNU loader/libc 映射销毁与重建尚无通用 API；失败无法安全恢复时应结束隔离的宿主进程。shutdown 不替宿主调用 DestroyJavaVM。
 
+## 卸载与失败隔离
+
+正常 close 依次执行：Guest `JNI_OnUnload`（映像保持映射）、Host 注销该模块的 VM native 入口、Guest `dlclose`，最后释放跳板并清扫 ID。拒绝的 OnLoad 先撤回注册，再执行不含 OnUnload 的 ABORT，确认成功后才释放跳板。清理保留最初的 Java 异常，不用后续异常覆盖它。
+
+弱类提升发生 OOM、注册预留仍在途、`UnregisterNatives` 失败或 Guest 提交/清理命令失败时，桥进入永久 quarantine。尚可能被使用的注册记录、closure、映像和上下文保留；已成功完成的清理不回滚。返回 `GW_E_QUARANTINED`，宿主必须丢弃进程。桥不自动杀应用，也不允许在同进程恢复。注册在发布 VM 入口期间持有模块借用，CLOSING 或 quarantine 后拒绝新注册；已保留的跳板拒绝新的 Guest 调用。
+
+这不替代宿主对缓存入口和原生后台线程的同步，不能据此承诺任意并发卸载安全。桌面故障注入 `python3 android-jni/tests/audit.py` 使用生产 transport/command 和 VM/Guest 替身检查顺序、保留和异常语义；它与真机正常生命周期回归互补。
+
 ## JNI 能力协商
 
 桥实现 JNI1.6 基础表及 GetModule，最高声明 JNI10。Host 启动时取真实 VM 的 GetVersion，与桥上限协商；在空闲启动槽 10..12 中交换能力并等待 Guest 确认。未确认的 Guest 不能 ready，Host 与 Guest 必须成套部署，即使关闭诊断和通知过滤也不能跳过此握手。
 
+私有装载协议版本为 2：在同一空闲启动槽的 13..17 项确认协议、共享区大小和上下文数，确认后才激活 loader。旧版 Host/Guest 不能混装；该握手不改变共享 POD 布局，也不替代其他编译配置必须匹配的要求。
+
 Guest GetVersion 返回协商值，GetEnv 和 AttachCurrentThread 拒绝更高或未知的版本并清空输出指针。JNI_OnLoad 的返回值也在提交装载前按同一能力检查，失败走正常回滚。JRE8 宿主最高 JNI1.8，较新 Host 最高 JNI10；这不限制宿主 Java 字节码版本，但不提供 JNI19 及以后新增槽位。
 
 低于 JNI9 的宿主收到 GetModule 请求时抛 UnsupportedOperationException；不会读取宿主 JNI 表的第 233 槽。完整 ART 行为仍需独立验证。
+
+方法/字段描述符最多 255 字节正文。反射、ID 缓存、注册和命令入口检查长度后完整复制，拒绝超长类型信息；反射和命令路径抛 `IllegalArgumentException`。Host 命令重入深度耗尽抛 `StackOverflowError`，其他资源耗尽的异常语义尚未全部统一。
 
 ## 配置和兼容边界
 

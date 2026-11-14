@@ -56,7 +56,7 @@ else()
   message(FATAL_ERROR "GW_BINDING_BACKEND must be c or zig")
 endif()
 add_library(android_jni_objects OBJECT src/host/full_host.c src/host/references.c
-  src/host/bindings.c src/host/slot_allocator.c ${binding_backend} src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
+  src/host/bindings.c src/host/slot_allocator.c src/host/loader_transport.c src/host/command.c ${binding_backend} src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
 add_dependencies(android_jni_objects jni_tables)
 target_include_directories(android_jni_objects PRIVATE include src/common src/host src/guest
   ${CMAKE_CURRENT_BINARY_DIR} ${GW_JNI_INCLUDE_DIR} ${GW_FFI_INCLUDE_DIR})

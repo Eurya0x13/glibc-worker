@@ -5,6 +5,7 @@
 #include "jni_signature.h"
 #include "binding_table.h"
 #include "slot_store.h"
+#include "dlopen_backend.h"
 
 static pthread_mutex_t bindings_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t registrations_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -18,6 +19,15 @@ struct registered_class {
 
 static struct gw_slot_store *registrations;
 
+static void zero_native_result(const struct binding *binding, void *result) {
+  if (result && binding->ret != 'V') {
+    size_t size = binding->ret == 'F'   ? sizeof(jfloat)
+                  : binding->ret == 'D' ? sizeof(jdouble)
+                                        : sizeof(ffi_arg);
+    memset(result, 0, size);
+  }
+}
+
 /* The trampoline the VM actually calls for a registered native method: it
    translates one JNI call into an FB_NATIVE bridge command. jobject
    arguments are re-issued as Host handle tokens (H_LOCAL) so the Guest never
@@ -28,14 +38,24 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   (void)cif;
   struct binding *b = opaque;
   JNIEnv *env = *(JNIEnv **)values[0];
+  if (gw_dlopen_is_quarantined()) {
+    zero_native_result(b, result);
+    if (!(*env)->ExceptionCheck(env)) {
+      jclass error = (*env)->FindClass(env, "java/lang/UnsatisfiedLinkError");
+      if (error) {
+        (*env)->ThrowNew(env, error,
+                         "Guest bridge quarantined; discard process");
+        (*env)->DeleteLocalRef(env, error);
+      }
+    }
+    return; /* Do not reserve a context or start another Guest worker. */
+  }
   struct host_context *c = fh_context(env);
 
   if (!c) {
     /* A thread outside bridge management cannot have its call routed or
        attributed; return a zeroed result instead of throwing. */
-    if (result) {
-      memset(result, 0, 8);
-    }
+    zero_native_result(b, result);
     return;
   }
 
@@ -287,19 +307,30 @@ static void finish_registration(JNIEnv *env, uint64_t token, int published) {
 
 /* UnregisterNatives needs a strong jclass, so the weak ref is revived first;
    a cleared weak skips the unregister call but is still deleted. */
-void release_registrations(JNIEnv *env, uint64_t module) {
+int release_registrations(JNIEnv *env, uint64_t module) {
+  int result = JNI_OK;
   pthread_mutex_lock(&registrations_lock);
 
   for (size_t i = 0; i < gw_slot_capacity(registrations); i++) {
     uint64_t token;
     struct registered_class *record = gw_slot_at(registrations, i, &token);
     if (record && record->module == module) {
+      if (record->pending) {
+        result = JNI_ERR;
+        break;
+      }
       jobject cls = (*env)->NewLocalRef(env, record->clazz);
+      if (!cls && (*env)->ExceptionCheck(env)) {
+        result = JNI_ERR; /* OOM is different from a collected weak class. */
+        break;
+      }
       if (cls) {
-        if ((*env)->UnregisterNatives(env, (jclass)cls) != JNI_OK) {
-          atomic_fetch_add(&gw_host_bridge->errors, 1);
-        }
+        int rc = (*env)->UnregisterNatives(env, (jclass)cls);
         (*env)->DeleteLocalRef(env, cls);
+        if (rc != JNI_OK || (*env)->ExceptionCheck(env)) {
+          result = JNI_ERR;
+          break;
+        }
       }
       (*env)->DeleteWeakGlobalRef(env, record->clazz);
       gw_slot_erase(registrations, token);
@@ -307,24 +338,19 @@ void release_registrations(JNIEnv *env, uint64_t module) {
   }
 
   pthread_mutex_unlock(&registrations_lock);
+  if (result != JNI_OK) {
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+  }
+  return result;
 }
 
 /* The owning module is the calling guest when known; otherwise the Guest is
    asked which image owns fnPtr (FB_OWNER). fnPtr entries are swapped for
    trampoline addresses in a copy, so the caller's array is left unchanged;
    per the class-ownership rule above, a class may only register once. */
-jint fh_register(struct host_context *c, jclass cls,
-                 const JNINativeMethod *methods, jint n) {
-  if (n < 0 || n > 64) {
-    return JNI_ERR;
-  }
-
-  uint64_t owner = c->module;
-  if (!owner && n) {
-    owner = (uint64_t)fh_command(c, FB_OWNER, (uintptr_t)methods[0].fnPtr, NULL,
-                                 NULL)
-                .j;
-  }
+static jint register_owned(struct host_context *c, jclass cls,
+                           const JNINativeMethod *methods, jint n,
+                           uint64_t owner) {
   uint64_t registration = owner ? own_registration(c->env, cls, owner) : 0;
   if (!registration) {
     return JNI_ERR;
@@ -374,5 +400,25 @@ jint fh_register(struct host_context *c, jclass cls,
      VM these closures stay owned by the module, even on JNI_ERR. */
   jint result = (*c->env)->RegisterNatives(c->env, cls, copy, n);
   finish_registration(c->env, registration, 1);
+  return result;
+}
+
+jint fh_register(struct host_context *c, jclass cls,
+                 const JNINativeMethod *methods, jint n) {
+  if (n < 0 || n > 64) {
+    return JNI_ERR;
+  }
+
+  uint64_t owner = c->module;
+  if (!owner && n) {
+    owner = (uint64_t)fh_command(c, FB_OWNER, (uintptr_t)methods[0].fnPtr, NULL,
+                                 NULL)
+                .j;
+  }
+  if (!owner || !gw_loader_enter(owner)) {
+    return JNI_ERR; /* CLOSING/quarantined modules cannot publish VM entries. */
+  }
+  jint result = register_owned(c, cls, methods, n, owner);
+  gw_loader_leave(owner);
   return result;
 }

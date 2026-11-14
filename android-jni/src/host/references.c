@@ -250,8 +250,21 @@ const char *fh_describe(struct host_context *c, jobject member) {
 
   const char *p = (*env)->GetStringUTFChars(env, text, NULL);
   if (p) {
-    snprintf(sig, sizeof sig, "%s", p);
+    size_t length = strnlen(p, sizeof sig);
+    if (length < sizeof sig) {
+      memcpy(sig, p, length + 1);
+    }
     (*env)->ReleaseStringUTFChars(env, text, p);
+    if (length == sizeof sig) {
+      (*env)->DeleteLocalRef(env, text);
+      jclass error =
+          (*env)->FindClass(env, "java/lang/IllegalArgumentException");
+      if (error) {
+        (*env)->ThrowNew(env, error, "JNI descriptor exceeds bridge capacity");
+        (*env)->DeleteLocalRef(env, error);
+      }
+      return sig;
+    }
   }
   (*env)->DeleteLocalRef(env, text);
   return sig;

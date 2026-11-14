@@ -76,6 +76,12 @@ public final class Runner {
       if (classes != 320 || references != 20000) {
         throw new AssertionError("Resource capacity or invocation failure");
       }
+      int descriptorChecks = resources.getField("descriptorChecks").getInt(null);
+      if (descriptorChecks != 3) {
+        throw new AssertionError("Descriptor boundary checks incomplete");
+      }
+      System.out.println(
+          "AUDIT_DESCRIPTOR_TEST {\"cycle\":" + cycle + ",\"checks\":" + descriptorChecks + "}");
       System.out.println("RESOURCE_CAPACITY_TEST {\"cycle\":" + cycle + ",\"classes\":" + classes
           + ",\"references\":" + references + "}");
       System.out.println("BINDING_CAPACITY_TEST {\"cycle\":" + cycle + ",\"methods\":" + methods

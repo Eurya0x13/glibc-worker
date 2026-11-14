@@ -4,8 +4,9 @@
 #include "full_protocol.h"
 
 /* Implemented by the JNI/RPC bridge. load() includes OnLoad validation,
-   COMMIT or ABORT and registration/closure rollback. close() returns JNI_ERR
-   only if it could not start; a completed close never resurrects a module. */
+   COMMIT or ABORT and registration/closure rollback. close() prepares OnUnload,
+   retires VM entries, then dlcloses. Uncertain cleanup quarantines the bridge
+   and retains reachable resources; the host must discard the process. */
 struct gw_guest_transport {
   jint (*load)(JNIEnv *, uint64_t, const char *image, struct gw_loader_error *);
   int (*close)(JNIEnv *, uint64_t, struct gw_loader_error *);

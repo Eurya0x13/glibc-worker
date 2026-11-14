@@ -10,10 +10,12 @@
  * cross-arch fallback. */
 #if defined(__aarch64__) || defined(GW_CLASSIFY_AARCH64)
 #define GW_ARCH_NAME "arm64-v8a"
+#define GW_ARCH_PLATFORM "aarch64"
 #define GW_ELF_MACHINE EM_AARCH64
 #define GW_LOADER_NAME "ld-linux-aarch64.so.1"
 #elif defined(__x86_64__)
 #define GW_ARCH_NAME "x86_64"
+#define GW_ARCH_PLATFORM "x86_64"
 #define GW_ELF_MACHINE EM_X86_64
 #define GW_LOADER_NAME "ld-linux-x86-64.so.2"
 #else

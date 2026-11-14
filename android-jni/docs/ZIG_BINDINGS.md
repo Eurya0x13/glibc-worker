@@ -50,11 +50,11 @@ ID 的类身份仍以 JNI `IsSameObject` 判断，不能把 jobject 地址当作
 
 插入先预留索引、owner 数组和块空间，再发布对象/令牌；失败不产生半成品成员关系。存活对象存在时拒绝销毁 store。空块保留至 store 销毁，以避免重置代数；删除不立即缩减峰值容量。
 
-引用槽位分配失败时原始 VM 引用仍属于 C 调用方：native 参数可能是借用的 local，不能由存储层随意删除。生成的 `NewGlobalRef` / `NewWeakGlobalRef` 包装会在 token 分配失败后删除刚创建的 VM 引用。ID 插入失败也删除本次新建的 weak class 引用。描述符在 ID 和 binding 插入前检查长度，不把截断结果作为有效键；反射描述及命令路径的剩余长度问题见工作区审计。
+引用槽位分配失败时原始 VM 引用仍属于 C 调用方：native 参数可能是借用的 local，不能由存储层随意删除。生成的 `NewGlobalRef` / `NewWeakGlobalRef` 包装会在 token 分配失败后删除刚创建的 VM 引用。ID 插入失败也删除本次新建的 weak class 引用。描述符在反射、命令、ID 和 binding 插入前检查长度，不把截断结果作为有效键。
 
 `RegisterNatives` 在交给 VM 前失败，会撤回本批新建 binding 和未发布的类所有权预留。并发预留通过 pending 计数区分；不会撤回其他已发布或仍在准备的注册。VM 返回 `JNI_ERR` 后可能已经发布部分入口，记录与 closure 保留至模块清理。类记录使用 weak 引用，不主动固定 ClassLoader。
 
-释放仍要求 VM 不会再次进入旧入口，且 Guest 后台工作已经停止。在途计数不能保护尚未进入 closure 的 VM 线程。`UnregisterNatives` 失败后的隔离和生命周期错误恢复仍需专项处理；不能用扩容测试证明任意并发卸载安全。
+释放仍要求 VM 不会再次进入旧入口，且 Guest 后台工作已经停止。在途计数不能保护尚未进入 closure 的 VM 线程。`UnregisterNatives` 或其他不确定清理失败会保留可能仍被引用的资源并永久停用桥，由宿主丢弃进程，见 [装载契约](LOADER_BACKEND.md)。不能用扩容测试证明任意并发卸载安全。
 
 ## 验证
 
@@ -73,6 +73,6 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --reuse-apk --apk APK --output OUT
 
 本机验证包括 8,192 个存储 binding、4,096 个生产 binding、扩容期间旧入口的 10,000 次并发调用、1,024 个注册类、32,768 个同时存活引用、类语义身份去重/回收、帧释放、陈旧令牌和缩小代数上限后的永久退役。binding 和槽位分别注入 40/48 个分配失败位置场景，并检查最终资源平衡；C 对照检查各固定上限。
 
-Android 固定 JRE17 / ARM64 夹具每轮调用 1,024 个不同 JNI 方法、为 320 个不同类实际注册 native，并同时创建/释放 20,000 个 global 引用。三个 ClassLoader 周期分别输出 JSON `BINDING_CAPACITY_TEST` / `RESOURCE_CAPACITY_TEST`，任何一轮缺失、返回值错误或退出后引用/closure 未归零都会使覆盖失败。它不等于所有 Android JRE、ART 或所有模组已验证。
+Android 固定 JRE17 / ARM64 夹具每轮调用 1,024 个不同 JNI 方法、为 320 个不同类实际注册 native，并同时创建/释放 20,000 个 global 引用。三个 ClassLoader 周期分别输出 JSON `BINDING_CAPACITY_TEST` / `RESOURCE_CAPACITY_TEST`，额外通过 `AUDIT_DESCRIPTOR_TEST` 验证 255 字节反射方法描述符接受及超长方法/字段描述符拒绝。任何一轮缺失、返回值错误或退出后引用/closure 未归零都会使覆盖失败。它不等于所有 Android JRE、ART 或所有模组已验证。
 
 当前结论为 GO：可以继续使用可选 Zig Host 资源后端。默认后端仍为 C；本轮未测量性能收益。原始结果与 APK 散列写入各项目 `build/`，不把运行日志混入开发者文档。

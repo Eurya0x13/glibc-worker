@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "wait_event.h"
+#include "rpc_sequence.h"
 #ifndef FB_CONTEXTS
 #define FB_CONTEXTS 16
 #endif
@@ -79,7 +80,8 @@ enum {
   FB_LOOKUP,
   FB_ABORT_LOAD,
   FB_COMMIT_LOAD,
-  FB_OWNER
+  FB_OWNER,
+  FB_PREPARE_UNLOAD
 };
 
 /* Diagnostic bootstrap only: call[0] is idle until loader activation. These
@@ -95,4 +97,38 @@ enum {
  * is mandatory even when diagnostic profiling and wake filtering are off. */
 #define FB_JNI_HELLO 0x47574a48
 #define FB_JNI_ACK 0x47574a41
+/* Mandatory private loader protocol: v2 splits OnUnload and final dlclose.
+   Use idle bootstrap args, preserving shared POD layout. Publish the ACK with
+   the existing release/acquire phase-ready edge before any module can open. */
+#define FB_LOADER_PROTOCOL 2
+#define FB_LOADER_HELLO 0x47574c48
+#define FB_LOADER_ACK 0x47574c41
+
+static inline void fb_loader_offer(struct fb_call *hello) {
+  hello->args[13].j = FB_LOADER_HELLO;
+  hello->args[14].j = FB_LOADER_PROTOCOL;
+  hello->args[15].j = 0;
+  hello->args[16].j = sizeof(struct full_bridge);
+  hello->args[17].j = FB_CONTEXTS;
+}
+
+static inline int fb_loader_matches(const struct fb_call *hello) {
+  return hello->args[13].j == FB_LOADER_HELLO &&
+         hello->args[14].j == FB_LOADER_PROTOCOL &&
+         hello->args[16].j == sizeof(struct full_bridge) &&
+         hello->args[17].j == FB_CONTEXTS;
+}
+
+static inline int fb_loader_acknowledge(struct fb_call *hello) {
+  hello->args[15].j = 0;
+  if (!fb_loader_matches(hello)) {
+    return 0;
+  }
+  hello->args[15].j = FB_LOADER_ACK;
+  return 1;
+}
+
+static inline int fb_loader_accepted(const struct fb_call *hello) {
+  return fb_loader_matches(hello) && hello->args[15].j == FB_LOADER_ACK;
+}
 #endif

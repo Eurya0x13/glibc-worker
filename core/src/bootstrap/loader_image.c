@@ -12,6 +12,8 @@
 #include "loader_image.h"
 #include "arch.h"
 
+enum { BOOTSTRAP_AUX_CAPACITY = 24 };
+
 static void die(const char *msg) {
   perror(msg);
   exit(1);
@@ -135,6 +137,30 @@ static uintptr_t copy_string(uintptr_t *cursor, const char *s) {
   return *cursor;
 }
 
+/* Validate every argument and the worst-case auxv/alignment budget before
+   touching caller memory. String inputs must remain stable during the call. */
+static void validate_stack(void *stack, size_t size, char **args, size_t argc) {
+  require(stack && args && argc >= 1 && argc <= 16,
+          "startup arguments must contain 1..16 entries");
+  require((uintptr_t)stack <= UINTPTR_MAX - size,
+          "startup stack address overflow");
+  const size_t reserved = 4096;
+  const size_t words = 1 + argc + 1 + 2 + 1 + BOOTSTRAP_AUX_CAPACITY * 2;
+  const size_t frame = words * sizeof(uintptr_t) + 16 + 15;
+  require(size >= reserved && size - reserved >= frame,
+          "startup stack capacity");
+  size_t remaining = size - reserved - frame;
+  const char *fixed[] = {"LC_ALL=C", "GLIBC_TUNABLES=glibc.pthread.rseq=0",
+                         GW_ARCH_PLATFORM};
+  for (size_t i = 0; i < argc + 3; i++) {
+    const char *text = i < argc ? args[i] : fixed[i - argc];
+    require(text != NULL, "startup argument is NULL");
+    size_t length = strnlen(text, remaining);
+    require(length < remaining, "startup strings exceed stack capacity");
+    remaining -= length + 1;
+  }
+}
+
 /* Builds the initial frame top-down: strings, 16 AT_RANDOM bytes, then the
  * argc/argv/envp/auxv word block, ending at a 16-byte-aligned sp. The
  * stack region must be writable for its whole extent. The trailing require
@@ -142,6 +168,10 @@ static uintptr_t copy_string(uintptr_t *cursor, const char *s) {
  * loader's earliest call frames. */
 void *gw_bootstrap_stack(struct gw_bootstrap_image l, void *stack, size_t size,
                          char **args, size_t argc) {
+  validate_stack(stack, size, args, argc);
+  unsigned char entropy[16];
+  require(getrandom(entropy, sizeof entropy, 0) == sizeof entropy,
+          "random auxv");
   uintptr_t cur = (uintptr_t)stack + size, av[16], env[3];
 
   for (size_t i = 0; i < argc; i++) {
@@ -149,19 +179,13 @@ void *gw_bootstrap_stack(struct gw_bootstrap_image l, void *stack, size_t size,
   }
   env[0] = copy_string(&cur, "LC_ALL=C");
   env[1] = copy_string(&cur, "GLIBC_TUNABLES=glibc.pthread.rseq=0");
-  uintptr_t platform = copy_string(&cur,
-#if defined(__aarch64__)
-                                   "aarch64"
-#else
-                                   "x86_64"
-#endif
-  );
+  uintptr_t platform = copy_string(&cur, GW_ARCH_PLATFORM);
 
   cur -= 16;
   uintptr_t random = cur;
-  require(getrandom((void *)random, 16, 0) == 16, "random auxv");
+  memcpy((void *)random, entropy, sizeof entropy);
 
-  Elf64_auxv_t aux[24];
+  Elf64_auxv_t aux[BOOTSTRAP_AUX_CAPACITY];
   size_t n = 0;
 #define AUX(k, v) \
   (aux[n++] = (Elf64_auxv_t){.a_type = (k), .a_un.a_val = (uintptr_t)(v)})
@@ -200,6 +224,6 @@ void *gw_bootstrap_stack(struct gw_bootstrap_image l, void *stack, size_t size,
   *w++ = 0;
   memcpy(w, aux, n * sizeof *aux);
 
-  require((uintptr_t)sp > (uintptr_t)stack + 4096, "startup stack space");
+  require((uintptr_t)sp >= (uintptr_t)stack + 4096, "startup stack space");
   return sp;
 }

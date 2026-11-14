@@ -11,13 +11,14 @@ import time
 import zipfile
 from pathlib import Path
 
+from evidence import RunEvidence
 from check import verify
 from payload import payload_points, verify_payload
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main():
+def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--group", choices=("smoke", "coverage"), required=True)
     parser.add_argument("--device", required=True)
@@ -62,7 +63,10 @@ def main():
         help="Skip installation after verifying installed APK hash",
     )
     parser.add_argument("--timeout", type=int, default=600)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def execute(args, output, attempt):
 
     adb = ["adb", "-s", args.device]
     abi = subprocess.check_output(
@@ -78,11 +82,6 @@ def main():
             raise SystemExit(
                 "--native-jar requires coverage without --benchmark"
             )
-
-    output = (
-        args.output or ROOT / "jvm-jni/build/test-results" / args.group
-    ).resolve()
-    output.mkdir(parents=True, exist_ok=True)
 
     measured = args.benchmark or args.payload_benchmark
     if args.payload_diagnostic and not args.payload_benchmark:
@@ -156,22 +155,8 @@ def main():
         )
 
     apk_hash = hashlib.sha256(apk.read_bytes()).hexdigest()
-    if args.installed:
-        remote = (
-            subprocess.check_output(
-                adb + ["shell", "pm", "path", "dev.glibc.worker"], text=True
-            )
-            .strip()
-            .removeprefix("package:")
-        )
-        actual = subprocess.check_output(
-            adb + ["shell", "sha256sum", remote], text=True
-        ).split()[0]
-        if actual != apk_hash:
-            raise SystemExit(
-                "Installed APK differs from the selected test build"
-            )
-    else:
+    attempt.update(abi=abi, apk_sha256=apk_hash)
+    if not args.installed:
         subprocess.run(
             [
                 "android",
@@ -184,6 +169,20 @@ def main():
             cwd=ROOT,
             check=True,
         )
+
+    remote = (
+        subprocess.check_output(
+            adb + ["shell", "pm", "path", "dev.glibc.worker"], text=True
+        )
+        .strip()
+        .removeprefix("package:")
+    )
+    actual = subprocess.check_output(
+        adb + ["shell", "sha256sum", remote], text=True
+    ).split()[0]
+    if actual != apk_hash:
+        raise SystemExit("Installed APK differs from the selected test build")
+    attempt.update(installed_apk_sha256=actual)
 
     subprocess.run(
         adb
@@ -377,6 +376,7 @@ def main():
             )
             evidence["abi"] = abi
             evidence["apk_sha256"] = apk_hash
+            evidence["installed_apk_sha256"] = actual
 
             cache = re.search(
                 r"ARRAY_COPY_CACHE enabled=([01]) min_bytes=(\d+) max_bytes=(\d+) ",
@@ -484,9 +484,7 @@ def main():
                     json.dumps(rows, indent=2) + "\n"
                 )
 
-            (output / "summary.json").write_text(
-                json.dumps(evidence, indent=2) + "\n"
-            )
+            attempt.finish(evidence)
             print(args.group + ": PASS; evidence=" + str(output))
             return
 
@@ -507,6 +505,15 @@ def main():
     )
     (output / "timeout-report.txt").write_text(partial.stdout)
     raise SystemExit("Timed out; no final test result")
+
+
+def main():
+    args = arguments()
+    output = (
+        args.output or ROOT / "jvm-jni/build/test-results" / args.group
+    ).resolve()
+    with RunEvidence(output, group=args.group, device=args.device) as attempt:
+        execute(args, output, attempt)
 
 
 if __name__ == "__main__":

@@ -12,8 +12,15 @@ static struct full_bridge counters;
 struct full_bridge *gw_host_bridge = &counters;
 static _Thread_local struct host_context context;
 static int exception_pending, register_calls, reject_registration;
-static int closure_failure = -1, weak_failure;
+static int closure_failure = -1, weak_failure, local_failure,
+           unregister_failure;
 static size_t registration_weaks;
+static int quarantined, context_calls;
+
+int gw_dlopen_is_quarantined(void) {
+  return quarantined;
+}
+
 static size_t allocation_attempts, fail_at = SIZE_MAX, outstanding;
 static size_t injected_failures;
 
@@ -88,6 +95,10 @@ static void delete_weak(JNIEnv *env, jweak object) {
 
 static jobject local_ref(JNIEnv *env, jobject object) {
   (void)env;
+  if (local_failure) {
+    exception_pending = 1;
+    return NULL;
+  }
   return object;
 }
 
@@ -103,7 +114,7 @@ static jint register_methods(JNIEnv *env, jclass cls,
 static jint unregister_methods(JNIEnv *env, jclass cls) {
   (void)env;
   (void)cls;
-  return JNI_OK;
+  return unregister_failure ? JNI_ERR : JNI_OK;
 }
 
 static const struct JNINativeInterface_ vm = {
@@ -122,6 +133,7 @@ static const struct JNINativeInterface_ vm = {
 static JNIEnv env = &vm;
 
 struct host_context *fh_context(JNIEnv *environment) {
+  context_calls++;
   context.env = environment;
   return &context;
 }
@@ -343,6 +355,13 @@ static void production_backend(void) {
   assert(!pthread_join(thread, NULL));
   assert(make_binding(21, 1, "(J)J", &error) == first);
   invoke(first);
+  int prior_contexts = context_calls;
+  quarantined = 1;
+  typedef jlong (*native_fn)(JNIEnv *, jobject, jlong);
+  assert(((native_fn)first->code)(&env, NULL, 5) == 0);
+  assert(exception_pending && context_calls == prior_contexts &&
+         !atomic_load(&first->active));
+  quarantined = exception_pending = 0;
   if (!GW_TEST_ZIG) {
     assert(!make_binding(21, 513, "(J)J", &error));
     assert(error.code == GW_E_CAPACITY);
@@ -390,7 +409,18 @@ static void production_backend(void) {
   context.module = 23;
   assert(fh_register(&context, (jclass)(uintptr_t)7, methods, 3) == JNI_ERR);
   context.module = 22;
-  release_registrations(&env, 22);
+  size_t retained_weaks = registration_weaks;
+  local_failure = 1;
+  assert(release_registrations(&env, 22) == JNI_ERR);
+  assert(exception_pending && registration_weaks == retained_weaks);
+  assert(atomic_load(&counters.live_closures) == 3);
+  local_failure = exception_pending = 0;
+  unregister_failure = 1;
+  assert(release_registrations(&env, 22) == JNI_ERR);
+  assert(registration_weaks == retained_weaks &&
+         atomic_load(&counters.live_closures) == 3);
+  unregister_failure = 0;
+  assert(release_registrations(&env, 22) == JNI_OK);
   release_bindings(22);
   fh_bindings_finish();
   assert(!registration_weaks && !atomic_load(&counters.live_closures));
@@ -402,7 +432,7 @@ int main(void) {
   store_failures();
   production_backend();
   assert(atomic_load(&counters.errors) ==
-         1); /* Expected busy rejection only. */
+         3); /* Busy rejection, weak promotion OOM, unregister failure. */
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\","
       "\"store_bindings\":8192,\"production_bindings\":%d,"

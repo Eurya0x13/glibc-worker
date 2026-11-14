@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "protocol.h"
 #include "host_internal.h"
+#include "dlopen_backend.h"
 #include "jni_vm_adapter.h"
 #include "image_policy.h"
 
@@ -39,6 +40,7 @@ static int jni_prepare(struct shared *shared, JNIEnv *env) {
   struct fb_call *hello = &gw_host_bridge->ctx[0].call[0];
   hello->args[10].j = FB_JNI_HELLO;
   hello->args[11].i = gw_host_jni_version;
+  fb_loader_offer(hello);
   return JNI_OK;
 }
 
@@ -274,12 +276,6 @@ static int metrics_accept(void) {
   return 1;
 }
 #endif
-static jint transport_load(JNIEnv *, uint64_t, const char *,
-                           struct gw_loader_error *);
-static int transport_close(JNIEnv *, uint64_t, struct gw_loader_error *);
-static int transport_find(JNIEnv *, uint64_t, const char *, const char *,
-                          void **, struct gw_loader_error *);
-
 static uint64_t transport_current_module(JNIEnv *env) {
   (void)env;
   return gw_host_current ? gw_host_current->module : 0;
@@ -340,6 +336,9 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
    helper contexts (origin set) clean themselves up elsewhere. */
 static void context_destructor(void *ptr) {
   struct host_context *c = ptr;
+  if (gw_dlopen_is_quarantined()) {
+    return; /* Context/resources stay pinned. */
+  }
   if (!gw_host_bridge || !atomic_load(&gw_host_bridge->running) || !c ||
       c->id == 0) {
     return;
@@ -376,6 +375,9 @@ static void context_destructor(void *ptr) {
    Exhaustion is counted once and returns NULL; callers translate that into
    a load failure. */
 struct host_context *fh_context(JNIEnv *env) {
+  if (gw_dlopen_is_quarantined()) {
+    return NULL;
+  }
   if (gw_host_current) {
     gw_host_current->env = env;
     return gw_host_current;
@@ -434,94 +436,6 @@ struct host_context *fh_context(JNIEnv *env) {
            syscall(SYS_gettid));
   }
   return NULL;
-}
-
-/* Post one fb_call at the current nesting depth and block for its reply.
-   Re-entrant by design: a native call may re-enter Java and issue deeper
-   commands, each on its own call[] slot, bounded by FB_DEPTH. While blocked
-   the thread pumps its own inbound JNI callbacks via full_host_poll, so the
-   Guest is never stalled waiting on this thread. */
-jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
-                  jvalue *args) {
-  jvalue zero = {0};
-
-  if (c->depth >= FB_DEPTH) {
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
-    return zero;
-  }
-
-  GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
-#if GW_RPC_PROFILE
-  struct gw_rpc_token metrics =
-      op == FB_NATIVE ? gw_rpc_begin() : (struct gw_rpc_token){0};
-#endif
-
-  GW_RPC_SCOPE(pack, GW_RPC_HOST_COMMAND_PACK, -1);
-  struct fb_call *r = &gw_host_bridge->ctx[c->id].call[c->depth++];
-  r->op = op;
-  r->module = c->module;
-  r->function = fn;
-  r->error = 0;
-  r->result = zero;
-  r->diagnostic[0] = 0;
-  if (sig) {
-    snprintf(r->sig, sizeof r->sig, "%s", sig);
-  }
-  if (args) {
-    memcpy(r->args, args, sizeof r->args);
-  } else {
-    memset(r->args, 0, sizeof r->args);
-  }
-
-  int seq = atomic_load(&r->request) + 1;
-#if GW_RPC_PROFILE
-  unsigned handoff_depth = (unsigned)(c->depth - 1);
-  if (op == FB_NATIVE) {
-    gw_handoff_begin(&gw_rpc_current->handoff, handoff_depth);
-  }
-#endif
-  atomic_store_explicit(&r->request, seq, memory_order_release);
-  struct fb_event *event = &gw_host_bridge->ctx[c->id].host_event;
-  GW_RPC_SCOPE_END(pack);
-  fb_event_notify(&gw_host_bridge->ctx[c->id].guest_event);
-
-  for (;;) {
-    uint32_t observed = fb_event_sample(event);
-    full_host_poll();
-    if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
-      break;
-    }
-#if GW_RPC_READY_POLL
-    fb_event_wait_active_response(event, observed, &r->response, seq);
-#else
-    fb_event_wait_active(event, observed);
-#endif
-  }
-
-#if GW_RPC_PROFILE
-  if (op == FB_NATIVE) {
-    gw_handoff_finish(&gw_rpc_current->handoff, handoff_depth,
-                      (struct gw_handoff_record){
-                          .function = fn,
-                          .module = c->module,
-                          .api = UINT64_MAX,
-                          .context = (unsigned)c->id,
-                          .depth = handoff_depth,
-                          .host_tid = gw_host_bridge->ctx[c->id].host_tid,
-                          .guest_tid = gw_host_bridge->ctx[c->id].guest_tid,
-                          .request = (unsigned)seq});
-  }
-#endif
-
-  GW_RPC_SCOPE(finish, GW_RPC_HOST_COMMAND_FINISH, -1);
-  snprintf(c->diagnostic, sizeof c->diagnostic, "%s", r->diagnostic);
-  c->depth--;
-  GW_RPC_SCOPE_END(finish);
-#if GW_RPC_PROFILE
-  gw_rpc_end(metrics);
-#endif
-  GW_RPC_SCOPE_END(boundary);
-  return r->result;
 }
 
 /* Thread body for a Guest-requested context: attach to the VM (as daemon
@@ -752,9 +666,9 @@ int full_host_start(struct shared *s, JNIEnv *env,
   }
 
   struct gw_loader_config config = {
-      .transport = {.load = transport_load,
-                    .close = transport_close,
-                    .find = transport_find,
+      .transport = {.load = fh_transport_load,
+                    .close = fh_transport_close,
+                    .find = fh_transport_find,
                     .current_module = transport_current_module},
       .resolve_image = gw_image_policy_resolve,
       .image_context = &image_policy,
@@ -790,6 +704,13 @@ int full_host_ready(void) {
   if (jni_accept() != JNI_OK) {
     return JNI_ERR;
   }
+  if (!fb_loader_accepted(&gw_host_bridge->ctx[0].call[0])) {
+    fprintf(stderr,
+            "LOADER_PROTOCOL_MISMATCH transactional unload acknowledgement "
+            "required\n");
+    return JNI_ERR;
+  }
+  printf("LOADER_PROTOCOL version=%d matched=1\n", FB_LOADER_PROTOCOL);
 #if GW_FUTEX_WAKE_FILTER
   if (!atomic_load_explicit(&wake_filter_accepted, memory_order_acquire)) {
     if (!gw_host_bridge || !wake_filter_shared ||
@@ -817,139 +738,6 @@ int full_host_ready(void) {
     printf("LOADER_BACKEND activation_failed=%s\n", error.message);
   }
   return rc == GW_OK ? JNI_OK : JNI_ERR;
-}
-
-/* Loader transport: run Guest dlopen plus JNI_OnLoad and commit only when
-   the returned version is acceptable and no exception is pending. On
-   rejection the attempt rolls back in order — registrations first (they may
-   still hold closures), then the guest image, then the trampolines and ID
-   cache — while the original Java exception is preserved and rethrown
-   last. */
-static jint transport_load(JNIEnv *env, uint64_t id, const char *image,
-                           struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
-  if (!c) {
-    gw_loader_fail(error, GW_E_BRIDGE, "No Host context available");
-    return JNI_ERR;
-  }
-
-  uint64_t previous = c->module;
-  c->module = id;
-  int prior = c->local_depth;
-  if ((*env)->PushLocalFrame(env, 1024) != JNI_OK) {
-    c->module = previous;
-    gw_loader_fail(error, GW_E_BRIDGE, "Cannot create load local frame");
-    return JNI_ERR;
-  }
-
-  c->local_depth++;
-  jvalue args[FB_ARGS + 2] = {{.l = (jobject)image}},
-                        out = fh_command(c, FB_LOAD, 0, NULL, args);
-  int accepted = gw_jni_accepts(gw_host_jni_version, out.i) &&
-                 !(*env)->ExceptionCheck(env);
-
-  if (accepted) {
-    fh_command(c, FB_COMMIT_LOAD, 0, NULL, NULL);
-  } else {
-    if (c->diagnostic[0]) {
-      gw_loader_fail(error, GW_E_LOAD, c->diagnostic);
-    } else {
-      gw_loader_fail(error, GW_E_VERSION,
-                     "Guest JNI_OnLoad version rejected or exception pending");
-    }
-
-    jthrowable pending = (*env)->ExceptionOccurred(env);
-    if (pending) {
-      (*env)->ExceptionClear(env);
-    }
-    /* Unregister before freeing any closure; retain the original Java
-     * exception. */
-    release_registrations(env, id);
-    fh_command(c, FB_ABORT_LOAD, 0, NULL, NULL);
-    release_bindings(id);
-    sweep_ids(env, 0);
-    if (pending) {
-      (*env)->Throw(env, pending);
-      (*env)->DeleteLocalRef(env, pending);
-    }
-  }
-
-  (*env)->PopLocalFrame(env, NULL);
-  fh_drop_locals(c, prior + 1);
-  c->local_depth = prior;
-  c->module = previous;
-  return accepted ? out.i : JNI_ERR;
-}
-
-/* Loader transport: run Guest JNI_OnUnload plus dlclose, then drop the
-   module's registrations, trampolines, and ID-cache entries. Always GW_OK:
-   a pending exception survives the cleanup. */
-static int transport_close(JNIEnv *env, uint64_t id,
-                           struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
-  if (!c) {
-    return gw_loader_fail(error, GW_E_BRIDGE, "No Host context for unload");
-  }
-
-  uint64_t previous = c->module;
-  c->module = id;
-  int prior = c->local_depth;
-  if ((*env)->PushLocalFrame(env, 1024) != JNI_OK) {
-    c->module = previous;
-    return gw_loader_fail(error, GW_E_BRIDGE,
-                          "Cannot create unload local frame");
-  }
-
-  c->local_depth++;
-  fh_command(c, FB_UNLOAD, 0, NULL, NULL);
-
-  jthrowable pending = (*env)->ExceptionOccurred(env);
-  if (pending) {
-    (*env)->ExceptionClear(env);
-  }
-  release_registrations(env, id);
-  release_bindings(id);
-  sweep_ids(env, 0);
-  if (pending) {
-    (*env)->Throw(env, pending);
-    (*env)->DeleteLocalRef(env, pending);
-  }
-
-  (*env)->PopLocalFrame(env, NULL);
-  fh_drop_locals(c, prior + 1);
-  c->local_depth = prior;
-  c->module = previous;
-  return GW_OK;
-}
-
-/* Loader transport: resolve a symbol inside the Guest and wrap its address
-   in an ffi trampoline — the VM never receives the raw guest pointer. A
-   missing symbol is GW_NOT_FOUND (an ordinary lookup miss); only trampoline
-   exhaustion is an error. */
-static int transport_find(JNIEnv *env, uint64_t id, const char *symbol,
-                          const char *descriptor, void **entry,
-                          struct gw_loader_error *error) {
-  struct host_context *c = fh_context(env);
-  if (!c) {
-    return gw_loader_fail(error, GW_E_BRIDGE,
-                          "No Host context for symbol lookup");
-  }
-
-  uint64_t previous = c->module;
-  c->module = id;
-  jvalue found = fh_command(c, FB_LOOKUP, 0, symbol, NULL);
-  struct binding *b =
-      found.j ? make_binding(id, (uintptr_t)found.j, descriptor, error) : NULL;
-  c->module = previous;
-
-  if (!found.j) {
-    return GW_NOT_FOUND;
-  }
-  if (!b) {
-    return GW_ERROR;
-  }
-  *entry = b->code;
-  return GW_OK;
 }
 
 /* Teardown mirrors full_host_start on the launcher thread: the loader must

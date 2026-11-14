@@ -34,6 +34,7 @@ def verify(
         "JRE_CREATE_RESULT=0",
         "distinct=1",
         "JRE_BRIDGE_RESULT=PASS",
+        "LOADER_PROTOCOL version=2 matched=1",
         "JRE_JAVA_RESUMED",
         "JRE_DESTROY_RESULT=0",
         "JRE_VM_ENUM stage=destroyed rc=0 count=0",
@@ -120,6 +121,16 @@ def verify(
                 "Missing complete Zig reference/class capacity cycles"
             )
 
+    descriptor_rows = [
+        json.loads(row)
+        for row in re.findall(r"AUDIT_DESCRIPTOR_TEST (\{[^\n]+\})", report)
+    ]
+    if group == "coverage" and binding_backend == "zig":
+        if descriptor_rows != [
+            {"cycle": cycle, "checks": 3} for cycle in range(3)
+        ]:
+            raise ValueError("Missing complete JNI descriptor boundary checks")
+
     if payload_benchmark:
         required.append(
             f"PAYLOAD_BENCH_CHECK rows={payload_trials} buffers=PASS domain=PASS"
@@ -205,6 +216,7 @@ def verify(
         "binding_capacity": capacity_rows,
         "resource_capacity": resource_rows,
         "bridge_lifecycle": lifecycle,
+        "descriptor_boundaries": descriptor_rows,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit
         else "strict-checkjni-interpreter",

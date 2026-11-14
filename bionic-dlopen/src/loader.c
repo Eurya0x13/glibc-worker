@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -36,11 +37,28 @@ static enum backend_state state;
 /* Opens past their READY check but not yet returned; stop() refuses to run
    while this is nonzero. */
 static unsigned inflight_opens;
+static _Atomic int quarantined;
 /* Handle of the most recent committed open; 0 until the first success. */
 static uint64_t last_handle;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 /* Entirely bionic-owned; this condition variable never crosses the bridge. */
 static pthread_cond_t quiescent = PTHREAD_COND_INITIALIZER;
+
+void gw_dlopen_quarantine(void) {
+  pthread_mutex_lock(&lock);
+  atomic_store_explicit(&quarantined, 1, memory_order_release);
+  pthread_cond_broadcast(&quiescent);
+  pthread_mutex_unlock(&lock);
+}
+
+int gw_dlopen_is_quarantined(void) {
+  return atomic_load_explicit(&quarantined, memory_order_acquire);
+}
+
+static int quarantine_error(struct gw_loader_error *error) {
+  return gw_dlopen_fail(error, GW_E_QUARANTINED,
+                        "Guest bridge quarantined; discard process");
+}
 
 /* Forwards one lifecycle event to the observer, if installed. Keep it cheap:
    it may run while the module lock is held, and FAILED may carry id 0 when
@@ -111,7 +129,7 @@ uint64_t gw_dlopen_last_handle(void) {
 int gw_dlopen_enter(uint64_t id) {
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
-  int ok = state == READY && m &&
+  int ok = !quarantined && state == READY && m &&
            (m->state == GW_MODULE_LOADING || m->state == GW_MODULE_LIVE);
   if (ok) {
     m->active++;
@@ -148,6 +166,11 @@ int gw_dlopen_configure(const struct gw_dlopen_config *value,
   }
 
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
+
   if (state != UNCONFIGURED) {
     pthread_mutex_unlock(&lock);
     return gw_dlopen_fail(
@@ -167,6 +190,11 @@ int gw_dlopen_configure(const struct gw_dlopen_config *value,
 int gw_dlopen_activate(struct gw_loader_error *error) {
   clear_error(error);
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
+
   if (state != CONFIGURED) {
     pthread_mutex_unlock(&lock);
     return gw_dlopen_fail(error, GW_E_NOT_READY,
@@ -186,6 +214,11 @@ int gw_dlopen_activate(struct gw_loader_error *error) {
 int gw_dlopen_stop(struct gw_loader_error *error) {
   clear_error(error);
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
+
   if (state != READY && state != CONFIGURED) {
     pthread_mutex_unlock(&lock);
     return gw_dlopen_fail(error, GW_E_NOT_READY, "Guest loader is not running");
@@ -224,6 +257,12 @@ static uint64_t reserve(const char *path, const char *image,
   }
 
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    quarantine_error(error);
+    return 0;
+  }
+
   for (int i = 0; i < FB_MODULES; i++) {
     if (modules[i].state && modules[i].device == st.st_dev &&
         modules[i].inode == st.st_ino) {
@@ -265,7 +304,8 @@ static uint64_t reserve(const char *path, const char *image,
    classifies the ELF: GW_PASS hands the path to the caller's platform
    loader, GW_ERROR is terminal and must not be retried there. Otherwise
    reserve, transport.load, then commit LIVE and publish the handle or roll
-   the slot fully back; a failed load leaves no handle and no module. */
+   the slot back. Quarantine retains uncertain resources and the LOADING slot
+   without publishing a usable handle. */
 static int loader_open(void *context, const char *path, uint32_t flags,
                        struct gw_dlopen_library *result,
                        struct gw_loader_error *error) {
@@ -288,6 +328,11 @@ static int loader_open(void *context, const char *path, uint32_t flags,
   }
 
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
+
   if (state != READY) {
     pthread_mutex_unlock(&lock);
     return gw_dlopen_fail(error, GW_E_NOT_READY, "Guest loader is not ready");
@@ -322,7 +367,18 @@ static int loader_open(void *context, const char *path, uint32_t flags,
 
   pthread_mutex_lock(&lock);
   struct module *m = get_module(id);
-  if (accepted) {
+  if (quarantined) {
+    /* A failed rollback may leave VM entries pointing into this image.
+       Keep the slot, generation and transport resources permanently. */
+    accepted = 0;
+    if (error) {
+      error->code = GW_E_QUARANTINED;
+    }
+    if (!error || !error->message[0]) {
+      quarantine_error(error);
+    }
+    observe(GW_DLOPEN_FAILED, id, 0);
+  } else if (accepted) {
     m->state = GW_MODULE_LIVE;
     last_handle = id;
     observe(GW_DLOPEN_OPENED, id, metadata);
@@ -362,6 +418,9 @@ static int loader_find(void *context, uint64_t id, const char *symbol,
     return GW_PASS;
   }
 
+  if (gw_dlopen_is_quarantined()) {
+    return quarantine_error(error);
+  }
   if (!symbol || !symbol[0] || strlen(symbol) >= GW_LOADER_SIGNATURE ||
       !entry) {
     return gw_dlopen_fail(error, GW_E_ARGUMENT,
@@ -378,9 +437,9 @@ static int loader_find(void *context, uint64_t id, const char *symbol,
 }
 
 /* Close synchronization: LIVE -> CLOSING refuses new borrows, waits out
-   active ones, then delegates teardown to the transport. A failed close
-   restores LIVE (the image is still resident in the Guest); success frees
-   the slot for a later generation. */
+   active ones, then delegates teardown to the transport. A recoverable close
+   failure restores LIVE; quarantine retains CLOSING and success frees the
+   slot for a later generation. */
 static int loader_close(void *context, uint64_t id,
                         struct gw_loader_error *error) {
   clear_error(error);
@@ -389,6 +448,11 @@ static int loader_close(void *context, uint64_t id,
   }
 
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
+
   struct module *m = get_module(id);
   if (state != READY || !m || m->state != GW_MODULE_LIVE) {
     pthread_mutex_unlock(&lock);
@@ -408,6 +472,10 @@ static int loader_close(void *context, uint64_t id,
   /* Re-validate under the lock: the module may have been retired while the
      current_module probe ran without it. */
   pthread_mutex_lock(&lock);
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
+  }
   m = get_module(id);
   if (!m || m->state != GW_MODULE_LIVE) {
     pthread_mutex_unlock(&lock);
@@ -417,14 +485,20 @@ static int loader_close(void *context, uint64_t id,
   m->state = GW_MODULE_CLOSING;
   /* Active borrowers finish before transport teardown. The adapter services
      any callbacks; this layer never owns a VM or pumps JNI. */
-  while (m->active) {
+  while (m->active && !quarantined) {
     pthread_cond_wait(&quiescent, &lock);
+  }
+  if (quarantined) {
+    pthread_mutex_unlock(&lock);
+    return quarantine_error(error);
   }
   pthread_mutex_unlock(&lock);
 
   int rc = config.transport.close(context, id, error);
   pthread_mutex_lock(&lock);
-  if (rc == GW_OK) {
+  if (quarantined) {
+    rc = quarantine_error(error);
+  } else if (rc == GW_OK) {
     m->state = 0;
     m->id = 0;
     observe(GW_DLOPEN_CLOSED, id, 0);

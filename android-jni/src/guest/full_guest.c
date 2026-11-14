@@ -100,7 +100,8 @@ static jvalue fg_rpc(JNIEnv *env, int api, jvalue *args) {
   r->api = api;
   r->error = 0;
   r->result = zero;
-  int seq = atomic_load_explicit(&r->request, memory_order_relaxed) + 1;
+  int seq = gw_rpc_next_sequence(
+      atomic_load_explicit(&r->request, memory_order_relaxed));
 #if GW_RPC_PROFILE
   gw_handoff_begin(&gw_rpc_current->handoff, (unsigned)gdepth);
 #endif
@@ -362,6 +363,12 @@ static void fg_pump(void) {
 void full_guest_start(struct shared *s) {
   G = (struct full_bridge *)s->full_bridge;
   struct fb_call *hello = &G->ctx[0].call[0];
+  if (!fb_loader_acknowledge(hello)) {
+    dprintf(2, "LOADER_PROTOCOL_MISMATCH matching Host/layout required\n");
+    atomic_store_explicit(&s->phase, -1, memory_order_release);
+    syscall(SYS_exit, 95);
+    __builtin_unreachable();
+  }
   guest_jni_version = hello->args[11].i;
   if (hello->args[10].j != FB_JNI_HELLO ||
       !gw_jni_accepts(GW_JNI_MAX_VERSION, guest_jni_version)) {

@@ -13,7 +13,8 @@ struct full_bridge *gw_host_bridge = &counters;
 jclass gw_host_helper_class;
 jmethodID gw_host_describe_method, gw_host_declaring_method;
 static size_t attempts, fail_at = SIZE_MAX, outstanding, failures, weak_count;
-static int collected;
+static int collected, pending_exception, string_releases;
+static const char *reflection_signature;
 
 static void *allocate(void *context, size_t size, size_t alignment) {
   (void)context;
@@ -174,10 +175,61 @@ static jboolean same_object(JNIEnv *env, jobject a, jobject b) {
   }
   return ai == bi;
 }
+
+static jobject describe_member(JNIEnv *env, jclass cls, jmethodID method, ...) {
+  (void)env;
+  (void)cls;
+  (void)method;
+  return (jobject)reflection_signature;
+}
+
+static const char *get_chars(JNIEnv *env, jstring value, jboolean *copy) {
+  (void)env;
+  (void)copy;
+  return (const char *)value;
+}
+
+static void release_chars(JNIEnv *env, jstring value, const char *text) {
+  (void)env;
+  (void)value;
+  (void)text;
+  string_releases++;
+}
+
+static jboolean has_exception(JNIEnv *env) {
+  (void)env;
+  return pending_exception;
+}
+
+static jclass error_class(JNIEnv *env, const char *name) {
+  (void)env;
+  assert(!strcmp(name, "java/lang/IllegalArgumentException"));
+  return (jclass)(uintptr_t)1;
+}
+
+static jint throw_error(JNIEnv *env, jclass cls, const char *message) {
+  (void)env;
+  (void)cls;
+  (void)message;
+  pending_exception = 1;
+  return JNI_OK;
+}
+
+static void delete_local(JNIEnv *env, jobject object) {
+  (void)env;
+  (void)object;
+}
 static const struct JNINativeInterface_ vm = {
     .NewWeakGlobalRef = new_weak,
     .DeleteWeakGlobalRef = delete_weak,
-    .IsSameObject = same_object};
+    .IsSameObject = same_object,
+    .CallStaticObjectMethod = describe_member,
+    .GetStringUTFChars = get_chars,
+    .ReleaseStringUTFChars = release_chars,
+    .ExceptionCheck = has_exception,
+    .FindClass = error_class,
+    .ThrowNew = throw_error,
+    .DeleteLocalRef = delete_local};
 static JNIEnv env = &vm;
 
 static void references(void) {
@@ -248,10 +300,27 @@ static void references(void) {
   free(tokens);
 }
 
+static void reflection_boundaries(void) {
+  struct host_context c = {.env = &env};
+  char text[FB_SIG + 1];
+  memset(text, 'I', sizeof text);
+  text[FB_SIG - 1] = 0;
+  reflection_signature = text;
+  const char *value = fh_describe(&c, (jobject)(uintptr_t)1);
+  assert(strlen(value) == FB_SIG - 1 && !pending_exception &&
+         string_releases == 1);
+  text[FB_SIG - 1] = 'I';
+  text[FB_SIG] = 0;
+  value = fh_describe(&c, (jobject)(uintptr_t)1);
+  assert(!value[0] && pending_exception && string_releases == 2);
+  pending_exception = 0;
+}
+
 int main(void) {
   storage_failures();
   generations_and_owners();
   references();
+  reflection_boundaries();
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\",\"references\":%u,"
       "\"oom_cases\":48,\"injected_failures\":%zu,\"generation_exhaustion\":"

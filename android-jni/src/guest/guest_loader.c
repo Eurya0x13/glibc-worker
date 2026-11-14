@@ -23,7 +23,7 @@ struct guest_module {
   uint64_t id;
   void *handle;
   struct link_map *map;
-  int committed;
+  int committed, unload_prepared;
 };
 static struct guest_module modules[FB_MODULES];
 static pthread_mutex_t modules_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -151,12 +151,26 @@ void fg_execute(struct fb_call *cmd) {
         cmd->error = 6;
       }
 
+    } else if (cmd->op == FB_PREPARE_UNLOAD) {
+      if (!handle || !m->committed || m->unload_prepared) {
+        cmd->error = 11;
+        goto done;
+      }
+      /* Invoke OnUnload while the image stays mapped. Host unregisters VM
+         entries before allowing the separate final dlclose command. */
+      m->unload_prepared = 1;
+      void (*unload)(JavaVM *, void *) = (void *)dlsym(handle, "JNI_OnUnload");
+      gdepth++;
+      if (unload) {
+        unload(&fg_vm, NULL);
+      }
+      gdepth--;
     } else if (cmd->op == FB_ABORT_LOAD || cmd->op == FB_UNLOAD) {
-      /* Only UNLOAD runs JNI_OnUnload; an aborted load never ran to
-         completion, so its observers must not see teardown. The slot is
-         cleared even when dlclose fails (refcount held elsewhere): the
-         failure is counted, never retried. */
-      if (cmd->op == FB_UNLOAD && handle) {
+      /* Abort never runs OnUnload. The new Host prepares unload separately;
+         the inline path only supports the legacy command ordering. A failed
+         dlclose retains this record and makes the Host quarantine the bridge.
+       */
+      if (cmd->op == FB_UNLOAD && handle && !m->unload_prepared) {
         void (*unload)(JavaVM *, void *) =
             (void *)dlsym(handle, "JNI_OnUnload");
         gdepth++;
@@ -166,15 +180,14 @@ void fg_execute(struct fb_call *cmd) {
         gdepth--;
       }
 
-      pthread_mutex_lock(&modules_lock);
-      m->map = NULL;
-      pthread_mutex_unlock(&modules_lock);
       if (handle) {
         int rc = dlclose(handle);
         if (!rc) {
           atomic_fetch_add(&G->image_closes, 1);
         } else {
-          atomic_fetch_add(&G->errors, 1);
+          cmd->error = 12;
+          snprintf(cmd->diagnostic, sizeof cmd->diagnostic, "%s", dlerror());
+          goto done; /* Mapping state is uncertain: Host must quarantine. */
         }
         dprintf(2, "GUEST_IMAGE_EVENT phase=close handle=%llx rc=%d\n",
                 (unsigned long long)m->id, rc);

@@ -83,6 +83,12 @@ int gw_dlopen_activate(struct gw_loader_error *);
    loading/live/closing or an open is in flight; after GW_OK the config
    pointers are released and no further opens are accepted. */
 int gw_dlopen_stop(struct gw_loader_error *);
+/* Irreversible fail-closed state for unsafe teardown/rollback. Retains all
+   module/config pointers until process disposal; refuses further Guest
+   opens, borrows, symbol lookups, closes and stop. Does not terminate the
+   process or attempt to repair an unknown VM/Guest state. */
+void gw_dlopen_quarantine(void);
+int gw_dlopen_is_quarantined(void);
 /* Borrows a module for direct callers (e.g. an adapter callback).
    Succeeds only while READY on a LOADING/LIVE module; on 0 nothing was
    borrowed and the matching leave must be skipped. */

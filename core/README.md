@@ -20,6 +20,10 @@ ctest --test-dir build --output-on-failure
 
 `tests/` 自己维护真实 futex、通知竞态、配对交接、嵌套统计和受控时钟故障测试；需要 Clang ASan/UBSan 与 Python，输出在本项目 `build/test-work/`。CMake 配置 `-DBUILD_TESTING=OFF` 可只构建组件。
 
+`gw_bootstrap_stack` 只接受 1..16 个非空参数指针；在任何栈写入前检查地址溢出、参数/固定环境/auxv/随机字节与对齐预算，并保留至少 4 KiB 余量。无效输入仍按低层 bootstrap 契约终止进程，不提供恢复重试接口。`tests/audit_boundaries.py` 通过保护页、共享哨兵和子进程验证拒绝前未写栈，并验证有效 argv/env/auxv。
+
+`rpc_sequence.h` 将有符号原子序号的下一值明确为 `INT_MAX → INT_MIN`，避免 C 有符号溢出；零同样是有效序号。它是每槽最多一个在途请求的等值令牌，不可用于大小排序或并发生产者分配。边界测试在四种通知/轮询配置下执行真实 pthread/futex 请求与响应，覆盖两处回绕。
+
 core 提供低层 bootstrap，不提供任意 runtime 的一键启动/销毁 API。宿主仍负责部署、栈与共享区生命周期、信号策略、启动参数和线程退出确认；GNU 映射当前保留到进程退出。core 不管理 JavaVM，也不混用两套 libc 的 allocator、FILE 或 pthread 对象。
 
 等待与诊断设计见 [WAITING](docs/WAITING.md)，实验性通知过滤见 [WAKE_FILTER](docs/WAKE_FILTER.md)。JNI 上下文配对与对象协议属于上层 android-jni。

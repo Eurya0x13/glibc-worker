@@ -1,0 +1,131 @@
+#include <stdio.h>
+#include <string.h>
+#include "host_internal.h"
+#include "dlopen_backend.h"
+
+/* Post one fb_call at the current nesting depth and block for its reply.
+   Re-entrant by design: a native call may re-enter Java and issue deeper
+   commands, each on its own call[] slot, bounded by FB_DEPTH. While blocked
+   the thread pumps its own inbound JNI callbacks via full_host_poll, so the
+   Guest is never stalled waiting on this thread. */
+jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
+                  jvalue *args) {
+  jvalue zero = {0};
+
+  c->command_error = 0;
+  c->diagnostic[0] = 0;
+  if (gw_dlopen_is_quarantined()) {
+    c->command_error = GW_E_QUARANTINED;
+    snprintf(c->diagnostic, sizeof c->diagnostic,
+             "Guest bridge quarantined; discard process");
+    return zero;
+  }
+
+  size_t signature_length = sig ? strnlen(sig, FB_SIG) : 0;
+  if (signature_length == FB_SIG) {
+    snprintf(c->diagnostic, sizeof c->diagnostic,
+             "Command descriptor exceeds bridge capacity");
+    c->command_error = GW_E_ARGUMENT;
+    if (!(*c->env)->ExceptionCheck(c->env)) {
+      jclass error =
+          (*c->env)->FindClass(c->env, "java/lang/IllegalArgumentException");
+      if (error) {
+        (*c->env)->ThrowNew(c->env, error, c->diagnostic);
+        (*c->env)->DeleteLocalRef(c->env, error);
+      }
+    }
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+    return zero;
+  }
+
+  if (c->depth >= FB_DEPTH) {
+    c->command_error = GW_E_CAPACITY;
+    snprintf(c->diagnostic, sizeof c->diagnostic,
+             "Host bridge nesting limit exceeded");
+    if (!(*c->env)->ExceptionCheck(c->env)) {
+      jclass error =
+          (*c->env)->FindClass(c->env, "java/lang/StackOverflowError");
+      if (error) {
+        (*c->env)->ThrowNew(c->env, error, c->diagnostic);
+        (*c->env)->DeleteLocalRef(c->env, error);
+      }
+    }
+    atomic_fetch_add(&gw_host_bridge->errors, 1);
+    return zero;
+  }
+
+  GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
+#if GW_RPC_PROFILE
+  struct gw_rpc_token metrics =
+      op == FB_NATIVE ? gw_rpc_begin() : (struct gw_rpc_token){0};
+#endif
+
+  GW_RPC_SCOPE(pack, GW_RPC_HOST_COMMAND_PACK, -1);
+  struct fb_call *r = &gw_host_bridge->ctx[c->id].call[c->depth++];
+  r->op = op;
+  r->module = c->module;
+  r->function = fn;
+  r->error = 0;
+  r->result = zero;
+  r->diagnostic[0] = 0;
+  r->sig[0] = 0;
+  if (sig) {
+    memcpy(r->sig, sig, signature_length + 1);
+  }
+  if (args) {
+    memcpy(r->args, args, sizeof r->args);
+  } else {
+    memset(r->args, 0, sizeof r->args);
+  }
+
+  int seq = gw_rpc_next_sequence(atomic_load(&r->request));
+#if GW_RPC_PROFILE
+  unsigned handoff_depth = (unsigned)(c->depth - 1);
+  if (op == FB_NATIVE) {
+    gw_handoff_begin(&gw_rpc_current->handoff, handoff_depth);
+  }
+#endif
+  atomic_store_explicit(&r->request, seq, memory_order_release);
+  struct fb_event *event = &gw_host_bridge->ctx[c->id].host_event;
+  GW_RPC_SCOPE_END(pack);
+  fb_event_notify(&gw_host_bridge->ctx[c->id].guest_event);
+
+  for (;;) {
+    uint32_t observed = fb_event_sample(event);
+    full_host_poll();
+    if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
+      break;
+    }
+#if GW_RPC_READY_POLL
+    fb_event_wait_active_response(event, observed, &r->response, seq);
+#else
+    fb_event_wait_active(event, observed);
+#endif
+  }
+
+#if GW_RPC_PROFILE
+  if (op == FB_NATIVE) {
+    gw_handoff_finish(&gw_rpc_current->handoff, handoff_depth,
+                      (struct gw_handoff_record){
+                          .function = fn,
+                          .module = c->module,
+                          .api = UINT64_MAX,
+                          .context = (unsigned)c->id,
+                          .depth = handoff_depth,
+                          .host_tid = gw_host_bridge->ctx[c->id].host_tid,
+                          .guest_tid = gw_host_bridge->ctx[c->id].guest_tid,
+                          .request = (unsigned)seq});
+  }
+#endif
+
+  GW_RPC_SCOPE(finish, GW_RPC_HOST_COMMAND_FINISH, -1);
+  c->command_error = r->error;
+  snprintf(c->diagnostic, sizeof c->diagnostic, "%s", r->diagnostic);
+  c->depth--;
+  GW_RPC_SCOPE_END(finish);
+#if GW_RPC_PROFILE
+  gw_rpc_end(metrics);
+#endif
+  GW_RPC_SCOPE_END(boundary);
+  return r->result;
+}
