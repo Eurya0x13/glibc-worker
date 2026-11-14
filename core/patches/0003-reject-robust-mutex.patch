@@ -1,0 +1,14 @@
+--- a/nptl/pthread_mutex_init.c
++++ b/nptl/pthread_mutex_init.c
+@@ -63,6 +63,11 @@
+ 
+   imutexattr = ((const struct pthread_mutexattr *) mutexattr
+ 		?: &default_mutexattr);
++
++  /* Android's Guest threads cannot register a kernel robust list.  Do not
++     report success for mutexes whose owner-death recovery is unavailable.  */
++  if (imutexattr->mutexkind & PTHREAD_MUTEXATTR_FLAG_ROBUST)
++    return ENOTSUP;
+ 
+   /* Sanity checks.  */
+   switch (__builtin_expect (imutexattr->mutexkind

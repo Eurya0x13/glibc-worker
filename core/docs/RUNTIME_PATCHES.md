@@ -16,4 +16,4 @@ python3 core/tests/runtime_patches.py
 
 回归包含源码位于 Git 忽略目录及独立源码目录两种布局，覆盖污染的 `GIT_DIR/GIT_WORK_TREE` 环境、正向应用、反向核对、重复应用拒绝和损坏缓存拒绝。测试只修改 core 的 build 临时目录，不要求下载或重建 glibc。
 
-补丁正确应用不消除其兼容性取舍；关闭 robust-list 登记后仍不能承诺 robust mutex 的 owner-death 恢复语义。具体功能边界继续由调用者与运行时测试验证。
+补丁正确应用不消除其兼容性取舍。关闭 robust-list 登记后，`0003-reject-robust-mutex.patch` 使 robust mutex 初始化明确返回 ENOTSUP；普通 non-robust 锁保留 glibc 实现。支持范围、旧行为复现和专项测试见 [mutex 契约](MUTEXES.md)。

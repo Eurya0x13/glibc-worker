@@ -29,3 +29,5 @@ core 提供低层 bootstrap，不提供任意 runtime 的一键启动/销毁 API
 等待与诊断设计见 [WAITING](docs/WAITING.md)，实验性通知过滤见 [WAKE_FILTER](docs/WAKE_FILTER.md)。JNI 上下文配对与对象协议属于上层 android-jni。
 
 GNU runtime 构建脚本会核对源码补丁；忽略目录或父级 Git checkout 不能使补丁被静默跳过。构建与缓存验证契约见 [RUNTIME_PATCHES](docs/RUNTIME_PATCHES.md)。
+
+GNU robust mutex 初始化明确返回 ENOTSUP，避免关闭内核 robust-list 登记后仍报告创建成功。普通锁与条件变量保持原实现；边界、原因及 `tests/mutex_contract.py` 的主机正对照/指定 runtime 验证见 [mutex 契约](docs/MUTEXES.md)。

@@ -71,7 +71,8 @@ cp "$core_out/libglibc_bridge.so" "$out/"
   jvm-jni/tests/native/harness/worker.c jvm-jni/tests/native/harness/jni_proxy.c \
   android-jni/src/guest/full_guest.c android-jni/src/guest/rpc.c android-jni/src/guest/guest_loader.c \
   "core/build/ffi-linux/$GW_ABI/lib/libffi.a" -ldl -pthread -o "$out/libguest_worker.so"
-"$GW_GUEST_CC" -shared "${guest_flags[@]}" core/tests/native/guest.c -Icore/tests/native -o "$out/libguest_probe.so"
+"$GW_GUEST_CC" -shared "${guest_flags[@]}" core/tests/native/guest.c core/tests/native/mutex_contract.c \
+  -Icore/tests/native -pthread -o "$out/libguest_probe.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" android-jni/tests/native/guest_bench.c \
   -o "$out/libguest_bench.so"
 "$GW_GUEST_CC" -shared "${guest_flags[@]}" -O2 -fno-builtin-memcpy \

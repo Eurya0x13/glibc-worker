@@ -19,6 +19,8 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --reuse-apk
 | smoke | 普通应用 UID、真实 JRE、同 PID/不同线程、POD/指针、malloc、errno/TLS、pthread、JNI 回调、Guest 退出、VM 恢复及销毁 |
 | coverage | smoke，加 142 项 Java/JNI 断言、26 项装载契约、引用/异常/线程/重入/卸载/回滚、SQLite/zstd、11 项 JNI 名称回归与 49 项 ELF 元数据检查 |
 
+smoke/coverage 都会执行 core 的 GNU mutex 夹具：普通锁/条件变量回归及 12 种 robust 属性组合的 ENOTSUP 拒绝，共 125 项检查；结构化结果必须存在且通过。旧 runtime 的 owner-death 失败复现、支持边界及独立运行方式见 [mutex 契约](../../core/docs/MUTEXES.md)。
+
 当前默认 Zig 存储的 coverage 还运行三个 ClassLoader 周期：每轮 1,024 个不同 JNI 方法、320 个注册类、20,000 个 global 引用及描述符边界检查，退出后要求引用和 closure 为零。每轮另有 6 项失败/恢复检查：Java 捕获 Guest 深度超限、Guest 在上限处查询并清除异常、注册数量拒绝、失败状态码、线程上下文耗尽、释放后复用。`AUDIT_FAILURE_TEST` JSON 每轮明确记录 3 个预期桥错误；三轮原始错误计数必须恰为 9，多出或缺少均失败。
 
 桌面故障注入入口为 `python3 android-jni/tests/failures.py`、`bindings.py`、`resources.py` 和 `audit.py`，分别覆盖生产 RPC 失败、libffi/注册、引用存储以及装卸载事务；它们使用 VM/worker 替身，不代表 Android 双 libc 验证。

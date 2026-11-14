@@ -11,7 +11,7 @@
 - [x] AUD-03：资源耗尽与 Host/Guest 重入超限使用明确异常或结构化错误；保留已有异常，回滚未发布资源，深度耗尽仍可查询/清除异常及释放资源。
 - [x] AUD-04：启动栈写入前校验 argc、地址、参数、固定环境和完整帧空间；保护页/哨兵回归通过。
 - [x] AUD-05：RPC 序号明确无溢出回绕；引用/ID 代数耗尽永久退役；现行 Zig 及已删除 C 对照均有边界验证。
-- [ ] AUD-06：验证 glibc 补丁关闭 robust-list 登记后的互斥量语义，明确支持契约。
+- [x] AUD-06：复现关闭 robust-list 后的假成功与 owner-death 超时；robust mutex 初始化明确返回 ENOTSUP，普通锁/条件变量及真机组合回归通过。
 - [ ] AUD-07：审定 JNI 上下文容量、重入深度、注册所有权和跨依赖库的归属规则。
 - [ ] AUD-08：审定卡死时的 deadline、取消、关闭及进程处置策略。
 - [x] AUD-09：runner 独占结果目录，先归档旧制品再检查设备，原子记录本轮状态与 run_id，并核对安装 APK 散列。
@@ -159,6 +159,22 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 
 源码与契约位置：[jni_capabilities.h](../android-jni/src/common/jni_capabilities.h)、[full_guest.c](../android-jni/src/guest/full_guest.c)、[guest_loader.c](../android-jni/src/guest/guest_loader.c)、[full_host.c](../android-jni/src/host/full_host.c)、[bindings.c](../android-jni/src/host/bindings.c)、[JvmAdapter.java](../jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java)、[LOADER_BACKEND.md](../android-jni/docs/LOADER_BACKEND.md)。
 
+### AUD-07 / AUD-08 待审决策
+
+以下是实现审阅后的问题与建议，尚未批准或实现；两项保持未勾选。
+
+| 问题 | 当前实现与风险 | 待审方向 |
+| --- | --- | --- |
+| 上下文生命周期 | Host 首次调用即绑定一对 Host/Guest 上下文，通常到 Host 线程退出才释放；16 是长期绑定槽数，不只是瞬时并发调用数 | 保留线程绑定以维持 JNI 线程语义；审定是否按块扩容及资源预算，不仅增大默认常量 |
+| 重入深度 | 12 个普通调用槽，另有应急 RPC；超限已由 AUD-03 明确报错 | 是否保留固定值或增加构建配置；不可只扩大数组而忽略对称协议和诊断 |
+| 同线程祖先模块关闭 | 当前只将待关闭模块与 current_module 比较；A→Java→B→关闭 A 时，A 仍被同线程借用但 current_module 为 B，可能等待自己归还借用 | 优先审定整个调用链的借用追踪与 BUSY 拒绝；已有生产 C loader / transport 替身的有限时复现，尚未做真实 JNI 复现或修复 |
+| 类注册所有权 | 一个类只允许一个模块；UnregisterNatives 后记录保留到卸载，其他模块无法接管 | 类级独占与成功注销后的交接规则一起审定，不能单独放开多 owner 后让一个模块卸载时注销别人的方法 |
+| 依赖库归属 | 有调用上下文时归当前逻辑模块；无上下文时 FB_OWNER 仅匹配顶层 link_map；共享依赖地址不能唯一确定 owner | 以装载/调用所有权为准，审定无上下文的依赖函数注册策略，不按单个地址猜测唯一归属 |
+| 发布后的 RPC 超时 | 命令仍可能访问 caller 栈上的参数、Guest 地址或 JNI frame；隔离 registry 不会延长这些借用对象的寿命 | deadline 检测、取消请求、对端确认和进程处置分开定义；未确认停止访问前不能直接超时返回并释放栈/上下文 |
+| 关闭与退出 | active 借用、事件等待、pthread join 均可能无期限阻塞；不能强制结束任意 Guest 函数并保证资源安全 | 分开审定优雅关闭期限与不可恢复处置；继续由宿主决定丢弃进程，不把 watchdog 警报等同于安全取消 |
+
+祖先关闭复现与结果保存在本地 [C 最小用例](../bionic-dlopen/build/aud07/ancestor_close.c) 和 [审阅结果](../bionic-dlopen/build/aud07/review.json)。该用例确认等待进入 CLOSING 后由外部 watchdog 结束独立测试进程；不将其描述为已修复或完整 JNI 兼容结论。
+
 ## 7. 运行时制品、部署和适配
 
 | 项目 | 当前边界 |
@@ -167,7 +183,7 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | 补丁应用验证 | 构建脚本隔离父级 Git 环境，核对反向补丁；跳过补丁或损坏缓存不能当作成功，见 [RUNTIME_PATCHES](../core/docs/RUNTIME_PATCHES.md) |
 | clone3 | 当前 glibc 补丁改走旧 clone 路径 |
 | rseq | 当前补丁和启动环境关闭登记 |
-| robust-list | 当前补丁移除了登记；不能承诺 robust mutex 的 owner-death 恢复语义，需专项实验 |
+| robust-list | 当前补丁关闭登记；robust mutex 初始化返回 ENOTSUP，普通 non-robust 锁保留 glibc 实现，见 [mutex 契约](../core/docs/MUTEXES.md) |
 | 依赖闭包 | 不自动下载或补齐完整 rootfs；必须部署模组需要的 GNU 依赖 |
 | 默认兼容 stage | 主要部署 loader/libc/libpthread/libm；不能将其等同于包含所有第三方库的 rootfs |
 | 映像策略 | 默认按安装目录或内容散列目录解析；目录外请求需匹配同字节已安装映像，或显式开启直接路径模式 |
@@ -181,7 +197,7 @@ AUD-04 的保护页/共享哨兵测试覆盖 10 类非法输入及有效 1/16 �
 | ART | 公开 JNI 层与 JRE 私有层已分离，但完整 ART 桥未验证 |
 | fork、任意信号处理与完整销毁重建 | 没有完整兼容性验证，不因普通 JNI 测试通过而自动成立 |
 
-robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专项 owner-death 测试结论。AUD-06 应检查支持与拒绝行为，而非仅验证普通 mutex 的加锁解锁。
+AUD-06 已在旧版 ARM64 同进程 Android Guest 中复现：12 种 robust 配置均创建成功，但持锁 pthread 正常返回后 timedlock 返回 ETIMEDOUT，未获得 EOWNERDEAD。新补丁在对象写入前返回 ENOTSUP；主机标准 glibc 正对照覆盖 EOWNERDEAD、consistent 后复用和 ENOTRECOVERABLE。新 runtime 的 QEMU 与真机组合各通过 125 项检查，含普通锁、递归、errorcheck、跨线程超时和实际条件变量等待/唤醒。它不证明完整 pthread/PI/跨进程兼容。
 
 旧的 [jre17_adapter.h](../jvm-jni/include/jre17_adapter.h) 仅声明转发到通用适配器的兼容名称，不再承载 JRE17 专用实现。维护中的 SDK 消费者使用 [jvm_adapter.h](../jvm-jni/include/jvm_adapter.h)。AUD-11 应明确是否需要旧源码/二进制接口兼容；若删除，应同步清理转发符号、安装清单和相关文档。
 
@@ -215,7 +231,7 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 | Zig Host 资源管理 | 桌面 8,192 个存储 binding、32,768 个引用、1,024 个注册类；Android 三轮各 1,024 个方法、20,000 个引用和 320 个注册类通过，最终 closure/引用为 0 | 所有资源上限已取消、任意并发卸载安全或性能提升 |
 | 审计边界与失败隔离 | core 保护页/哨兵和四种 RPC 配置、13 项生产 transport 故障场景、C/Zig 注册失败资源保留、C loader 三种隔离场景及 runner 结果生命周期检查通过 | 任意并发卸载安全、无限等待的取消 |
 | AUD-03 失败语义 | ASan/UBSan 的生产 RPC/引用/ID/上下文故障注入、libffi/注册回滚检查及真机三轮各 6 项失败/恢复检查通过；9 个预期桥错误逐轮核对，最终引用和 closure 为 0 | 全系统 OOM 行为、任意第三方模组的异常恢复、ART 完整兼容 |
-| runtime 补丁流程 | 8 项回归检查；修复静默跳过补丁后，C 与 Zig 真机组合均通过 | robust mutex owner-death 恢复语义 |
+| runtime 补丁流程 | 8 项回归检查；新 robust 拒绝补丁已核对源码、匹配 loader/libc 与 APK 内散列；ARM64 coverage 通过 | robust mutex 恢复能力（本 runtime 明确拒绝）、所有 pthread 属性 |
 
 本地结果在各项目 `build/`，不是源代码发布包的必备文件：
 
@@ -223,6 +239,7 @@ robust mutex 条目属于从现有补丁得出的能力缺口判断，尚无专�
 - [ELF 边界结果](../bionic-dlopen/build/test-results/aud01-elf-route.json)。
 - [删除前 C 对照](../jvm-jni/build/aud01/coverage-c-control-v3/summary.json) 与 [AUD-01 默认 Zig 真机结果](../jvm-jni/build/aud01/coverage-default-clean/summary.json)。
 - [AUD-01 容量与对照汇总](../android-jni/build/aud01/summary.json) 保存当前容量边界、删除前对照及删除后默认回归证据。
+- [AUD-06 验证汇总](../core/build/aud06/summary.json)、[旧版真机失败复现](../jvm-jni/build/aud06/baseline-smoke/report.txt) 与 [新版真机覆盖](../jvm-jni/build/aud06/coverage-patched/summary.json) 区分原始缺陷、显式拒绝及普通锁/JNI 回归。
 - [AUD-03 验证汇总](../android-jni/build/aud03/summary.json) 及 [真机覆盖](../jvm-jni/build/aud03/coverage-final/summary.json) 记录故障注入、应急 RPC、资源恢复及本轮制品。
 - [审计验证汇总](../android-jni/build/audit-fixes/summary.json) 汇合边界、故障注入、真机和 SDK 检查；[Host 资源管理验证](../android-jni/build/zig-resources/summary.json) 保留先前扩容证据。
 

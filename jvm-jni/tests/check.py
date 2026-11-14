@@ -45,6 +45,27 @@ def verify(
         "SMOKE_TEST_RESULT=PASS group=" + group,
     ]
 
+    mutex_rows = re.findall(
+        r"^MUTEX_CONTRACT (\{[^\n]+\})$", report, re.MULTILINE
+    )
+    if len(mutex_rows) != 1:
+        raise ValueError("Missing unique GNU mutex contract evidence")
+    mutex_contract = json.loads(mutex_rows[0])
+    expected_mutex = {
+        "result": "PASS",
+        "policy": "reject",
+        "failures": 0,
+        "robust_rejected": 12,
+        "robust_accepted": 0,
+        "owner_dead": 0,
+        "owner_timed_out": 0,
+    }
+    if (
+        any(mutex_contract.get(k) != v for k, v in expected_mutex.items())
+        or mutex_contract.get("checks", 0) < 100
+    ):
+        raise ValueError("GNU mutex contract failed: " + str(mutex_contract))
+
     if group == "coverage":
         required += [
             "JNI_TEST_SUMMARY checks=142 failures=0 unsupported=0",
@@ -236,6 +257,7 @@ def verify(
         "bridge_lifecycle": lifecycle,
         "descriptor_boundaries": descriptor_rows,
         "failure_boundaries": failure_rows,
+        "mutex_contract": mutex_contract,
         "jvm_mode": "benchmark-normal-jit"
         if benchmark_jit
         else "strict-checkjni-interpreter",

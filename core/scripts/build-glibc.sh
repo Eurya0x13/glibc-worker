@@ -21,6 +21,7 @@ patches=(
   patches/termux/set-nptl-syscalls.patch
   patches/0001-use-faccessat.patch
   patches/0002-use-at-file-syscalls.patch
+  patches/0003-reject-robust-mutex.patch
 )
 key=$(cat scripts/build-glibc.sh scripts/apply-patches.py config/targets.json \
   "${patches[@]}" | sha256sum | cut -c1-16)

@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "mutex_contract.h"
 static __thread int counter = 17;
 
 int guest_probe(struct packet *p, callback_t cb) {
@@ -31,6 +32,12 @@ int guest_probe(struct packet *p, callback_t cb) {
 
   if (errno != EBADF || counter != 29) {
     return -4;
+  }
+  int saved = errno;
+  int mutexes = gw_mutex_contract(GW_MUTEX_REJECTED);
+  errno = saved;
+  if (mutexes) {
+    return -6;
   }
   return p->value == 42 && p->callback_value == 84 ? 0 : -5;
 }
