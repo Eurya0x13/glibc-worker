@@ -1,0 +1,67 @@
+{
+  "result": "PASS",
+  "execution": "android-art-hotspot-same-process",
+  "late_signal": true,
+  "pressure": [
+    {
+      "result": "PASS",
+      "threads": 8,
+      "calls": 8000,
+      "samples": 20,
+      "guest_overlaps": 20,
+      "explicit_guest_signals": 3
+    },
+    {
+      "result": "PASS",
+      "threads": 8,
+      "calls": 8000,
+      "samples": 20,
+      "guest_overlaps": 20,
+      "explicit_guest_signals": 3
+    },
+    {
+      "result": "PASS",
+      "threads": 8,
+      "calls": 8000,
+      "samples": 20,
+      "guest_overlaps": 20,
+      "explicit_guest_signals": 3
+    }
+  ],
+  "signal_install": [
+    {
+      "result": "PASS",
+      "bindings": 2,
+      "art_chain": true,
+      "adopted": 10,
+      "global_interposition": false
+    }
+  ],
+  "signal_delivery": [
+    {
+      "sr": 90,
+      "sr_guest": 3
+    }
+  ],
+  "supervisor_uid": 10310,
+  "contract": {
+    "result": "PASS",
+    "cycles": 3,
+    "checks": 25,
+    "unloads": 3,
+    "active_modules": 0,
+    "live_closures": 0,
+    "bionic_passthrough": true
+  },
+  "lifecycle": {
+    "result": "PASS",
+    "domains_created": 29,
+    "domains_finished": 28,
+    "idle_domains_retained": 1,
+    "vm_destroyed": true
+  },
+  "production_ready": false,
+  "apk_sha256": "d2c7e0934d00cca21256aafd5fb3a1ffd58880a19996d162f5bfec6ea61043e7",
+  "outer_forwarding_chain": true,
+  "validator_sha256": "8dd032fca37cf5927073560c24a35ccb6e5a1b13e5994dd09906579994900ee3"
+}

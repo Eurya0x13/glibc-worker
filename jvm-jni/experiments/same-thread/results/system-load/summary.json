@@ -1,0 +1,203 @@
+{
+  "x86_64": {
+    "result": "PASS",
+    "build": "90a6339dd99f1b3c",
+    "execution": "desktop-linux",
+    "results": [
+      {
+        "backend": "worker",
+        "contract": {
+          "result": "PASS",
+          "cycles": 3,
+          "checks": 23,
+          "unloads": 3,
+          "active_modules": 0,
+          "live_closures": 0,
+          "bionic_passthrough": false
+        },
+        "lifecycle": {
+          "result": "PASS",
+          "domains_created": 0,
+          "domains_finished": 0,
+          "idle_domains_retained": 0,
+          "vm_destroyed": true
+        },
+        "command": [
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/host",
+          "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+          "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64",
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/guest",
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/probe.so"
+        ]
+      },
+      {
+        "backend": "domain",
+        "contract": {
+          "result": "PASS",
+          "cycles": 3,
+          "checks": 23,
+          "unloads": 3,
+          "active_modules": 0,
+          "live_closures": 0,
+          "bionic_passthrough": false
+        },
+        "lifecycle": {
+          "result": "PASS",
+          "domains_created": 2,
+          "domains_finished": 1,
+          "idle_domains_retained": 1,
+          "vm_destroyed": true
+        },
+        "command": [
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/host",
+          "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+          "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64",
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/guest",
+          "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/x86_64/probe.so"
+        ]
+      }
+    ],
+    "production_ready": false
+  },
+  "arm64-v8a": {
+    "result": "PASS",
+    "build": "f9b726065cf47ceb",
+    "execution": "android-shell",
+    "results": [
+      {
+        "backend": "worker",
+        "contract": {
+          "result": "PASS",
+          "cycles": 3,
+          "checks": 25,
+          "unloads": 3,
+          "active_modules": 0,
+          "live_closures": 0,
+          "bionic_passthrough": true
+        },
+        "lifecycle": {
+          "result": "PASS",
+          "domains_created": 0,
+          "domains_finished": 0,
+          "idle_domains_retained": 0,
+          "vm_destroyed": true
+        },
+        "command": [
+          "adb",
+          "-s",
+          "192.168.1.9:45185",
+          "shell",
+          "cd /data/local/tmp/gw-production-jni-f9b726065cf47ceb && /system/bin/timeout -s KILL 120 env GW_CONFORMANCE=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/conformance.so GW_JAVA_HOME=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre GW_JVM_LIB=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib/server/libjvm.so GW_JAVA_BOOT_LIB=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib GW_DOMAIN_JAR=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/domain-probe.jar LD_LIBRARY_PATH=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib:/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib/server GW_SYSTEM_JAR=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-fixture.jar GW_SYSTEM_IMAGE=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-load.so GW_SYSTEM_REJECT=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-reject.so GW_SYSTEM_ORDINARY=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-ordinary.so GW_DOMAIN_MODE=worker GW_THREADS=1 GW_BENCH=0 /system/bin/linker64 /data/local/tmp/gw-production-jni-f9b726065cf47ceb/host /data/local/tmp/gw-production-jni-f9b726065cf47ceb/ld-linux-aarch64.so.1 /data/local/tmp/gw-production-jni-f9b726065cf47ceb /data/local/tmp/gw-production-jni-f9b726065cf47ceb/guest /data/local/tmp/gw-production-jni-f9b726065cf47ceb/probe.so"
+        ]
+      },
+      {
+        "backend": "domain",
+        "contract": {
+          "result": "PASS",
+          "cycles": 3,
+          "checks": 25,
+          "unloads": 3,
+          "active_modules": 0,
+          "live_closures": 0,
+          "bionic_passthrough": true
+        },
+        "lifecycle": {
+          "result": "PASS",
+          "domains_created": 2,
+          "domains_finished": 1,
+          "idle_domains_retained": 1,
+          "vm_destroyed": true
+        },
+        "command": [
+          "adb",
+          "-s",
+          "192.168.1.9:45185",
+          "shell",
+          "cd /data/local/tmp/gw-production-jni-f9b726065cf47ceb && /system/bin/timeout -s KILL 120 env GW_CONFORMANCE=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/conformance.so GW_JAVA_HOME=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre GW_JVM_LIB=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib/server/libjvm.so GW_JAVA_BOOT_LIB=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib GW_DOMAIN_JAR=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/domain-probe.jar LD_LIBRARY_PATH=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib:/data/local/tmp/gw-production-jni-f9b726065cf47ceb/jre/lib/server GW_SYSTEM_JAR=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-fixture.jar GW_SYSTEM_IMAGE=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-load.so GW_SYSTEM_REJECT=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-reject.so GW_SYSTEM_ORDINARY=/data/local/tmp/gw-production-jni-f9b726065cf47ceb/system-ordinary.so GW_DOMAIN_MODE=domain GW_THREADS=1 GW_BENCH=0 /system/bin/linker64 /data/local/tmp/gw-production-jni-f9b726065cf47ceb/host /data/local/tmp/gw-production-jni-f9b726065cf47ceb/ld-linux-aarch64.so.1 /data/local/tmp/gw-production-jni-f9b726065cf47ceb /data/local/tmp/gw-production-jni-f9b726065cf47ceb/guest /data/local/tmp/gw-production-jni-f9b726065cf47ceb/probe.so"
+        ]
+      }
+    ],
+    "production_ready": false
+  },
+  "application": {
+    "result": "PASS",
+    "execution": "android-application-exec-child",
+    "supervisor_uid": 10310,
+    "contract": {
+      "result": "PASS",
+      "cycles": 3,
+      "checks": 25,
+      "unloads": 3,
+      "active_modules": 0,
+      "live_closures": 0,
+      "bionic_passthrough": true
+    },
+    "lifecycle": {
+      "result": "PASS",
+      "domains_created": 2,
+      "domains_finished": 1,
+      "idle_domains_retained": 1,
+      "vm_destroyed": true
+    },
+    "production_ready": false,
+    "apk_sha256": "e63fcd8164e83fec4b1e7cd385c223a733e6b3f778b626f981ae205e1fb48871"
+  },
+  "late_dso": {
+    "result": "UNSUPPORTED",
+    "init_status": 0,
+    "existing_handler_wrapped": false,
+    "global_sigaction_interposed": false,
+    "build": [
+      [
+        "/mnt/data/Android/Sdk/ndk/30.0.16138531/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang",
+        "-std=gnu17",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I/mnt/data/projects/glibc-worker/core/experiments/same-thread",
+        "-shared",
+        "-fPIC",
+        "-DROUTER_STUB",
+        "/mnt/data/projects/glibc-worker/jvm-jni/experiments/same-thread/late-signal-probe.c",
+        "/mnt/data/projects/glibc-worker/core/experiments/same-thread/signal-router.c",
+        "-ldl",
+        "-o",
+        "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/late-signal/router.so"
+      ],
+      [
+        "/mnt/data/Android/Sdk/ndk/30.0.16138531/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang",
+        "-std=gnu17",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I/mnt/data/projects/glibc-worker/core/experiments/same-thread",
+        "/mnt/data/projects/glibc-worker/jvm-jni/experiments/same-thread/late-signal-probe.c",
+        "-ldl",
+        "-o",
+        "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/late-signal/probe"
+      ]
+    ],
+    "run": [
+      "adb",
+      "-s",
+      "192.168.1.9:45185",
+      "shell",
+      "/system/bin/timeout 10 /system/bin/linker64 /data/local/tmp/gw-late-signal-8feeec51d6a56e02/probe /data/local/tmp/gw-late-signal-8feeec51d6a56e02/router.so"
+    ],
+    "scope": "late DSO registration only; no VM/game execution",
+    "sha256": {
+      "/mnt/data/projects/glibc-worker/jvm-jni/experiments/same-thread/late-signal-probe.c": "f7289d6d4766a14e13d5138c8c16b80db4efd759c2d08459a207bd5d8295e212",
+      "/mnt/data/projects/glibc-worker/jvm-jni/experiments/same-thread/late-signal-probe.py": "2b0d9c45c78883e8048c29a676868536b06eddeac1bdccbb774a35a35e57c158",
+      "/mnt/data/projects/glibc-worker/core/experiments/same-thread/signal-router.c": "1fafc75aa612a3dab656285107bc5b3d8792b90d7dd5ed54c6b6053b094e8531",
+      "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/late-signal/probe": "47a6b69535e813aecfac1587d769f618d044d558726137de6c732062486aff1a",
+      "/mnt/data/projects/glibc-worker/jvm-jni/build/experiments/system-load/late-signal/router.so": "8feeec51d6a56e025cd0035f5e1be06090310bf8b72a17a5f46f30bafe8854a0"
+    }
+  },
+  "evidence_sha256": {
+    "arm64-v8a-manifest.json": "f9b726065cf47ceb81b1e991ff9f26bf5062c4b734bc209b4af05d6b89cab7b7",
+    "logs.json.gz": "cb9539f5784c5cfb86347fa145aa6faa6b2e170f6bb49ae0761854a0fa7c5d80",
+    "x86_64-manifest.json": "90a6339dd99f1b3ce8531e5781f875de8f465310fbe1975962f15cbf6bcf416a"
+  }
+}
