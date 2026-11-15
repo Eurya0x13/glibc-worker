@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "backend": "domain",
+  "threads": 8,
+  "benchmark": 0,
+  "errors": 0,
+  "execution": "android-application-exec-child",
+  "supervisor_uid": 10310,
+  "coverage": {
+    "apis": 234,
+    "contexts": 48,
+    "domains_created": 106,
+    "domains_finished": 106,
+    "sr_deliveries": 492
+  },
+  "guest_threads": {
+    "created": 32,
+    "passed": 32
+  },
+  "conformance": {
+    "groups": 10,
+    "java_threads": 96,
+    "concurrent_threads": 32,
+    "reentry_depth": 32,
+    "monitor_increments": 960
+  },
+  "vm_cooperation": {
+    "samples": 20,
+    "overlaps": 20
+  },
+  "production_jni_paths_validated": true,
+  "production_ready": false,
+  "performance_measured": false,
+  "apk_sha256": "03176da0d48a758ba1b246df8e4584fd969793b21520b5bf857334909171d04e"
+}

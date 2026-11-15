@@ -442,7 +442,14 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
   }
 #endif
   atomic_store_explicit(&r->response, seq, memory_order_release);
-  fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  extern int gw_experiment_host_domain(void);
+  if (!gw_experiment_host_domain()) {
+#endif
+    fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  }
+#endif
 }
 
 /* TLS exit hook for a thread that reserved a context via fh_context: ask
@@ -465,15 +472,22 @@ static void context_destructor(void *ptr) {
   }
 
   atomic_store(&w->closing, 1);
-  fb_event_notify(&w->guest_event);
-  for (;;) {
-    uint32_t observed = fb_event_sample(&w->host_event);
-    if (atomic_load_explicit(&w->state, memory_order_acquire) == FB_JOINED ||
-        !atomic_load(&gw_host_bridge->running)) {
-      break;
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  extern int gw_experiment_context_stop(struct host_context *);
+  if (!gw_experiment_context_stop(c)) {
+#endif
+    fb_event_notify(&w->guest_event);
+    for (;;) {
+      uint32_t observed = fb_event_sample(&w->host_event);
+      if (atomic_load_explicit(&w->state, memory_order_acquire) == FB_JOINED ||
+          !atomic_load(&gw_host_bridge->running)) {
+        break;
+      }
+      fb_event_wait(&w->host_event, observed);
     }
-    fb_event_wait(&w->host_event, observed);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
   }
+#endif
 
   fh_drop_locals(c, 0);
 #if GW_RPC_PROFILE
@@ -482,6 +496,16 @@ static void context_destructor(void *ptr) {
   atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
   gw_host_current = NULL;
 }
+
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+/* The standalone VM fixture releases while its caller is still attached.
+ * Ordinary Java-created threads use the existing pthread-key destructor. */
+void gw_experiment_release_context(void) {
+  struct host_context *c = gw_host_current;
+  pthread_setspecific(context_key, NULL);
+  context_destructor(c);
+}
+#endif
 
 /* Bind the calling JNIEnv to a bridge context, reserving one on first use.
    The CAS claims the slot; per-use fields are reset but the event epochs
@@ -547,8 +571,15 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
                              "Cannot allocate Host thread-local context");
     }
 
-    atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
-    fb_owner_post(gw_host_bridge, i);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+    extern int gw_experiment_context_start(struct host_context *);
+    if (!gw_experiment_context_start(c)) {
+#endif
+      atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
+      fb_owner_post(gw_host_bridge, i);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+    }
+#endif
     for (;;) {
       uint32_t observed = fb_event_sample(&w->host_event);
       int attached = atomic_load_explicit(&w->state, memory_order_acquire);

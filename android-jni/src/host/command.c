@@ -80,25 +80,33 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   atomic_store_explicit(&r->request, seq, memory_order_release);
   struct fb_event *event = &fb_context_at(gw_host_bridge, c->id)->host_event;
   GW_RPC_SCOPE_END(pack);
-  fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  extern int gw_experiment_command(struct host_context *, struct fb_call *,
+                                   int);
+  if (!gw_experiment_command(c, r, seq)) {
+#endif
+    fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
 
-  /* A final response implies that synchronous reverse JNI calls have already
-     returned. Avoid polling their slots again on the completed path. Keep
-     sample-before-pump and the second response check: a callback can complete
-     this command while the pump runs, and its notification must not be lost.
-     The Guest pump is different: it also services owner lifecycle work. */
-  while (atomic_load_explicit(&r->response, memory_order_acquire) != seq) {
-    uint32_t observed = fb_event_sample(event);
-    full_host_poll();
-    if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
-      break;
-    }
+    /* A final response implies that synchronous reverse JNI calls have already
+       returned. Avoid polling their slots again on the completed path. Keep
+       sample-before-pump and the second response check: a callback can complete
+       this command while the pump runs, and its notification must not be lost.
+       The Guest pump is different: it also services owner lifecycle work. */
+    while (atomic_load_explicit(&r->response, memory_order_acquire) != seq) {
+      uint32_t observed = fb_event_sample(event);
+      full_host_poll();
+      if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
+        break;
+      }
 #if GW_RPC_READY_POLL
-    fb_event_wait_active_response(event, observed, &r->response, seq);
+      fb_event_wait_active_response(event, observed, &r->response, seq);
 #else
     fb_event_wait_active(event, observed);
 #endif
+    }
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
   }
+#endif
 
 #if GW_RPC_PROFILE
   if (op == FB_NATIVE && handoff_depth < GW_HANDOFF_DEPTH) {

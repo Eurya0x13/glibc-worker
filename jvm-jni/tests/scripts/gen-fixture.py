@@ -1,7 +1,13 @@
+import argparse
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
-d = root / "jvm-jni/build/native/generated/java/conformance"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--output", type=Path, default=root / "jvm-jni/build/native/generated"
+)
+generated = parser.parse_args().output
+d = generated / "java/conformance"
 d.mkdir(parents=True, exist_ok=True)
 types = [
     ("Boolean", "boolean", "jboolean", "Z", "z", "JNI_TRUE"),
@@ -162,8 +168,5 @@ for name, jt, ct, s, var, val in types[:-1]:
         + "}"
     )
 c.append("return 0;}")
-(root / "jvm-jni/build/native/generated").mkdir(parents=True, exist_ok=True)
-(root / "jvm-jni/build/native/generated/fixture_generated.inc").write_text(
-    "\n".join(c) + "\n"
-)
+(generated / "fixture_generated.inc").write_text("\n".join(c) + "\n")
 print("Fixture method/field/array matrix generated")

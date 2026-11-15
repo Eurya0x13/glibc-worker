@@ -1,0 +1,124 @@
+{
+  "build": "321a385684a6bd29",
+  "execution": "desktop-linux",
+  "compatibility": [
+    {
+      "result": {
+        "result": "PASS",
+        "backend": "worker",
+        "threads": 1,
+        "benchmark": 0,
+        "errors": 0
+      },
+      "samples": [],
+      "coverage": [
+        {
+          "apis": 234,
+          "contexts": 48,
+          "domains_created": 0,
+          "domains_finished": 0,
+          "sr_deliveries": 306
+        }
+      ],
+      "command": [
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/host",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/guest",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/probe.so"
+      ]
+    },
+    {
+      "result": {
+        "result": "PASS",
+        "backend": "domain",
+        "threads": 1,
+        "benchmark": 0,
+        "errors": 0
+      },
+      "samples": [],
+      "coverage": [
+        {
+          "apis": 234,
+          "contexts": 48,
+          "domains_created": 99,
+          "domains_finished": 99,
+          "sr_deliveries": 316
+        }
+      ],
+      "command": [
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/host",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/guest",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/probe.so"
+      ]
+    },
+    {
+      "result": {
+        "result": "PASS",
+        "backend": "worker",
+        "threads": 8,
+        "benchmark": 0,
+        "errors": 0
+      },
+      "samples": [],
+      "coverage": [
+        {
+          "apis": 234,
+          "contexts": 48,
+          "domains_created": 0,
+          "domains_finished": 0,
+          "sr_deliveries": 220
+        }
+      ],
+      "command": [
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/host",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/guest",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/probe.so"
+      ]
+    },
+    {
+      "result": {
+        "result": "PASS",
+        "backend": "domain",
+        "threads": 8,
+        "benchmark": 0,
+        "errors": 0
+      },
+      "samples": [],
+      "coverage": [
+        {
+          "apis": 234,
+          "contexts": 48,
+          "domains_created": 106,
+          "domains_finished": 106,
+          "sr_deliveries": 346
+        }
+      ],
+      "command": [
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/host",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4/ld-linux-x86-64.so.2",
+        "/mnt/data/projects/glibc-worker/core/build/experiments/same-thread/runtime/x86_64/3acda2a05e1284d4:/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/guest",
+        "/mnt/data/projects/glibc-worker/android-jni/build/experiments/same-thread/x86_64/probe.so"
+      ]
+    }
+  ],
+  "fatal_error": [
+    {
+      "backend": "worker",
+      "returncode": -6,
+      "expected_sigabrt": true
+    },
+    {
+      "backend": "domain",
+      "returncode": -6,
+      "expected_sigabrt": true
+    }
+  ],
+  "pairs": [],
+  "production_ready": false
+}

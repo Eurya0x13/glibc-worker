@@ -7,3 +7,7 @@
 # Preserve whitespace in upstream patches and third-party license texts.
 *.patch -whitespace
 **/third_party/** -whitespace
+
+# Captured VM output is evidence; preserve its original spacing and digest.
+**/experiments/same-thread/results/*.txt -whitespace
+**/experiments/same-thread/results/**/*.txt -whitespace

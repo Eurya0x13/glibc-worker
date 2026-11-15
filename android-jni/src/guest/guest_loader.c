@@ -270,5 +270,12 @@ done:
   /* The release publishes result/error/diagnostic before the wake below can
      make the Host observe the completed sequence number. */
   atomic_store_explicit(&cmd->response, seq, memory_order_release);
-  fb_event_notify(&fb_context_at(G, gid)->host_event);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  extern int gw_experiment_guest_domain(void);
+  if (!gw_experiment_guest_domain()) {
+#endif
+    fb_event_notify(&fb_context_at(G, gid)->host_event);
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  }
+#endif
 }

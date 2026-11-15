@@ -54,20 +54,27 @@ static jvalue exchange(int api, jvalue *args, int slot) {
   atomic_store_explicit(&r->request, seq, memory_order_release);
   GW_RPC_SCOPE_END(pack);
 
-  fb_event_notify(&fb_context_at(G, gid)->host_event);
-  for (;;) {
-    uint32_t observed = fb_event_sample(&fb_context_at(G, gid)->guest_event);
-    fg_pump();
-    if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
-      break;
-    }
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
+  extern int gw_experiment_rpc(struct fb_rpc *, int);
+  if (!gw_experiment_rpc(r, seq)) {
+#endif
+    fb_event_notify(&fb_context_at(G, gid)->host_event);
+    for (;;) {
+      uint32_t observed = fb_event_sample(&fb_context_at(G, gid)->guest_event);
+      fg_pump();
+      if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
+        break;
+      }
 #if GW_RPC_READY_POLL
-    fb_event_wait_active_response(&fb_context_at(G, gid)->guest_event, observed,
-                                  &r->response, seq);
+      fb_event_wait_active_response(&fb_context_at(G, gid)->guest_event,
+                                    observed, &r->response, seq);
 #else
     fb_event_wait_active(&fb_context_at(G, gid)->guest_event, observed);
 #endif
+    }
+#ifdef GW_EXPERIMENT_DOMAIN_JNI
   }
+#endif
 #if GW_RPC_PROFILE
   if (slot >= 0 && (unsigned)slot < GW_HANDOFF_DEPTH) {
     gw_handoff_finish(&gw_rpc_current->handoff, (unsigned)slot,
