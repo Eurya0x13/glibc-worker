@@ -19,6 +19,10 @@ enum { DOMAIN_READY = 1, DOMAIN_CALL, DOMAIN_CALLBACK, DOMAIN_DONE };
 
 enum { DOMAIN_ROUNDS = 10000, DOMAIN_NESTING = 8 };
 
+/* Linux test-owned realtime signals. Avoid HotSpot SIGUSR2; installation
+ * checks that both actions are unused instead of assuming signal ownership. */
+enum { DOMAIN_NOTIFY_SIGNAL = 50, DOMAIN_NESTED_SIGNAL = 51 };
+
 struct exchange {
   struct domain host, guest;
   void (*swap)(struct domain *, struct domain *);
@@ -31,6 +35,11 @@ struct exchange {
   int *allocation;
   volatile sig_atomic_t signal_count;
   volatile uintptr_t signal_tp[2];
+  void (*fault)(void *);
+  void *fault_page;
+  int host_signal_probe;
+  int host_signal_expected[3];
+  volatile sig_atomic_t host_signal_delivered[3];
 };
 
 void domain_swap(struct domain *from, struct domain *to);

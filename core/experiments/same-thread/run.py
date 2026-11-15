@@ -15,6 +15,22 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], default="x86_64")
 parser.add_argument("--runtime", type=Path)
 parser.add_argument("--output", type=Path)
+parser.add_argument("--host-source", type=Path, action="append", default=[])
+parser.add_argument("--host-flag", action="append", default=[])
+parser.add_argument("--build-only", action="store_true")
+parser.add_argument(
+    "--credential-guard",
+    action="store_true",
+    help="Assert setxid rejection in the revised experimental runtime",
+)
+parser.add_argument(
+    "--signals",
+    action="store_true",
+    help="Test scoped signal routing with --adopt",
+)
+parser.add_argument(
+    "--adopt", action="store_true", help="Use the patched multi-carrier runtime"
+)
 parser.add_argument(
     "--ndk", type=Path, help="Build Android Host; do not run locally"
 )
@@ -28,6 +44,10 @@ parser.add_argument(
     "--sysroot", type=Path, help="QEMU Host dynamic-loader sysroot"
 )
 args = parser.parse_args()
+if args.signals and not args.adopt:
+    parser.error("--signals requires --adopt")
+if args.adopt and not args.runtime:
+    parser.error("--adopt requires an explicit experimental --runtime")
 if args.ndk and args.qemu:
     parser.error(
         "Android deployment and Linux QEMU execution are separate stages"
@@ -38,6 +58,10 @@ if args.qemu and (args.abi != "arm64-v8a" or not args.sysroot):
     parser.error("--qemu requires --abi arm64-v8a and an explicit --sysroot")
 runtime = (args.runtime or core / "build/glibc-runtime" / args.abi).resolve()
 kind = "android" if args.ndk else "linux"
+if args.adopt:
+    kind += "-adopt"
+if args.signals:
+    kind += "-signals"
 output = (
     args.output or core / "build/experiments/same-thread" / f"{args.abi}-{kind}"
 ).resolve()
@@ -92,19 +116,47 @@ def build(cc, name, sources, flags=()):
     subprocess.run(command, check=True)
 
 
+host_sources = [
+    source / ("adopt-host.c" if args.adopt else "host.c"),
+    source / "switch.S",
+    core / "src/bootstrap/loader_image.c",
+]
+if args.adopt:
+    host_sources += [source / "start.S", core / "src/bootstrap/clone.S"]
+host_flags = ["-pthread"] if args.adopt else []
+host_sources += [p.resolve() for p in args.host_source]
+host_flags += ["-I" + str(source), *args.host_flag]
+guest_flags = ["-ldl", "-pthread"]
+if args.credential_guard:
+    if not args.adopt:
+        parser.error("--credential-guard requires --adopt")
+    guest_flags += ["-DGW_ADOPT_SETXID_GUARD"]
+if args.signals:
+    host_sources += [source / "signals.c", source / "signal-entry.S"]
+    host_flags += ["-DGW_DOMAIN_SIGNALS"]
+    guest_flags += ["-DGW_DOMAIN_SIGNALS"]
+if args.ndk:
+    host_flags += ["-fno-emulated-tls"]
+build(host_cc, "host", host_sources, host_flags)
 build(
-    host_cc,
-    "host",
-    [
-        source / "host.c",
-        source / "switch.S",
-        core / "src/bootstrap/loader_image.c",
-    ],
-    ["-fno-emulated-tls"] if args.ndk else [],
+    guest_cc,
+    "guest",
+    [source / ("adopt-guest.c" if args.adopt else "guest.c")],
+    guest_flags,
 )
-build(guest_cc, "guest", [source / "guest.c"], ["-ldl"])
 build(guest_cc, "probe.so", [source / "probe.c"], ["-shared", "-fPIC"])
+if args.adopt:
+    unwind = Path(
+        subprocess.check_output(
+            [guest_cc, "-print-file-name=libgcc_s.so.1"], text=True
+        ).strip()
+    ).resolve()
+    if not unwind.is_file():
+        parser.error("Guest pthread_exit requires a matching libgcc_s.so.1")
+    shutil.copyfile(unwind, output / "libgcc_s.so.1")
 files = [
+    *[p.resolve() for p in args.host_source],
+    source / "host-hooks.h",
     *source.glob("*.c"),
     source / "switch.S",
     source / "domain.h",
@@ -121,6 +173,21 @@ files = [
     output / "guest",
     output / "probe.so",
 ]
+if args.adopt:
+    files += [
+        source / "adopt.h",
+        source / "start.S",
+        source / "adopt-nptl.inc",
+        core / "src/bootstrap/clone.S",
+        runtime / "manifest.json",
+        output / "libgcc_s.so.1",
+    ]
+if args.signals:
+    files += [
+        source / "signals.h",
+        source / "signal-entry.S",
+        source / "signal-registry.inc",
+    ]
 manifest = {
     "abi": args.abi,
     "host_libc": "bionic" if args.ndk else "glibc",
@@ -137,8 +204,8 @@ manifest = {
     },
 }
 (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-if args.ndk and not args.serial:
-    print(f"Android binaries built, NOT executed: {output}")
+if args.build_only or (args.ndk and not args.serial):
+    print(f"Binaries built, NOT executed: {output}")
     raise SystemExit(0)
 if (
     not args.qemu
@@ -150,7 +217,7 @@ if (
 command = [
     str(output / "host"),
     str(loader),
-    str(runtime),
+    str(runtime) + (":" + str(output) if args.adopt else ""),
     str(output / "guest"),
     str(output / "probe.so"),
 ]
@@ -175,6 +242,7 @@ if args.serial:
         loader,
         runtime / "libc.so.6",
         runtime / "libm.so.6",
+        *([output / "libgcc_s.so.1"] if args.adopt else []),
     ]:
         subprocess.run([*adb, "push", str(path), remote + "/"], check=True)
     invocation = [
@@ -217,15 +285,30 @@ except subprocess.TimeoutExpired as error:
 if run.returncode:
     raise SystemExit(f"Probe exited {run.returncode}; logs: {output}")
 result = json.loads(run.stdout)
+expected = (
+    {
+        "calls": 19200,
+        "carriers": 24,
+        "guest_destructors": 24,
+        "host_destructors": 24,
+        "host_join_completed": True,
+        "tls_destructors": 24,
+        "guest_pthread_exits": 12,
+    }
+    if args.adopt
+    else {
+        "calls": 80000,
+        "callbacks": 80000,
+        "nested": 70000,
+        "same_tid": True,
+        "distinct_tls": True,
+        "host_signal_saw_guest_tls": True,
+    }
+)
 if (
     result["result"] != "PASS"
     or result["failures"]
-    or not result["same_tid"]
-    or not result["distinct_tls"]
-    or not result["host_signal_saw_guest_tls"]
-    or result["calls"] != 80000
-    or result["callbacks"] != 80000
-    or result["nested"] != 70000
+    or any(result[k] != v for k, v in expected.items())
 ):
     raise SystemExit(f"Probe assertions failed: {output}")
 result.update(
@@ -240,7 +323,9 @@ result.update(
     guest_libc="glibc",
     android_validated=bool(args.serial),
     android_app_validated=False,
-    pthread_adoption_validated=False,
+    pthread_adoption_validated=bool(args.adopt),
+    scoped_signal_routing_validated=bool(args.signals),
+    credential_rejection_validated=bool(args.credential_guard),
     production_ready=False,
     command=command,
 )
