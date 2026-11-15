@@ -3,12 +3,19 @@
 
 import argparse
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXTENSIONS = {".c", ".h", ".java", ".py", ".sh", ".zig"}
+# Hand-maintained C fragments injected into the experimental runtime. Generated
+# JNI .inc files are intentionally absent: their generators own their format.
+C_FRAGMENTS = {
+    "core/experiments/same-thread/adopt-nptl.inc",
+    "core/experiments/same-thread/signal-guard.inc",
+    "core/experiments/same-thread/signal-registry.inc",
+}
 TEXT_EXTENSIONS = EXTENSIONS | {".md", ".json", ".kts", ".properties"}
 
 
@@ -30,7 +37,7 @@ def main():
     args = parser.parse_args()
     groups = {"clang-format": [], "shfmt": [], "ruff": [], "zig": []}
 
-    for directory in (
+    directories = (
         "core",
         "bionic-dlopen",
         "android-jni",
@@ -38,48 +45,47 @@ def main():
         "scripts",
         "docs",
         "config",
-    ):
-        for path in sorted((ROOT / directory).rglob("*")):
-            if not path.is_file() or path.suffix not in TEXT_EXTENSIONS:
-                continue
-            if any(
-                part
-                in (
-                    "build",
-                    "work",
-                    "vendor",
-                    ".gradle",
-                    "__pycache__",
-                    "third_party",
-                )
-                for part in path.relative_to(ROOT).parts
-            ):
-                continue
-            data = path.read_bytes()
-            normalized = data.replace(b"\r\n", b"\n").rstrip(b"\n") + b"\n"
-            if data != normalized:
-                if args.check:
-                    raise SystemExit(
-                        "Use LF and one final newline: " + str(path)
-                    )
-                path.write_bytes(normalized)
-            if path.suffix not in EXTENSIONS:
-                continue
-            if any(
-                part in (".gradle", "build", "__pycache__", "third_party")
-                for part in path.relative_to(ROOT).parts
-            ):
-                continue
-            tool = (
-                "zig"
-                if path.suffix == ".zig"
-                else "ruff"
-                if path.suffix == ".py"
-                else "shfmt"
-                if path.suffix == ".sh"
-                else "clang-format"
+    )
+    excluded = {
+        "build",
+        "work",
+        "vendor",
+        ".gradle",
+        "__pycache__",
+        "third_party",
+    }
+    for directory in directories:
+        # Prune before walking: build/runtime trees can contain millions of
+        # files, and none of their generated sources belongs to this check.
+        for parent, children, names in os.walk(ROOT / directory):
+            children[:] = sorted(
+                name for name in children if name not in excluded
             )
-            groups[tool].append(str(path.relative_to(ROOT)))
+            for name in sorted(names):
+                path = Path(parent) / name
+                fragment = path.relative_to(ROOT).as_posix() in C_FRAGMENTS
+                if path.suffix not in TEXT_EXTENSIONS and not fragment:
+                    continue
+                data = path.read_bytes()
+                normalized = data.replace(b"\r\n", b"\n").rstrip(b"\n") + b"\n"
+                if data != normalized:
+                    if args.check:
+                        raise SystemExit(
+                            "Use LF and one final newline: " + str(path)
+                        )
+                    path.write_bytes(normalized)
+                if path.suffix not in EXTENSIONS and not fragment:
+                    continue
+                tool = (
+                    "zig"
+                    if path.suffix == ".zig"
+                    else "ruff"
+                    if path.suffix == ".py"
+                    else "shfmt"
+                    if path.suffix == ".sh"
+                    else "clang-format"
+                )
+                groups[tool].append(str(path.relative_to(ROOT)))
 
     tools = {name: executable(name) for name in groups}
     for name, files in groups.items():

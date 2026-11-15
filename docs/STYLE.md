@@ -33,4 +33,4 @@ shellcheck -S warning scripts/*.sh jvm-jni/tests/scripts/*.sh jvm-jni/tests/smok
 
 需要安装 `clang-format`、`shfmt` 和 `ruff`；脚本从 PATH 或本地 `scripts/build/tools/` 查找。推荐固定格式工具版本，例如 clang-format 21.1.8、shfmt 3.12.0 和 Ruff 0.17.4。shfmt 来源为 [官方发布页](https://github.com/mvdan/sh/releases/tag/v3.12.0)。
 
-格式脚本只遍历维护代码；第三方许可证、Gradle wrapper、下载源码、构建缓存与自动生成 `.inc` 不做手工格式化。生成代码需要调整时修改生成器。Kotlin DSL 当前按上述规则维护，未宣称经过 Kotlin formatter 检查。
+格式脚本只遍历维护代码；第三方许可证、Gradle wrapper、下载源码、构建缓存与自动生成 `.inc` 不做手工格式化。生成代码需要调整时修改生成器。实验运行时的手写 `adopt-nptl.inc`、`signal-guard.inc` 和 `signal-registry.inc` 由格式脚本显式纳入 C 格式检查。Kotlin DSL 当前按上述规则维护，未宣称经过 Kotlin formatter 检查。
