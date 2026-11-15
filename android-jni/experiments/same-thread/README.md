@@ -4,7 +4,9 @@
 
 ## 接入边界
 
-两种模式使用同一个 Host、Guest、DSO、Java 测试类和打过收养补丁的 glibc；只用 `GW_DOMAIN_MODE=worker|domain` 选择交接方式。
+两种模式使用同一个 Host、Guest、DSO、Java 测试类和打过收养补丁的 glibc；当前接入构建在未设置 `GW_DOMAIN_MODE` 时默认同线程；显式 `GW_DOMAIN_MODE=worker` 选择线程后端，`GW_DOMAIN_MODE=domain` 显式选择同线程。空值和其他名称均拒绝启动，不静默改用其他后端。APK 兼容性入口不再强制写入该变量，而是验证原生默认值；A/B runner 继续为每轮显式选择后端。
+
+[默认后端回归证据](results/default-backend/README.md) 覆盖缺省、显式选择、非法选择与 ART/HotSpot 同进程装卸载。这个默认值只适用于带收养 runtime 和信号接入的构建；常规安装 SDK 的迁移独立跟踪于 [todo.md](../../../todo.md)。
 
 - 复用 `full_host_start`、`full_guest_start`、Host controller、公开 loader API，以及真实的 `JNI_OnLoad`、`RegisterNatives`、`JNI_OnUnload` 和关闭流程。
 - 复用生产生成的 JNI 表、参数封送、引用/ID 存储、Zig 绑定存储和 libffi 跳板。没有用测试专用 JNI 函数表代替生产桥。
@@ -18,7 +20,7 @@
 
 ## 兼容性断言
 
-每次 runner 都先运行 worker/domain × 1/8 线程矩阵，开启 CheckJNI；任一结果错误或 CheckJNI/信号处理器警告导致失败。复用 `guest_conformance.c` 和生成的方法/字段/数组矩阵，要求正常进程命中 234 个接口入口，再用两种后端各自的隔离子进程验证 FatalError 确实触发 SIGABRT，覆盖 230 个 JNI 与 5 个 VM 入口。Guest DestroyJavaVM 等明确拒绝的语义也计入入口覆盖，不代表这些操作被允许。随后性能模式关闭 CheckJNI 和编译日志。
+每次 runner 都先验证未指定后端的八线程同线程执行及空值／非法选择拒绝，再运行 worker/domain × 1/8 线程矩阵，开启 CheckJNI；任一结果错误或 CheckJNI/信号处理器警告导致失败。复用 `guest_conformance.c` 和生成的方法/字段/数组矩阵，要求正常进程命中 234 个接口入口，再用两种后端各自的隔离子进程验证 FatalError 确实触发 SIGABRT，覆盖 230 个 JNI 与 5 个 VM 入口。Guest DestroyJavaVM 等明确拒绝的语义也计入入口覆盖，不代表这些操作被允许。随后性能模式关闭 CheckJNI 和编译日志。
 
 | 切面 | 断言 |
 | --- | --- |

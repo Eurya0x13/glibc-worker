@@ -38,6 +38,7 @@ evidence = build / "runs" / stamp
 evidence.mkdir(parents=True)
 runtime = Path(manifest["runtime"])
 environment = os.environ.copy()
+environment.pop("GW_DOMAIN_MODE", None)
 if android:
     adb = ["adb", "-s", args.serial]
     remote = "/data/local/tmp/gw-production-jni-" + identity
@@ -105,21 +106,24 @@ else:
     ]
 
 
-def run(mode, threads, measure, label, fatal=False):
+def run(mode, threads, measure, label, fatal=False, reject=False):
+    requested = mode
+    mode = "domain" if requested is None else requested
     settings = {
         **env,
-        "GW_DOMAIN_MODE": mode,
         "GW_THREADS": str(threads),
         "GW_BENCH": str(int(measure)),
         "GW_FATAL": str(int(fatal)),
     }
+    if requested is not None:
+        settings["GW_DOMAIN_MODE"] = requested
     command = (
         [
             *adb,
             "shell",
             "cd "
             + shlex.quote(remote)
-            + " && /system/bin/timeout -s KILL 180 env "
+            + " && /system/bin/timeout -s KILL 180 env -u GW_DOMAIN_MODE "
             + shlex.join([k + "=" + v for k, v in settings.items()] + native),
         ]
         if android
@@ -136,6 +140,17 @@ def run(mode, threads, measure, label, fatal=False):
     )
     (evidence / (label + ".stdout")).write_text(result.stdout)
     (evidence / (label + ".stderr")).write_text(result.stderr)
+    if reject:
+        output = result.stdout + result.stderr
+        if (
+            result.returncode != 2
+            or "JNI_DOMAIN_REJECT invalid_backend" not in output
+        ):
+            raise SystemExit(
+                f"Invalid backend was not rejected: {label}; {evidence}"
+            )
+        print(label, "expected backend rejection", flush=True)
+        return {"requested": requested, "rejected": True, "command": command}
     if fatal:
         output = result.stdout + result.stderr
         if (
@@ -158,6 +173,18 @@ def run(mode, threads, measure, label, fatal=False):
         for line in result.stdout.splitlines()
         if line.startswith("JNI_DOMAIN_RESULT ")
     ]
+    selection = [
+        json.loads(line.removeprefix("JNI_DOMAIN_SELECTION "))
+        for line in result.stdout.splitlines()
+        if line.startswith("JNI_DOMAIN_SELECTION ")
+    ]
+    if selection != [
+        {
+            "requested": requested if requested is not None else "default",
+            "backend": mode,
+        }
+    ]:
+        raise SystemExit(f"Wrong backend selection: {label}; {evidence}")
     samples = [
         json.loads(line.removeprefix("JNI_DOMAIN_BENCH "))
         for line in result.stdout.splitlines()
@@ -263,10 +290,16 @@ results = {
     "execution": "android-shell" if android else "desktop-linux",
     "compatibility": [],
     "fatal_error": [],
+    "backend_selection": [],
     "pairs": [],
     "production_ready": False,
 }
 (evidence / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+results["backend_selection"] = [
+    run(None, 8, False, "compat-default-8"),
+    run("", 1, False, "reject-empty", reject=True),
+    run("invalid", 1, False, "reject-invalid", reject=True),
+]
 for threads in [1, 8]:
     for mode in ["worker", "domain"]:
         results["compatibility"].append(

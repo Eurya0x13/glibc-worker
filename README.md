@@ -32,6 +32,6 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 
 ## 同线程域实验
 
-受限的同线程后端保留在各项目 `experiments/same-thread/`，使用单独构建和测试入口，不进入正常 SDK 安装或更改默认 worker 后端。阅读顺序为 [core 收养与信号机制](core/experiments/same-thread/README.md)、[公开 JNI 接入与生命周期](android-jni/experiments/same-thread/README.md)、[JVM System.load](jvm-jni/experiments/same-thread/SYSTEM_LOAD.md) 和 [晚加载信号链](jvm-jni/experiments/same-thread/LATE_SIGNALS.md)。
+受限的同线程后端保留在各项目 `experiments/same-thread/`，使用单独构建和测试入口。该接入构建默认同线程，`GW_DOMAIN_MODE=worker` 显式选择 worker；空值和未知名称拒绝。常规 SDK 安装与组合构建仍使用原 worker 路径，迁移清单见 [todo.md](todo.md)。阅读顺序为 [core 收养与信号机制](core/experiments/same-thread/README.md)、[公开 JNI 接入与生命周期](android-jni/experiments/same-thread/README.md)、[JVM System.load](jvm-jni/experiments/same-thread/SYSTEM_LOAD.md) 和 [晚加载信号链](jvm-jni/experiments/same-thread/LATE_SIGNALS.md)。
 
 [测量方法](jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](android-jni/docs/ARRAY_COPY_CACHE.md)。这些固定制品的结果不等同于通用 ART/JRE/模组兼容保证；完整双域信号语义仍见 [todo.md](todo.md)。

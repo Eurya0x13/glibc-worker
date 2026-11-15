@@ -6,7 +6,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Compatibility pressure only; these timings are not a performance result. */
 public final class LateSignalPressure {
   static void run(Class<?> fixture) throws Exception {
-    boolean adopted = "domain".equals(System.getenv("GW_DOMAIN_MODE"));
+    String mode = System.getenv("GW_DOMAIN_MODE");
+    boolean adopted = mode == null || "domain".equals(mode);
     if (adopted && (Integer) fixture.getMethod("probeSignals").invoke(null) != 3) {
       throw new AssertionError("Guest TLS/errno signal round trip");
     }

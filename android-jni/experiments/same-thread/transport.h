@@ -5,9 +5,24 @@
 #include "protocol.h"
 #include "full_bridge.h"
 #include <stdatomic.h>
+#include <string.h>
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+/* Selection for adoption-enabled entrypoints only. Normal installed SDK builds
+ * have their own lifecycle and do not consume this experiment's environment.
+ * Missing selection means same-thread; worker is an explicit compatibility
+ * choice. Reject typos instead of quietly changing the execution contract. */
+static inline int jni_domain_select(const char *mode) {
+  if (!mode || !strcmp(mode, "domain")) {
+    return 1;
+  }
+  if (!strcmp(mode, "worker")) {
+    return 0;
+  }
+  return -1;
+}
 
 enum { JNI_DOMAIN_ALLOC = 1, JNI_DOMAIN_FREE, JNI_DOMAIN_STOP };
 

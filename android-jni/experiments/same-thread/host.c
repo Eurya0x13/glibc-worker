@@ -137,8 +137,15 @@ int main(int argc, char **argv) {
 #endif
   REQUIRE(argc == 5);
   const char *mode = getenv("GW_DOMAIN_MODE");
-  REQUIRE(mode && (!strcmp(mode, "worker") || !strcmp(mode, "domain")));
-  session.domain = !strcmp(mode, "domain");
+  int selected = jni_domain_select(mode);
+  if (selected < 0) {
+    fputs("JNI_DOMAIN_REJECT invalid_backend\n", stderr);
+    return 2;
+  }
+  session.domain = selected;
+  printf("JNI_DOMAIN_SELECTION {\"requested\":\"%s\",\"backend\":\"%s\"}\n",
+         mode ? mode : "default", session.domain ? "domain" : "worker");
+  mode = session.domain ? "domain" : "worker";
   measuring = getenv("GW_BENCH") && !strcmp(getenv("GW_BENCH"), "1");
   threads = getenv("GW_THREADS") ? atoi(getenv("GW_THREADS")) : 1;
   REQUIRE(threads > 0 && threads <= 64);

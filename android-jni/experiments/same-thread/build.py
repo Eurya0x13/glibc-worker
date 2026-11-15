@@ -489,6 +489,7 @@ manifest = {
     "system_load": args.system_load,
     "abi": args.abi,
     "host_libc": "bionic" if android else "glibc",
+    "default_backend": "domain",
     "runtime": str(runtime),
     "loader": loader,
     "commands": commands,

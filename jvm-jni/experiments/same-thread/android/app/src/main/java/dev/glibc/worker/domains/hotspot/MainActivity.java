@@ -95,7 +95,9 @@ public final class MainActivity extends Activity {
       // Used only by the production-JNI experiment executable. The original
       // domain fixture ignores these settings.
       builder.environment().put("GW_CONFORMANCE", nativePath + "/libdomain_conformance.so");
-      builder.environment().put("GW_DOMAIN_MODE", "domain");
+      // Exercise the native entrypoint's default, rather than force it here.
+      // Timed A/B runs below continue to select their backend explicitly.
+      builder.environment().remove("GW_DOMAIN_MODE");
       builder.environment().put("GW_THREADS", "8");
       builder.environment().put("GW_BENCH", "0");
       // Explicit experiment-only launch options; one fresh process per sample.
@@ -130,6 +132,9 @@ public final class MainActivity extends Activity {
             if (setting.getKey().startsWith("GW_") || setting.getKey().equals("LD_LIBRARY_PATH")) {
               Os.setenv(setting.getKey(), setting.getValue(), true);
             }
+          }
+          if (!builder.environment().containsKey("GW_DOMAIN_MODE")) {
+            Os.unsetenv("GW_DOMAIN_MODE");
           }
           System.loadLibrary("domain_inline_host");
           runInline(builder.command().subList(1, builder.command().size()).toArray(new String[0]),

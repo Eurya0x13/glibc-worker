@@ -36,6 +36,7 @@ evidence.mkdir(parents=True)
 (evidence / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 runtime = Path(manifest["runtime"])
 environment = os.environ.copy()
+environment.pop("GW_DOMAIN_MODE", None)
 if android:
     adb = ["adb", "-s", args.serial]
     remote = "/data/local/tmp/gw-production-jni-" + identity
@@ -117,20 +118,23 @@ env.update(
 if manifest.get("late_signal"):
     env["GW_LATE_BRIDGE"] = location + "/late-bridge.so"
 results = []
-for mode in ("worker", "domain"):
+for requested in (None, "worker", "domain"):
+    mode = "domain" if requested is None else requested
+    label = "default" if requested is None else requested
     settings = {
         **env,
-        "GW_DOMAIN_MODE": mode,
         "GW_THREADS": "1",
         "GW_BENCH": "0",
     }
+    if requested is not None:
+        settings["GW_DOMAIN_MODE"] = requested
     command = (
         [
             *adb,
             "shell",
             "cd "
             + shlex.quote(remote)
-            + " && /system/bin/timeout -s KILL 120 env "
+            + " && /system/bin/timeout -s KILL 120 env -u GW_DOMAIN_MODE "
             + shlex.join([k + "=" + v for k, v in settings.items()] + native),
         ]
         if android
@@ -145,11 +149,18 @@ for mode in ("worker", "domain"):
         timeout=130,
         check=False,
     )
-    (evidence / (mode + ".stdout")).write_text(completed.stdout)
-    (evidence / (mode + ".stderr")).write_text(completed.stderr)
+    (evidence / (label + ".stdout")).write_text(completed.stdout)
+    (evidence / (label + ".stderr")).write_text(completed.stderr)
     output = completed.stdout + completed.stderr
     if manifest.get("late_signal") and "LATE_SIGNAL_INSTALL " not in output:
         raise SystemExit(f"Late signal installation failed: {evidence}")
+    selection = [
+        json.loads(line.removeprefix("JNI_DOMAIN_SELECTION "))
+        for line in output.splitlines()
+        if line.startswith("JNI_DOMAIN_SELECTION ")
+    ]
+    if selection != [{"requested": label, "backend": mode}]:
+        raise SystemExit(f"Wrong backend selection: {label}; {evidence}")
     pressure = [
         json.loads(line.removeprefix("LATE_SIGNAL_PRESSURE "))
         for line in output.splitlines()
@@ -207,6 +218,7 @@ for mode in ("worker", "domain"):
     results.append(
         {
             "backend": mode,
+            "selection": label,
             "contract": rows[0],
             "lifecycle": life[0],
             "command": command,
@@ -215,7 +227,7 @@ for mode in ("worker", "domain"):
             "signal_delivery": signal_delivery,
         }
     )
-    print(mode, rows[0], life[0], flush=True)
+    print(label, rows[0], life[0], flush=True)
 rejections = []
 if manifest.get("late_signal"):
     for point in range(1, 4):

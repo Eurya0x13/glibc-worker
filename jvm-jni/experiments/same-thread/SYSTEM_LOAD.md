@@ -1,6 +1,6 @@
 # System.load integration with same-thread domains
 
-本轮将已有生产 JVM adapter 直接接入同线程实验后端，通过真实 `System.load` / `System.loadLibrary` 进入 Guest；不再由夹具显式调用公开 loader 的 open/close。默认生产 worker 不变，未增加 JRE 自动识别。
+本轮将已有生产 JVM adapter 直接接入同线程实验后端，通过真实 `System.load` / `System.loadLibrary` 进入 Guest；不再由夹具显式调用公开 loader 的 open/close。当前接入构建默认同线程，`GW_DOMAIN_MODE=worker` 可显式选择 worker；常规 SDK 的默认值和构建入口暂不变，未增加 JRE 自动识别。runner 分别验证未设置选择、显式 worker 和显式 domain；缺省用例检查实际创建了收养域，而不是只看配置字符串。
 
 ## Implementation
 

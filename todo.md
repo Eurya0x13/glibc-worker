@@ -44,3 +44,34 @@ validated. The test APK is not a Pojav/game compatibility result.
 Keep full signal virtualization and process-lifetime record reclamation deferred
 as above. Do not infer support for arbitrary live attachment, unreviewed Android
 ART artifacts or unloading the bridge while the application resumes execution.
+
+## Regular SDK migration of the same-thread backend
+
+The adoption-enabled integration build now defaults to same-thread execution;
+`GW_DOMAIN_MODE=worker` remains an explicit compatibility selection. This does
+not by itself migrate the installed SDK. Its CMake targets currently compile
+the worker Host, and its package script starts `service_main.c` with the normal
+runtime. Simply enabling the experiment macro would leave undefined hooks or
+pair the new service with a libc that lacks the adoption entrypoints.
+
+Promotion must preserve the four project boundaries and provide these pieces:
+
+- Move architecture switching, thread adoption, signal routing and the patched
+  runtime recipe into maintained core sources and installed build targets.
+  Keep JNI and JRE dependencies out of core and bionic-dlopen.
+- Define an explicit public Host bootstrap/configuration API for runtime image
+  paths, selected VM, backend and signal ownership. The current shared session
+  and `start_owner` are private integration structures, not an installed ABI.
+- Separate generic JNI transport initialization from pinned HotSpot/ART late
+  signal setup. `late-signal.c` currently verifies artifacts through JvmAdapter;
+  android-jni must not acquire a dependency on the upper jvm-jni project.
+- Package the matching adoption-enabled Guest service and libc together, with
+  a protocol/capability check before admitting calls. `package-runtime.sh`
+  currently selects the ordinary runtime and worker service.
+- Validate the independently installed CMake packages, default/worker selection,
+  generic Host lifecycle and explicit artifact rejection. Keep JRE/ART profiles
+  maintainer-selected; no version/offset autodetection is implied.
+
+A default change in the independent integration entrypoints is covered by its
+JNI and System.load runners. It is not evidence that these public SDK/build
+contracts have already been implemented.
