@@ -5,8 +5,22 @@
 /* Copies are legal JNI Elements results. Only Host allocation and JNI calls
    live here; no JVM heap pointer, JNIEnv or reference is cached. */
 #define COPY_SLOTS 8
-/* The target JRE's repeated allocation cost jumps at this measured floor. */
-#define COPY_MIN (2u * 1024u * 1024u)
+/* Android allocator page reclamation also affects 1 MiB JNI copies. Keep
+   eligible buffers live between leases; the slot and byte limits still bound
+   retention. The threshold is a policy, not a JVM allocation boundary.
+
+   Scudo MapAllocatorCache::store can release pages but retain the mapping;
+   oversized entries are unmapped. A reused address need not have resident
+   pages. Keeping the allocation live avoids repeated free/refault cycles.
+   Android 13 source (release interval is set by the mallopt wrapper):
+   https://android.googlesource.com/platform/external/scudo/+/8e2d762272cd7bed1362cbe22016d1d9754d74f8/standalone/secondary.h
+   https://android.googlesource.com/platform/external/scudo/+/8e2d762272cd7bed1362cbe22016d1d9754d74f8/standalone/wrappers_c.inc
+
+   HotSpot's Elements path allocates/copies and frees on final release:
+   https://github.com/openjdk/jdk17u/blob/jdk-17.0.14-ga/src/hotspot/share/prims/jni.cpp#L2235
+   This cache uses Region calls for the required copy; it never pins the heap.
+ */
+#define COPY_MIN (1u * 1024u * 1024u)
 #define COPY_MAX (8u * 1024u * 1024u)
 #define COPY_BUDGET (32u * 1024u * 1024u)
 

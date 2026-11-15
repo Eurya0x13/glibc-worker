@@ -1,0 +1,309 @@
+{
+  "runs": {
+    "1048576": [
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 100297.324,
+        "minor_faults_per_call": 1.004,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      },
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 56337.141,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 310493.242,
+        "minor_faults_per_call": 256.0,
+        "queried_pages": 256,
+        "resident_pages": 0,
+        "mincore_errno": 0
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 58183.594,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 313368.391,
+        "minor_faults_per_call": 257.0,
+        "queried_pages": 256,
+        "resident_pages": 0,
+        "mincore_errno": 0
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 56412.406,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 83245.793,
+        "minor_faults_per_call": 1.004,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 1048576,
+        "page_bytes": 4096,
+        "ns_per_call": 58510.965,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 256,
+        "resident_pages": 256,
+        "mincore_errno": 0
+      }
+    ],
+    "1572864": [
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 162932.691,
+        "minor_faults_per_call": 1.504,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      },
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 107233.473,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 598704.777,
+        "minor_faults_per_call": 383.5,
+        "queried_pages": 384,
+        "resident_pages": 0,
+        "mincore_errno": 0
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 110234.523,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 599410.906,
+        "minor_faults_per_call": 385.0,
+        "queried_pages": 384,
+        "resident_pages": 0,
+        "mincore_errno": 0
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 127650.543,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 160414.812,
+        "minor_faults_per_call": 1.504,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 1572864,
+        "page_bytes": 4096,
+        "ns_per_call": 99817.16,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 384,
+        "resident_pages": 384,
+        "mincore_errno": 0
+      }
+    ],
+    "2097152": [
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 813913.16,
+        "minor_faults_per_call": 513.0,
+        "queried_pages": 512,
+        "resident_pages": 0,
+        "mincore_errno": 12
+      },
+      {
+        "state": 0,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 135954.477,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 512,
+        "resident_pages": 512,
+        "mincore_errno": 0
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 810605.469,
+        "minor_faults_per_call": 513.0,
+        "queried_pages": 512,
+        "resident_pages": 0,
+        "mincore_errno": 12
+      },
+      {
+        "state": 1,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 131204.023,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 512,
+        "resident_pages": 512,
+        "mincore_errno": 0
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 0,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 775843.0,
+        "minor_faults_per_call": 513.0,
+        "queried_pages": 512,
+        "resident_pages": 0,
+        "mincore_errno": 12
+      },
+      {
+        "state": 2,
+        "decay": 0,
+        "retained": 1,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 127883.414,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 512,
+        "resident_pages": 512,
+        "mincore_errno": 0
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 0,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 793937.352,
+        "minor_faults_per_call": 513.0,
+        "queried_pages": 512,
+        "resident_pages": 0,
+        "mincore_errno": 12
+      },
+      {
+        "state": 3,
+        "decay": 1,
+        "retained": 1,
+        "bytes": 2097152,
+        "page_bytes": 4096,
+        "ns_per_call": 126323.918,
+        "minor_faults_per_call": 0.0,
+        "queried_pages": 512,
+        "resident_pages": 512,
+        "mincore_errno": 0
+      }
+    ]
+  },
+  "as_run_manifest": {
+    "device": "192.168.1.9:44615",
+    "note": "Separate shell processes after all APK tests restored; M_DECAY_TIME modifies only these processes. mincore_errno 12 means queried range was not fully mapped; resident_pages=0 on failure is not a residency measurement.",
+    "sha256": {
+      "android-jni/build/array-investigation/allocator-pages-sizes": "ee3889b3fa89edab08d68f1edd46bf976993cab4bb59a5310adc85d6a63cfff3",
+      "android-jni/tests/native/allocator_pages.c": "07c5f8aeff57bf1c5286a7b1b3641241192461f50c76600378b6153ac239c386",
+      "android-jni/build/array-investigation/allocator-pages-1048576.jsonl": "2ecaf260a426770dde8d752a7d8a8e9aee6a8eecd1e365e9c6a08fd250c2d03d",
+      "android-jni/build/array-investigation/allocator-pages-1572864.jsonl": "650d0d5f4b9d67c680c35dd5da20a1accc5b34929273a400371a6ca34fd83bd8",
+      "android-jni/build/array-investigation/allocator-pages-2097152.jsonl": "d8f620a2cb62ef23851c5a4050f5dc0315542527b02c36dc09a9c7f2a585fa6a"
+    }
+  }
+}

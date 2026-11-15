@@ -15,9 +15,11 @@
 维护 Host 存储源码及构建 android-jni 需要 Zig 0.16.0；格式脚本调用 `zig fmt`。core 和 bionic-dlopen 自身的构建不依赖 Zig。
 
 C / 头文件 / Java 的函数、类型定义之间保留一个空行，由
-`SeparateDefinitionBlocks: Always` 自动维护。函数内部按逻辑阶段留空行，避免把检查、分配、调用与清理挤在一起；Python、Bash 与 Kotlin 同样遵守这一分块约定。
+`SeparateDefinitionBlocks: Always` 自动维护。源码链接中的不可拆分 URL 可单独占行并超过列宽，保持链接可直接访问；其余注释遵循相应列宽。
 
-C / 头文件 / Java 的 `if`、`else`、`for`、`while` 语句体一律使用花括号，即使只有一条语句；C 由 `InsertBraces: true` 自动维护，Java 由脚本补齐后经 clang-format 归一化。手工维护的宏区域同样遵守该规则。
+函数内部按逻辑阶段留空行，避免把检查、分配、调用与清理挤在一起；Python、Bash 与 Kotlin 同样遵守这一分块约定。
+
+C / 头文件 / Java 的 `if`、`else`、`for`、`while` 语句体一律使用花括号，即使只有一条语句；C 由 `InsertBraces: true` 自动维护，Java 手动补齐后经 clang-format 归一化。手工维护的宏区域同样遵守该规则。
 
 少量拼接 JNI 类型名的 C 宏会被 clang-format 错判缩进。这些宏只在定义范围内使用
 `clang-format off/on`，手工保持 2 空格缩进、80 列内、续行反斜杠对齐及逻辑分段；调用处和其余代码仍自动格式化。

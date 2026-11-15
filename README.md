@@ -29,3 +29,9 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 当前真实验证仍主要覆盖 Android HotSpot。公开 JNI 层已与 JRE 私有接口分离，这不等于 ART 的完整 JNI 桥已验证。Pojav 与真实模组接入在外部验证工程，本工作区不包含启动器源码。
 
 依赖下载和源码缓存分别归所属项目的 `vendor/`、`work/`，构建输出归各自 `build/`；根目录不保存这些缓存。代码格式见 [STYLE](docs/STYLE.md)，项目边界、契约文档与 review 顺序见 [REVIEW_GUIDE](docs/REVIEW_GUIDE.md)。
+
+## 同线程域实验
+
+受限的同线程后端保留在各项目 `experiments/same-thread/`，使用单独构建和测试入口，不进入正常 SDK 安装或更改默认 worker 后端。阅读顺序为 [core 收养与信号机制](core/experiments/same-thread/README.md)、[公开 JNI 接入与生命周期](android-jni/experiments/same-thread/README.md)、[JVM System.load](jvm-jni/experiments/same-thread/SYSTEM_LOAD.md) 和 [晚加载信号链](jvm-jni/experiments/same-thread/LATE_SIGNALS.md)。
+
+[测量方法](jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](android-jni/docs/ARRAY_COPY_CACHE.md)。这些固定制品的结果不等同于通用 ART/JRE/模组兼容保证；完整双域信号语义仍见 [todo.md](todo.md)。

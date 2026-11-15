@@ -1,0 +1,2400 @@
+{
+  "result": "PASS",
+  "apk_processes": 7,
+  "contracts_per_backend": 312,
+  "concurrent_leases": 12,
+  "cache_min_bytes": 1048576,
+  "slots": 8,
+  "budget_bytes": 33554432,
+  "comparisons": {
+    "midrange": {
+      "apk_sha256": "3362367c2608a1e895c638fa64c5177a612ef2ddb4be2df532051d8805e1c3e9",
+      "transport": "domain",
+      "allocator_decay": "0",
+      "cases": [
+        {
+          "case": "array-elements-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 60.316650390625,
+              "worker_wall_ns_per_call": 1119.0609130859375,
+              "worker_process_cpu_ns_per_call": 1879.6998291015625,
+              "paired_extra_wall_ns_per_call": 1059.1619873046875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 62.885009765625,
+              "worker_wall_ns_per_call": 1176.3211669921875,
+              "worker_process_cpu_ns_per_call": 2903.50341796875,
+              "paired_extra_wall_ns_per_call": 1113.0748291015625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 55.96435546875,
+              "worker_wall_ns_per_call": 1114.09814453125,
+              "worker_process_cpu_ns_per_call": 1128.45556640625,
+              "paired_extra_wall_ns_per_call": 1058.095947265625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 62.396728515625,
+              "worker_wall_ns_per_call": 1165.2080078125,
+              "worker_process_cpu_ns_per_call": 2689.415771484375,
+              "paired_extra_wall_ns_per_call": 1101.6376953125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 63.373291015625,
+              "worker_wall_ns_per_call": 1187.434326171875,
+              "worker_process_cpu_ns_per_call": 3117.591064453125,
+              "paired_extra_wall_ns_per_call": 1124.511962890625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 64.6689453125,
+              "worker_wall_ns_per_call": 1124.023681640625,
+              "worker_process_cpu_ns_per_call": 2630.944091796875,
+              "paired_extra_wall_ns_per_call": 1060.22802734375
+            }
+          }
+        },
+        {
+          "case": "array-elements-1048575",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 275937.7255859375,
+              "worker_wall_ns_per_call": 290091.251953125,
+              "worker_process_cpu_ns_per_call": 288143.05908203125,
+              "paired_extra_wall_ns_per_call": 13240.57177734375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 282251.3896484375,
+              "worker_wall_ns_per_call": 298522.08544921875,
+              "worker_process_cpu_ns_per_call": 296711.97412109375,
+              "paired_extra_wall_ns_per_call": 18123.44189453125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 267659.2919921875,
+              "worker_wall_ns_per_call": 281063.8134765625,
+              "worker_process_cpu_ns_per_call": 279418.337890625,
+              "paired_extra_wall_ns_per_call": 13342.66015625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 276103.7041015625,
+              "worker_wall_ns_per_call": 290156.9638671875,
+              "worker_process_cpu_ns_per_call": 288559.80078125,
+              "paired_extra_wall_ns_per_call": 19585.712890625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 288399.0751953125,
+              "worker_wall_ns_per_call": 306887.20703125,
+              "worker_process_cpu_ns_per_call": 304864.1474609375,
+              "paired_extra_wall_ns_per_call": 16661.1708984375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 284216.1591796875,
+              "worker_wall_ns_per_call": 299118.6904296875,
+              "worker_process_cpu_ns_per_call": 296867.7802734375,
+              "paired_extra_wall_ns_per_call": 13138.4833984375
+            }
+          }
+        },
+        {
+          "case": "array-elements-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 279861.3466796875,
+              "worker_wall_ns_per_call": 291640.28662109375,
+              "worker_process_cpu_ns_per_call": 289696.16943359375,
+              "paired_extra_wall_ns_per_call": 12828.42578125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 289526.7802734375,
+              "worker_wall_ns_per_call": 47907.7333984375,
+              "worker_process_cpu_ns_per_call": 47608.7744140625,
+              "paired_extra_wall_ns_per_call": -241566.9326171875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 269125.7890625,
+              "worker_wall_ns_per_call": 280868.5771484375,
+              "worker_process_cpu_ns_per_call": 279090.20703125,
+              "paired_extra_wall_ns_per_call": 12442.12109375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 295303.5986328125,
+              "worker_wall_ns_per_call": 48554.1240234375,
+              "worker_process_cpu_ns_per_call": 48248.72265625,
+              "paired_extra_wall_ns_per_call": -246951.998046875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 283749.9619140625,
+              "worker_wall_ns_per_call": 47261.3427734375,
+              "worker_process_cpu_ns_per_call": 46968.826171875,
+              "paired_extra_wall_ns_per_call": -236181.8671875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 290596.904296875,
+              "worker_wall_ns_per_call": 302411.99609375,
+              "worker_process_cpu_ns_per_call": 300302.1318359375,
+              "paired_extra_wall_ns_per_call": 13214.73046875
+            }
+          }
+        },
+        {
+          "case": "array-elements-1572864",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 549634.8032226562,
+              "worker_wall_ns_per_call": 584707.6875,
+              "worker_process_cpu_ns_per_call": 582178.5385742188,
+              "paired_extra_wall_ns_per_call": 33892.0517578125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 540962.4208984375,
+              "worker_wall_ns_per_call": 89422.814453125,
+              "worker_process_cpu_ns_per_call": 88822.86669921875,
+              "paired_extra_wall_ns_per_call": -452142.82177734375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 541444.2236328125,
+              "worker_wall_ns_per_call": 579876.4267578125,
+              "worker_process_cpu_ns_per_call": 577115.7138671875,
+              "paired_extra_wall_ns_per_call": 38230.3173828125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 537630.3330078125,
+              "worker_wall_ns_per_call": 89344.42578125,
+              "worker_process_cpu_ns_per_call": 88709.6201171875,
+              "paired_extra_wall_ns_per_call": -449314.0390625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 544294.5087890625,
+              "worker_wall_ns_per_call": 89501.203125,
+              "worker_process_cpu_ns_per_call": 88936.11328125,
+              "paired_extra_wall_ns_per_call": -454971.6044921875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 557825.3828125,
+              "worker_wall_ns_per_call": 589538.9482421875,
+              "worker_process_cpu_ns_per_call": 587241.36328125,
+              "paired_extra_wall_ns_per_call": 29553.7861328125
+            }
+          }
+        },
+        {
+          "case": "array-elements-2097152",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 789706.580078125,
+              "worker_wall_ns_per_call": 822398.60546875,
+              "worker_process_cpu_ns_per_call": 814587.9829101562,
+              "paired_extra_wall_ns_per_call": 29055.4765625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 790349.2333984375,
+              "worker_wall_ns_per_call": 142885.3671875,
+              "worker_process_cpu_ns_per_call": 141863.6572265625,
+              "paired_extra_wall_ns_per_call": -648794.451171875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 793542.6669921875,
+              "worker_wall_ns_per_call": 823771.7080078125,
+              "worker_process_cpu_ns_per_call": 816401.8173828125,
+              "paired_extra_wall_ns_per_call": 30810.6220703125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 790490.4208984375,
+              "worker_wall_ns_per_call": 139352.314453125,
+              "worker_process_cpu_ns_per_call": 138515.32421875,
+              "paired_extra_wall_ns_per_call": -651403.6572265625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 790208.0458984375,
+              "worker_wall_ns_per_call": 146418.419921875,
+              "worker_process_cpu_ns_per_call": 145211.990234375,
+              "paired_extra_wall_ns_per_call": -646185.2451171875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 785870.4931640625,
+              "worker_wall_ns_per_call": 821025.5029296875,
+              "worker_process_cpu_ns_per_call": 812774.1484375,
+              "paired_extra_wall_ns_per_call": 27300.3310546875
+            }
+          }
+        },
+        {
+          "case": "array-elements-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 58845.759765625,
+              "worker_wall_ns_per_call": 64314.5087890625,
+              "worker_process_cpu_ns_per_call": 64074.46240234375,
+              "paired_extra_wall_ns_per_call": 5633.07470703125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 56374.568359375,
+              "worker_wall_ns_per_call": 61105.63818359375,
+              "worker_process_cpu_ns_per_call": 86921.87158203125,
+              "paired_extra_wall_ns_per_call": 4816.7431640625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 59557.9189453125,
+              "worker_wall_ns_per_call": 64218.5986328125,
+              "worker_process_cpu_ns_per_call": 63941.48046875,
+              "paired_extra_wall_ns_per_call": 4495.9423828125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 58536.283203125,
+              "worker_wall_ns_per_call": 63845.9287109375,
+              "worker_process_cpu_ns_per_call": 115743.2734375,
+              "paired_extra_wall_ns_per_call": 5868.0517578125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 54212.853515625,
+              "worker_wall_ns_per_call": 58365.34765625,
+              "worker_process_cpu_ns_per_call": 58100.4697265625,
+              "paired_extra_wall_ns_per_call": 3765.4345703125
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 58133.6005859375,
+              "worker_wall_ns_per_call": 64410.4189453125,
+              "worker_process_cpu_ns_per_call": 64207.4443359375,
+              "paired_extra_wall_ns_per_call": 6770.20703125
+            }
+          }
+        },
+        {
+          "case": "array-elements-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 941.1527099609375,
+              "worker_wall_ns_per_call": 2024.982177734375,
+              "worker_process_cpu_ns_per_call": 3951.79638671875,
+              "paired_extra_wall_ns_per_call": 1086.1583251953125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 921.363525390625,
+              "worker_wall_ns_per_call": 2023.3812255859375,
+              "worker_process_cpu_ns_per_call": 3953.7071533203125,
+              "paired_extra_wall_ns_per_call": 1113.2576904296875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 922.2880859375,
+              "worker_wall_ns_per_call": 1970.881591796875,
+              "worker_process_cpu_ns_per_call": 3901.611572265625,
+              "paired_extra_wall_ns_per_call": 1051.30712890625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 897.517578125,
+              "worker_wall_ns_per_call": 1966.308837890625,
+              "worker_process_cpu_ns_per_call": 3894.193115234375,
+              "paired_extra_wall_ns_per_call": 1079.8154296875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 945.20947265625,
+              "worker_wall_ns_per_call": 2080.45361328125,
+              "worker_process_cpu_ns_per_call": 4013.22119140625,
+              "paired_extra_wall_ns_per_call": 1146.699951171875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 960.017333984375,
+              "worker_wall_ns_per_call": 2079.082763671875,
+              "worker_process_cpu_ns_per_call": 4001.981201171875,
+              "paired_extra_wall_ns_per_call": 1121.009521484375
+            }
+          }
+        },
+        {
+          "case": "array-elements-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 226.2760009765625,
+              "worker_wall_ns_per_call": 1290.2127685546875,
+              "worker_process_cpu_ns_per_call": 3220.4962158203125,
+              "paired_extra_wall_ns_per_call": 1064.73486328125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 224.2900390625,
+              "worker_wall_ns_per_call": 1346.097412109375,
+              "worker_process_cpu_ns_per_call": 3266.4566650390625,
+              "paired_extra_wall_ns_per_call": 1120.5350341796875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 207.2470703125,
+              "worker_wall_ns_per_call": 1207.387939453125,
+              "worker_process_cpu_ns_per_call": 3141.572998046875,
+              "paired_extra_wall_ns_per_call": 1000.347412109375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 211.482177734375,
+              "worker_wall_ns_per_call": 1286.292236328125,
+              "worker_process_cpu_ns_per_call": 3204.49658203125,
+              "paired_extra_wall_ns_per_call": 1074.0966796875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 237.097900390625,
+              "worker_wall_ns_per_call": 1405.902587890625,
+              "worker_process_cpu_ns_per_call": 3328.416748046875,
+              "paired_extra_wall_ns_per_call": 1166.973388671875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 245.304931640625,
+              "worker_wall_ns_per_call": 1373.03759765625,
+              "worker_process_cpu_ns_per_call": 3299.41943359375,
+              "paired_extra_wall_ns_per_call": 1129.122314453125
+            }
+          }
+        },
+        {
+          "case": "array-region-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 52.89404296875,
+              "worker_wall_ns_per_call": 949.063720703125,
+              "worker_process_cpu_ns_per_call": 1439.03076171875,
+              "paired_extra_wall_ns_per_call": 896.1414794921875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 51.5184326171875,
+              "worker_wall_ns_per_call": 945.246826171875,
+              "worker_process_cpu_ns_per_call": 2109.5064697265625,
+              "paired_extra_wall_ns_per_call": 893.84130859375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 54.6875,
+              "worker_wall_ns_per_call": 925.49951171875,
+              "worker_process_cpu_ns_per_call": 1899.72412109375,
+              "paired_extra_wall_ns_per_call": 870.924560546875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 48.66845703125,
+              "worker_wall_ns_per_call": 918.175537109375,
+              "worker_process_cpu_ns_per_call": 1313.523681640625,
+              "paired_extra_wall_ns_per_call": 869.64794921875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 54.368408203125,
+              "worker_wall_ns_per_call": 972.318115234375,
+              "worker_process_cpu_ns_per_call": 2905.4892578125,
+              "paired_extra_wall_ns_per_call": 918.03466796875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 51.1005859375,
+              "worker_wall_ns_per_call": 972.6279296875,
+              "worker_process_cpu_ns_per_call": 978.33740234375,
+              "paired_extra_wall_ns_per_call": 921.3583984375
+            }
+          }
+        },
+        {
+          "case": "array-region-1048575",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 48659.310546875,
+              "worker_wall_ns_per_call": 50607.21533203125,
+              "worker_process_cpu_ns_per_call": 50284.779296875,
+              "paired_extra_wall_ns_per_call": 1640.32470703125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 49137.9580078125,
+              "worker_wall_ns_per_call": 50811.63623046875,
+              "worker_process_cpu_ns_per_call": 50586.89404296875,
+              "paired_extra_wall_ns_per_call": 1776.42333984375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 47133.9384765625,
+              "worker_wall_ns_per_call": 50608.9990234375,
+              "worker_process_cpu_ns_per_call": 50292.142578125,
+              "paired_extra_wall_ns_per_call": 3191.068359375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 48373.9853515625,
+              "worker_wall_ns_per_call": 49692.7587890625,
+              "worker_process_cpu_ns_per_call": 49511.0048828125,
+              "paired_extra_wall_ns_per_call": 1704.0263671875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 49901.9306640625,
+              "worker_wall_ns_per_call": 51930.513671875,
+              "worker_process_cpu_ns_per_call": 51662.783203125,
+              "paired_extra_wall_ns_per_call": 1848.8203125
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 50184.6826171875,
+              "worker_wall_ns_per_call": 50605.431640625,
+              "worker_process_cpu_ns_per_call": 50277.416015625,
+              "paired_extra_wall_ns_per_call": 89.5810546875
+            }
+          }
+        },
+        {
+          "case": "array-region-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 52464.27978515625,
+              "worker_wall_ns_per_call": 54487.21044921875,
+              "worker_process_cpu_ns_per_call": 53781.7216796875,
+              "paired_extra_wall_ns_per_call": 1629.376953125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 52911.02001953125,
+              "worker_wall_ns_per_call": 55412.4482421875,
+              "worker_process_cpu_ns_per_call": 81633.150390625,
+              "paired_extra_wall_ns_per_call": 2754.05712890625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 51057.69140625,
+              "worker_wall_ns_per_call": 53595.4775390625,
+              "worker_process_cpu_ns_per_call": 53285.685546875,
+              "paired_extra_wall_ns_per_call": 2710.9765625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 51887.0947265625,
+              "worker_wall_ns_per_call": 53531.5888671875,
+              "worker_process_cpu_ns_per_call": 53112.8291015625,
+              "paired_extra_wall_ns_per_call": 1815.1298828125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 53934.9453125,
+              "worker_wall_ns_per_call": 57293.3076171875,
+              "worker_process_cpu_ns_per_call": 110153.4716796875,
+              "paired_extra_wall_ns_per_call": 3692.984375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 53870.8681640625,
+              "worker_wall_ns_per_call": 55378.943359375,
+              "worker_process_cpu_ns_per_call": 54277.7578125,
+              "paired_extra_wall_ns_per_call": 547.77734375
+            }
+          }
+        },
+        {
+          "case": "array-region-1572864",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 85922.7763671875,
+              "worker_wall_ns_per_call": 90989.53955078125,
+              "worker_process_cpu_ns_per_call": 90365.4970703125,
+              "paired_extra_wall_ns_per_call": 5335.2978515625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 87910.15625,
+              "worker_wall_ns_per_call": 89171.875,
+              "worker_process_cpu_ns_per_call": 88537.07568359375,
+              "paired_extra_wall_ns_per_call": 1050.4052734375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 84593.6748046875,
+              "worker_wall_ns_per_call": 89634.9912109375,
+              "worker_process_cpu_ns_per_call": 89089.6572265625,
+              "paired_extra_wall_ns_per_call": 5604.2275390625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 88584.5478515625,
+              "worker_wall_ns_per_call": 88885.8173828125,
+              "worker_process_cpu_ns_per_call": 88268.9736328125,
+              "paired_extra_wall_ns_per_call": -569.298828125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 87235.7646484375,
+              "worker_wall_ns_per_call": 89457.9326171875,
+              "worker_process_cpu_ns_per_call": 88805.177734375,
+              "paired_extra_wall_ns_per_call": 2670.109375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 87251.8779296875,
+              "worker_wall_ns_per_call": 92344.087890625,
+              "worker_process_cpu_ns_per_call": 91641.3369140625,
+              "paired_extra_wall_ns_per_call": 5066.3681640625
+            }
+          }
+        },
+        {
+          "case": "array-region-2097152",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 138165.67724609375,
+              "worker_wall_ns_per_call": 142811.31689453125,
+              "worker_process_cpu_ns_per_call": 141927.3212890625,
+              "paired_extra_wall_ns_per_call": 5086.9697265625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 140358.248046875,
+              "worker_wall_ns_per_call": 141726.48681640625,
+              "worker_process_cpu_ns_per_call": 140536.8291015625,
+              "paired_extra_wall_ns_per_call": 311.7109375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 137990.271484375,
+              "worker_wall_ns_per_call": 142438.7392578125,
+              "worker_process_cpu_ns_per_call": 141423.154296875,
+              "paired_extra_wall_ns_per_call": 3981.9326171875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 141312.2744140625,
+              "worker_wall_ns_per_call": 139340.744140625,
+              "worker_process_cpu_ns_per_call": 138031.287109375,
+              "paired_extra_wall_ns_per_call": -3933.7822265625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 139404.2216796875,
+              "worker_wall_ns_per_call": 144112.2294921875,
+              "worker_process_cpu_ns_per_call": 143042.37109375,
+              "paired_extra_wall_ns_per_call": 4557.2041015625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 138341.0830078125,
+              "worker_wall_ns_per_call": 143183.89453125,
+              "worker_process_cpu_ns_per_call": 142431.48828125,
+              "paired_extra_wall_ns_per_call": 6192.0068359375
+            }
+          }
+        },
+        {
+          "case": "array-region-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 8535.982421875,
+              "worker_wall_ns_per_call": 10231.85888671875,
+              "worker_process_cpu_ns_per_call": 18131.42236328125,
+              "paired_extra_wall_ns_per_call": 1878.32421875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 9165.35791015625,
+              "worker_wall_ns_per_call": 9882.41748046875,
+              "worker_process_cpu_ns_per_call": 13816.16259765625,
+              "paired_extra_wall_ns_per_call": 726.61865234375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 8163.310546875,
+              "worker_wall_ns_per_call": 9542.6689453125,
+              "worker_process_cpu_ns_per_call": 17272.8759765625,
+              "paired_extra_wall_ns_per_call": 1692.9462890625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 8739.107421875,
+              "worker_wall_ns_per_call": 9772.7978515625,
+              "worker_process_cpu_ns_per_call": 9913.986328125,
+              "paired_extra_wall_ns_per_call": 1094.275390625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 9591.6083984375,
+              "worker_wall_ns_per_call": 9992.037109375,
+              "worker_process_cpu_ns_per_call": 17718.3388671875,
+              "paired_extra_wall_ns_per_call": 358.9619140625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 8908.654296875,
+              "worker_wall_ns_per_call": 10921.048828125,
+              "worker_process_cpu_ns_per_call": 18989.96875,
+              "paired_extra_wall_ns_per_call": 2063.7021484375
+            }
+          }
+        },
+        {
+          "case": "array-region-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 870.5068359375,
+              "worker_wall_ns_per_call": 1821.8900146484375,
+              "worker_process_cpu_ns_per_call": 3755.50732421875,
+              "paired_extra_wall_ns_per_call": 943.5518798828125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 868.534912109375,
+              "worker_wall_ns_per_call": 1807.2508544921875,
+              "worker_process_cpu_ns_per_call": 3739.38916015625,
+              "paired_extra_wall_ns_per_call": 936.3779296875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 855.327880859375,
+              "worker_wall_ns_per_call": 1805.645263671875,
+              "worker_process_cpu_ns_per_call": 3737.398681640625,
+              "paired_extra_wall_ns_per_call": 930.28857421875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 877.948486328125,
+              "worker_wall_ns_per_call": 1793.87939453125,
+              "worker_process_cpu_ns_per_call": 3722.37451171875,
+              "paired_extra_wall_ns_per_call": 914.61669921875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 859.121337890625,
+              "worker_wall_ns_per_call": 1820.622314453125,
+              "worker_process_cpu_ns_per_call": 3756.40380859375,
+              "paired_extra_wall_ns_per_call": 958.13916015625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 885.685791015625,
+              "worker_wall_ns_per_call": 1838.134765625,
+              "worker_process_cpu_ns_per_call": 3773.615966796875,
+              "paired_extra_wall_ns_per_call": 956.815185546875
+            }
+          }
+        },
+        {
+          "case": "array-region-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 154.583251953125,
+              "worker_wall_ns_per_call": 1069.0589599609375,
+              "worker_process_cpu_ns_per_call": 2994.8402099609375,
+              "paired_extra_wall_ns_per_call": 914.9310302734375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 157.6162109375,
+              "worker_wall_ns_per_call": 1073.59423828125,
+              "worker_process_cpu_ns_per_call": 2043.2503662109375,
+              "paired_extra_wall_ns_per_call": 915.4051513671875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 152.13720703125,
+              "worker_wall_ns_per_call": 1038.51806640625,
+              "worker_process_cpu_ns_per_call": 2966.40234375,
+              "paired_extra_wall_ns_per_call": 886.34326171875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 155.611328125,
+              "worker_wall_ns_per_call": 1058.574951171875,
+              "worker_process_cpu_ns_per_call": 1066.415771484375,
+              "paired_extra_wall_ns_per_call": 902.259033203125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 159.62109375,
+              "worker_wall_ns_per_call": 1088.613525390625,
+              "worker_process_cpu_ns_per_call": 3020.0849609375,
+              "paired_extra_wall_ns_per_call": 928.55126953125
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 157.029296875,
+              "worker_wall_ns_per_call": 1099.599853515625,
+              "worker_process_cpu_ns_per_call": 3023.278076171875,
+              "paired_extra_wall_ns_per_call": 943.518798828125
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 31.2548828125,
+              "worker_wall_ns_per_call": 784.1138916015625,
+              "worker_process_cpu_ns_per_call": 1651.00537109375,
+              "paired_extra_wall_ns_per_call": 753.1080322265625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 29.8134765625,
+              "worker_wall_ns_per_call": 776.409423828125,
+              "worker_process_cpu_ns_per_call": 1617.5208740234375,
+              "paired_extra_wall_ns_per_call": 746.6524658203125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 33.10009765625,
+              "worker_wall_ns_per_call": 770.085205078125,
+              "worker_process_cpu_ns_per_call": 1942.5888671875,
+              "paired_extra_wall_ns_per_call": 737.510986328125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 28.461181640625,
+              "worker_wall_ns_per_call": 762.5263671875,
+              "worker_process_cpu_ns_per_call": 2180.4951171875,
+              "paired_extra_wall_ns_per_call": 734.1123046875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 31.165771484375,
+              "worker_wall_ns_per_call": 790.29248046875,
+              "worker_process_cpu_ns_per_call": 1054.546630859375,
+              "paired_extra_wall_ns_per_call": 759.192626953125
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 29.40966796875,
+              "worker_wall_ns_per_call": 798.142578125,
+              "worker_process_cpu_ns_per_call": 1359.421875,
+              "paired_extra_wall_ns_per_call": 768.705078125
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 30.9306640625,
+              "worker_wall_ns_per_call": 782.7900390625,
+              "worker_process_cpu_ns_per_call": 795.5791015625,
+              "paired_extra_wall_ns_per_call": 747.3515625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 31.92626953125,
+              "worker_wall_ns_per_call": 773.73876953125,
+              "worker_process_cpu_ns_per_call": 787.76611328125,
+              "paired_extra_wall_ns_per_call": 741.86865234375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 32.376953125,
+              "worker_wall_ns_per_call": 760.9306640625,
+              "worker_process_cpu_ns_per_call": 771.6728515625,
+              "paired_extra_wall_ns_per_call": 725.5859375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 29.935546875,
+              "worker_wall_ns_per_call": 754.169921875,
+              "worker_process_cpu_ns_per_call": 765.962890625,
+              "paired_extra_wall_ns_per_call": 723.0693359375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 33.9169921875,
+              "worker_wall_ns_per_call": 793.3076171875,
+              "worker_process_cpu_ns_per_call": 809.5693359375,
+              "paired_extra_wall_ns_per_call": 760.66796875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 29.484375,
+              "worker_wall_ns_per_call": 804.6494140625,
+              "worker_process_cpu_ns_per_call": 819.4853515625,
+              "paired_extra_wall_ns_per_call": 769.1171875
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 37.2216796875,
+              "worker_wall_ns_per_call": 795.8798828125,
+              "worker_process_cpu_ns_per_call": 804.78173828125,
+              "paired_extra_wall_ns_per_call": 759.6337890625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 35.212890625,
+              "worker_wall_ns_per_call": 785.10009765625,
+              "worker_process_cpu_ns_per_call": 795.8603515625,
+              "paired_extra_wall_ns_per_call": 750.5634765625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 38.310546875,
+              "worker_wall_ns_per_call": 786.3955078125,
+              "worker_process_cpu_ns_per_call": 795.8984375,
+              "paired_extra_wall_ns_per_call": 746.130859375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 36.921875,
+              "worker_wall_ns_per_call": 777.7197265625,
+              "worker_process_cpu_ns_per_call": 790.52734375,
+              "paired_extra_wall_ns_per_call": 742.150390625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 33.50390625,
+              "worker_wall_ns_per_call": 792.48046875,
+              "worker_process_cpu_ns_per_call": 801.193359375,
+              "paired_extra_wall_ns_per_call": 758.9765625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 36.1328125,
+              "worker_wall_ns_per_call": 805.3642578125,
+              "worker_process_cpu_ns_per_call": 813.6650390625,
+              "paired_extra_wall_ns_per_call": 773.13671875
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 32.1138916015625,
+              "worker_wall_ns_per_call": 798.9783935546875,
+              "worker_process_cpu_ns_per_call": 801.1898193359375,
+              "paired_extra_wall_ns_per_call": 767.1695556640625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 30.766357421875,
+              "worker_wall_ns_per_call": 783.7054443359375,
+              "worker_process_cpu_ns_per_call": 794.2601318359375,
+              "paired_extra_wall_ns_per_call": 753.4884033203125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 34.1328125,
+              "worker_wall_ns_per_call": 790.22705078125,
+              "worker_process_cpu_ns_per_call": 792.39599609375,
+              "paired_extra_wall_ns_per_call": 756.272705078125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 29.8603515625,
+              "worker_wall_ns_per_call": 776.639404296875,
+              "worker_process_cpu_ns_per_call": 787.551025390625,
+              "paired_extra_wall_ns_per_call": 747.859130859375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 31.67236328125,
+              "worker_wall_ns_per_call": 790.771484375,
+              "worker_process_cpu_ns_per_call": 800.96923828125,
+              "paired_extra_wall_ns_per_call": 759.11767578125
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 30.094970703125,
+              "worker_wall_ns_per_call": 807.729736328125,
+              "worker_process_cpu_ns_per_call": 809.983642578125,
+              "paired_extra_wall_ns_per_call": 778.06640625
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 31.70556640625,
+              "worker_wall_ns_per_call": 795.2127685546875,
+              "worker_process_cpu_ns_per_call": 1404.3953857421875,
+              "paired_extra_wall_ns_per_call": 763.037841796875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 30.437744140625,
+              "worker_wall_ns_per_call": 771.3575439453125,
+              "worker_process_cpu_ns_per_call": 860.22021484375,
+              "paired_extra_wall_ns_per_call": 739.97119140625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 33.625732421875,
+              "worker_wall_ns_per_call": 783.73828125,
+              "worker_process_cpu_ns_per_call": 930.128662109375,
+              "paired_extra_wall_ns_per_call": 749.59619140625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 28.89306640625,
+              "worker_wall_ns_per_call": 751.661865234375,
+              "worker_process_cpu_ns_per_call": 754.122314453125,
+              "paired_extra_wall_ns_per_call": 722.646484375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 31.982421875,
+              "worker_wall_ns_per_call": 791.05322265625,
+              "worker_process_cpu_ns_per_call": 966.318115234375,
+              "paired_extra_wall_ns_per_call": 757.2958984375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 29.785400390625,
+              "worker_wall_ns_per_call": 806.687255859375,
+              "worker_process_cpu_ns_per_call": 1878.662109375,
+              "paired_extra_wall_ns_per_call": 776.4794921875
+            }
+          }
+        },
+        {
+          "case": "callback-1",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 222.0224609375,
+              "worker_wall_ns_per_call": 1161.7432861328125,
+              "worker_process_cpu_ns_per_call": 2366.2109375,
+              "paired_extra_wall_ns_per_call": 938.6080322265625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 226.2479248046875,
+              "worker_wall_ns_per_call": 1156.3955078125,
+              "worker_process_cpu_ns_per_call": 1642.9442138671875,
+              "paired_extra_wall_ns_per_call": 932.8658447265625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 180.26025390625,
+              "worker_wall_ns_per_call": 1145.93994140625,
+              "worker_process_cpu_ns_per_call": 3071.908935546875,
+              "paired_extra_wall_ns_per_call": 963.8955078125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 181.086669921875,
+              "worker_wall_ns_per_call": 1111.55322265625,
+              "worker_process_cpu_ns_per_call": 1115.262451171875,
+              "paired_extra_wall_ns_per_call": 930.466552734375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 271.4091796875,
+              "worker_wall_ns_per_call": 1201.23779296875,
+              "worker_process_cpu_ns_per_call": 2170.6259765625,
+              "paired_extra_wall_ns_per_call": 935.26513671875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 263.78466796875,
+              "worker_wall_ns_per_call": 1177.546630859375,
+              "worker_process_cpu_ns_per_call": 1660.512939453125,
+              "paired_extra_wall_ns_per_call": 913.320556640625
+            }
+          }
+        },
+        {
+          "case": "callback-8",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 1284.0859375,
+              "worker_wall_ns_per_call": 5301.6966552734375,
+              "worker_process_cpu_ns_per_call": 10570.654907226562,
+              "paired_extra_wall_ns_per_call": 3991.8916015625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 1621.49755859375,
+              "worker_wall_ns_per_call": 5296.4710693359375,
+              "worker_process_cpu_ns_per_call": 10996.577514648438,
+              "paired_extra_wall_ns_per_call": 3693.312255859375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 1266.83642578125,
+              "worker_wall_ns_per_call": 5304.893798828125,
+              "worker_process_cpu_ns_per_call": 10056.415283203125,
+              "paired_extra_wall_ns_per_call": 3987.013427734375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 1267.343505859375,
+              "worker_wall_ns_per_call": 5199.32177734375,
+              "worker_process_cpu_ns_per_call": 10782.451904296875,
+              "paired_extra_wall_ns_per_call": 3958.016845703125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 1975.651611328125,
+              "worker_wall_ns_per_call": 5393.620361328125,
+              "worker_process_cpu_ns_per_call": 11210.703125,
+              "paired_extra_wall_ns_per_call": 3428.607666015625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 1301.33544921875,
+              "worker_wall_ns_per_call": 5298.49951171875,
+              "worker_process_cpu_ns_per_call": 11084.89453125,
+              "paired_extra_wall_ns_per_call": 3996.769775390625
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 58.0914306640625,
+              "worker_wall_ns_per_call": 946.7679443359375,
+              "worker_process_cpu_ns_per_call": 2394.075927734375,
+              "paired_extra_wall_ns_per_call": 888.51220703125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 58.22265625,
+              "worker_wall_ns_per_call": 937.7486572265625,
+              "worker_process_cpu_ns_per_call": 1531.4283447265625,
+              "paired_extra_wall_ns_per_call": 879.5352783203125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 59.04443359375,
+              "worker_wall_ns_per_call": 931.903564453125,
+              "worker_process_cpu_ns_per_call": 1898.982177734375,
+              "paired_extra_wall_ns_per_call": 872.802734375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 54.9033203125,
+              "worker_wall_ns_per_call": 931.546630859375,
+              "worker_process_cpu_ns_per_call": 2115.82568359375,
+              "paired_extra_wall_ns_per_call": 876.69970703125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 61.5419921875,
+              "worker_wall_ns_per_call": 943.95068359375,
+              "worker_process_cpu_ns_per_call": 947.031005859375,
+              "paired_extra_wall_ns_per_call": 882.370849609375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 57.138427734375,
+              "worker_wall_ns_per_call": 961.63232421875,
+              "worker_process_cpu_ns_per_call": 2889.169677734375,
+              "paired_extra_wall_ns_per_call": 904.2216796875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 64.96044921875,
+              "worker_wall_ns_per_call": 977.98974609375,
+              "worker_process_cpu_ns_per_call": 989.501953125,
+              "paired_extra_wall_ns_per_call": 910.306640625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 62.14306640625,
+              "worker_wall_ns_per_call": 944.5419921875,
+              "worker_process_cpu_ns_per_call": 968.35595703125,
+              "paired_extra_wall_ns_per_call": 878.90673828125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 67.0078125,
+              "worker_wall_ns_per_call": 967.3974609375,
+              "worker_process_cpu_ns_per_call": 978.064453125,
+              "paired_extra_wall_ns_per_call": 896.333984375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 60.1337890625,
+              "worker_wall_ns_per_call": 931.8271484375,
+              "worker_process_cpu_ns_per_call": 961.763671875,
+              "paired_extra_wall_ns_per_call": 866.962890625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 64.15234375,
+              "worker_wall_ns_per_call": 957.2568359375,
+              "worker_process_cpu_ns_per_call": 974.9482421875,
+              "paired_extra_wall_ns_per_call": 890.8505859375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 62.9130859375,
+              "worker_wall_ns_per_call": 988.58203125,
+              "worker_process_cpu_ns_per_call": 1000.939453125,
+              "paired_extra_wall_ns_per_call": 924.279296875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 71.419921875,
+              "worker_wall_ns_per_call": 969.33203125,
+              "worker_process_cpu_ns_per_call": 984.8818359375,
+              "paired_extra_wall_ns_per_call": 895.62060546875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 67.11962890625,
+              "worker_wall_ns_per_call": 950.87109375,
+              "worker_process_cpu_ns_per_call": 962.947265625,
+              "paired_extra_wall_ns_per_call": 882.86865234375
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 72.828125,
+              "worker_wall_ns_per_call": 952.7109375,
+              "worker_process_cpu_ns_per_call": 974.91015625,
+              "paired_extra_wall_ns_per_call": 876.427734375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 65.4287109375,
+              "worker_wall_ns_per_call": 951.134765625,
+              "worker_process_cpu_ns_per_call": 961.8017578125,
+              "paired_extra_wall_ns_per_call": 883.4140625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 68.810546875,
+              "worker_wall_ns_per_call": 950.607421875,
+              "worker_process_cpu_ns_per_call": 964.0927734375,
+              "paired_extra_wall_ns_per_call": 882.3232421875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 70.01171875,
+              "worker_wall_ns_per_call": 985.953125,
+              "worker_process_cpu_ns_per_call": 994.853515625,
+              "paired_extra_wall_ns_per_call": 914.8134765625
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 64.6878662109375,
+              "worker_wall_ns_per_call": 977.25732421875,
+              "worker_process_cpu_ns_per_call": 1810.3028564453125,
+              "paired_extra_wall_ns_per_call": 913.029541015625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 64.68798828125,
+              "worker_wall_ns_per_call": 993.1031494140625,
+              "worker_process_cpu_ns_per_call": 2663.4329833984375,
+              "paired_extra_wall_ns_per_call": 928.6922607421875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 65.71142578125,
+              "worker_wall_ns_per_call": 972.32763671875,
+              "worker_process_cpu_ns_per_call": 2633.864501953125,
+              "paired_extra_wall_ns_per_call": 906.803955078125
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 60.5,
+              "worker_wall_ns_per_call": 960.60888671875,
+              "worker_process_cpu_ns_per_call": 2368.69921875,
+              "paired_extra_wall_ns_per_call": 900.043212890625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 68.8759765625,
+              "worker_wall_ns_per_call": 1025.597412109375,
+              "worker_process_cpu_ns_per_call": 2958.166748046875,
+              "paired_extra_wall_ns_per_call": 957.34130859375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 63.664306640625,
+              "worker_wall_ns_per_call": 982.18701171875,
+              "worker_process_cpu_ns_per_call": 986.7412109375,
+              "paired_extra_wall_ns_per_call": 919.255126953125
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 67.340576171875,
+              "worker_wall_ns_per_call": 994.985595703125,
+              "worker_process_cpu_ns_per_call": 2101.2666015625,
+              "paired_extra_wall_ns_per_call": 927.7154541015625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 65.5281982421875,
+              "worker_wall_ns_per_call": 978.3182373046875,
+              "worker_process_cpu_ns_per_call": 1684.1712646484375,
+              "paired_extra_wall_ns_per_call": 911.5457763671875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 67.185546875,
+              "worker_wall_ns_per_call": 958.9091796875,
+              "worker_process_cpu_ns_per_call": 1213.341552734375,
+              "paired_extra_wall_ns_per_call": 891.9208984375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 61.560791015625,
+              "worker_wall_ns_per_call": 945.011962890625,
+              "worker_process_cpu_ns_per_call": 1683.2744140625,
+              "paired_extra_wall_ns_per_call": 883.39453125
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 69.49560546875,
+              "worker_wall_ns_per_call": 1011.62451171875,
+              "worker_process_cpu_ns_per_call": 1685.068115234375,
+              "paired_extra_wall_ns_per_call": 939.697021484375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 67.49560546875,
+              "worker_wall_ns_per_call": 1031.06201171875,
+              "worker_process_cpu_ns_per_call": 2989.191650390625,
+              "paired_extra_wall_ns_per_call": 963.510009765625
+            }
+          }
+        },
+        {
+          "case": "native-batch-32",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 53.0069580078125,
+              "worker_wall_ns_per_call": 589.63232421875,
+              "worker_process_cpu_ns_per_call": 598.4307861328125,
+              "paired_extra_wall_ns_per_call": 537.611572265625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 18.6907958984375,
+              "worker_wall_ns_per_call": 566.1385498046875,
+              "worker_process_cpu_ns_per_call": 577.8153076171875,
+              "paired_extra_wall_ns_per_call": 545.9029541015625
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 88.435546875,
+              "worker_wall_ns_per_call": 622.0703125,
+              "worker_process_cpu_ns_per_call": 634.33349609375,
+              "paired_extra_wall_ns_per_call": 535.8134765625
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 15.033447265625,
+              "worker_wall_ns_per_call": 536.611572265625,
+              "worker_process_cpu_ns_per_call": 550.6689453125,
+              "paired_extra_wall_ns_per_call": 519.6435546875
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 22.34814453125,
+              "worker_wall_ns_per_call": 595.66552734375,
+              "worker_process_cpu_ns_per_call": 604.961669921875,
+              "paired_extra_wall_ns_per_call": 572.162353515625
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 17.578369140625,
+              "worker_wall_ns_per_call": 557.1943359375,
+              "worker_process_cpu_ns_per_call": 562.528076171875,
+              "paired_extra_wall_ns_per_call": 539.40966796875
+            }
+          }
+        },
+        {
+          "case": "scalar-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 28.80859375,
+              "worker_wall_ns_per_call": 580.3458251953125,
+              "worker_process_cpu_ns_per_call": 589.313232421875,
+              "paired_extra_wall_ns_per_call": 551.4010009765625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 30.099609375,
+              "worker_wall_ns_per_call": 577.89013671875,
+              "worker_process_cpu_ns_per_call": 586.0782470703125,
+              "paired_extra_wall_ns_per_call": 548.08154296875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 29.33447265625,
+              "worker_wall_ns_per_call": 575.345703125,
+              "worker_process_cpu_ns_per_call": 581.364501953125,
+              "paired_extra_wall_ns_per_call": 545.8701171875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 29.9072265625,
+              "worker_wall_ns_per_call": 566.43408203125,
+              "worker_process_cpu_ns_per_call": 577.76806640625,
+              "paired_extra_wall_ns_per_call": 536.611572265625
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 30.2919921875,
+              "worker_wall_ns_per_call": 589.34619140625,
+              "worker_process_cpu_ns_per_call": 594.388427734375,
+              "paired_extra_wall_ns_per_call": 559.551513671875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 28.28271484375,
+              "worker_wall_ns_per_call": 585.345947265625,
+              "worker_process_cpu_ns_per_call": 597.261962890625,
+              "paired_extra_wall_ns_per_call": 556.931884765625
+            }
+          }
+        },
+        {
+          "case": "scalar-128",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 138.1180419921875,
+              "worker_wall_ns_per_call": 678.326171875,
+              "worker_process_cpu_ns_per_call": 1297.1519775390625,
+              "paired_extra_wall_ns_per_call": 539.776123046875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 141.559326171875,
+              "worker_wall_ns_per_call": 686.9178466796875,
+              "worker_process_cpu_ns_per_call": 1848.3043212890625,
+              "paired_extra_wall_ns_per_call": 542.61669921875
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 141.99609375,
+              "worker_wall_ns_per_call": 677.23681640625,
+              "worker_process_cpu_ns_per_call": 1143.892578125,
+              "paired_extra_wall_ns_per_call": 535.5224609375
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 141.489013671875,
+              "worker_wall_ns_per_call": 679.828369140625,
+              "worker_process_cpu_ns_per_call": 2032.0107421875,
+              "paired_extra_wall_ns_per_call": 532.77099609375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 141.629638671875,
+              "worker_wall_ns_per_call": 694.00732421875,
+              "worker_process_cpu_ns_per_call": 1664.597900390625,
+              "paired_extra_wall_ns_per_call": 552.46240234375
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 134.239990234375,
+              "worker_wall_ns_per_call": 679.41552734375,
+              "worker_process_cpu_ns_per_call": 1450.411376953125,
+              "paired_extra_wall_ns_per_call": 544.02978515625
+            }
+          }
+        },
+        {
+          "case": "scalar-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 4396.7518310546875,
+              "worker_wall_ns_per_call": 4933.415283203125,
+              "worker_process_cpu_ns_per_call": 9081.993408203125,
+              "paired_extra_wall_ns_per_call": 536.7291259765625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 4404.1373291015625,
+              "worker_wall_ns_per_call": 4963.8389892578125,
+              "worker_process_cpu_ns_per_call": 9286.17919921875,
+              "paired_extra_wall_ns_per_call": 556.288330078125
+            }
+          },
+          "per_run": {
+            "array-cache-midrange-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 4401.761474609375,
+              "worker_wall_ns_per_call": 4916.118896484375,
+              "worker_process_cpu_ns_per_call": 9330.12451171875,
+              "paired_extra_wall_ns_per_call": 513.071044921875
+            },
+            "array-cache-midrange-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 4403.132568359375,
+              "worker_wall_ns_per_call": 4980.618896484375,
+              "worker_process_cpu_ns_per_call": 9747.839599609375,
+              "paired_extra_wall_ns_per_call": 571.195068359375
+            },
+            "array-cache-midrange-20261115-v1-3-domain": {
+              "direct_wall_ns_per_call": 4405.14208984375,
+              "worker_wall_ns_per_call": 4947.05908203125,
+              "worker_process_cpu_ns_per_call": 8824.518798828125,
+              "paired_extra_wall_ns_per_call": 541.381591796875
+            },
+            "array-cache-midrange-20261115-v1-4-domain": {
+              "direct_wall_ns_per_call": 4391.7421875,
+              "worker_wall_ns_per_call": 4950.711669921875,
+              "worker_process_cpu_ns_per_call": 8833.8623046875,
+              "paired_extra_wall_ns_per_call": 560.38720703125
+            }
+          }
+        }
+      ]
+    },
+    "fast": {
+      "apk_sha256": "3362367c2608a1e895c638fa64c5177a612ef2ddb4be2df532051d8805e1c3e9",
+      "transport": "domain",
+      "allocator_decay": "1",
+      "cases": [
+        {
+          "case": "array-elements-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 77.035888671875,
+              "worker_wall_ns_per_call": 1398.305908203125,
+              "worker_process_cpu_ns_per_call": 3320.1904296875,
+              "paired_extra_wall_ns_per_call": 1321.57080078125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 74.772705078125,
+              "worker_wall_ns_per_call": 1451.25634765625,
+              "worker_process_cpu_ns_per_call": 3367.159423828125,
+              "paired_extra_wall_ns_per_call": 1374.76513671875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 74.772705078125,
+              "worker_wall_ns_per_call": 1451.25634765625,
+              "worker_process_cpu_ns_per_call": 3367.159423828125,
+              "paired_extra_wall_ns_per_call": 1374.76513671875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 77.035888671875,
+              "worker_wall_ns_per_call": 1398.305908203125,
+              "worker_process_cpu_ns_per_call": 3320.1904296875,
+              "paired_extra_wall_ns_per_call": 1321.57080078125
+            }
+          }
+        },
+        {
+          "case": "array-elements-1048575",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 294269.494140625,
+              "worker_wall_ns_per_call": 314888.9716796875,
+              "worker_process_cpu_ns_per_call": 312172.9228515625,
+              "paired_extra_wall_ns_per_call": 20543.568359375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 296564.828125,
+              "worker_wall_ns_per_call": 322916.12890625,
+              "worker_process_cpu_ns_per_call": 320510.21875,
+              "paired_extra_wall_ns_per_call": 25386.3046875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 296564.828125,
+              "worker_wall_ns_per_call": 322916.12890625,
+              "worker_process_cpu_ns_per_call": 320510.21875,
+              "paired_extra_wall_ns_per_call": 25386.3046875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 294269.494140625,
+              "worker_wall_ns_per_call": 314888.9716796875,
+              "worker_process_cpu_ns_per_call": 312172.9228515625,
+              "paired_extra_wall_ns_per_call": 20543.568359375
+            }
+          }
+        },
+        {
+          "case": "array-elements-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 299299.6162109375,
+              "worker_wall_ns_per_call": 315514.685546875,
+              "worker_process_cpu_ns_per_call": 313383.9404296875,
+              "paired_extra_wall_ns_per_call": 16997.5595703125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 370209.7724609375,
+              "worker_wall_ns_per_call": 59628.0419921875,
+              "worker_process_cpu_ns_per_call": 59238.1279296875,
+              "paired_extra_wall_ns_per_call": -310636.0419921875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 370209.7724609375,
+              "worker_wall_ns_per_call": 59628.0419921875,
+              "worker_process_cpu_ns_per_call": 59238.1279296875,
+              "paired_extra_wall_ns_per_call": -310636.0419921875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 299299.6162109375,
+              "worker_wall_ns_per_call": 315514.685546875,
+              "worker_process_cpu_ns_per_call": 313383.9404296875,
+              "paired_extra_wall_ns_per_call": 16997.5595703125
+            }
+          }
+        },
+        {
+          "case": "array-elements-1572864",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 594134.689453125,
+              "worker_wall_ns_per_call": 625505.595703125,
+              "worker_process_cpu_ns_per_call": 619745.2685546875,
+              "paired_extra_wall_ns_per_call": 30667.78125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 599888.0703125,
+              "worker_wall_ns_per_call": 91403.0947265625,
+              "worker_process_cpu_ns_per_call": 90399.7939453125,
+              "paired_extra_wall_ns_per_call": -507939.9794921875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 599888.0703125,
+              "worker_wall_ns_per_call": 91403.0947265625,
+              "worker_process_cpu_ns_per_call": 90399.7939453125,
+              "paired_extra_wall_ns_per_call": -507939.9794921875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 594134.689453125,
+              "worker_wall_ns_per_call": 625505.595703125,
+              "worker_process_cpu_ns_per_call": 619745.2685546875,
+              "paired_extra_wall_ns_per_call": 30667.78125
+            }
+          }
+        },
+        {
+          "case": "array-elements-2097152",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 851392.6513671875,
+              "worker_wall_ns_per_call": 870977.087890625,
+              "worker_process_cpu_ns_per_call": 859855.7333984375,
+              "paired_extra_wall_ns_per_call": 30811.63671875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 821231.4072265625,
+              "worker_wall_ns_per_call": 147516.7138671875,
+              "worker_process_cpu_ns_per_call": 146331.5830078125,
+              "paired_extra_wall_ns_per_call": -673626.5400390625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 821231.4072265625,
+              "worker_wall_ns_per_call": 147516.7138671875,
+              "worker_process_cpu_ns_per_call": 146331.5830078125,
+              "paired_extra_wall_ns_per_call": -673626.5400390625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 851392.6513671875,
+              "worker_wall_ns_per_call": 870977.087890625,
+              "worker_process_cpu_ns_per_call": 859855.7333984375,
+              "paired_extra_wall_ns_per_call": 30811.63671875
+            }
+          }
+        },
+        {
+          "case": "array-elements-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 11256.197265625,
+              "worker_wall_ns_per_call": 13370.98046875,
+              "worker_process_cpu_ns_per_call": 28565.314453125,
+              "paired_extra_wall_ns_per_call": 1981.107421875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 11114.7841796875,
+              "worker_wall_ns_per_call": 13335.3359375,
+              "worker_process_cpu_ns_per_call": 28700.1181640625,
+              "paired_extra_wall_ns_per_call": 2321.8896484375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 11114.7841796875,
+              "worker_wall_ns_per_call": 13335.3359375,
+              "worker_process_cpu_ns_per_call": 28700.1181640625,
+              "paired_extra_wall_ns_per_call": 2321.8896484375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 11256.197265625,
+              "worker_wall_ns_per_call": 13370.98046875,
+              "worker_process_cpu_ns_per_call": 28565.314453125,
+              "paired_extra_wall_ns_per_call": 1981.107421875
+            }
+          }
+        },
+        {
+          "case": "array-elements-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 1164.738525390625,
+              "worker_wall_ns_per_call": 2503.080078125,
+              "worker_process_cpu_ns_per_call": 4441.960205078125,
+              "paired_extra_wall_ns_per_call": 1338.29443359375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 1157.43310546875,
+              "worker_wall_ns_per_call": 2562.180908203125,
+              "worker_process_cpu_ns_per_call": 4493.1640625,
+              "paired_extra_wall_ns_per_call": 1411.330078125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 1157.43310546875,
+              "worker_wall_ns_per_call": 2562.180908203125,
+              "worker_process_cpu_ns_per_call": 4493.1640625,
+              "paired_extra_wall_ns_per_call": 1411.330078125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 1164.738525390625,
+              "worker_wall_ns_per_call": 2503.080078125,
+              "worker_process_cpu_ns_per_call": 4441.960205078125,
+              "paired_extra_wall_ns_per_call": 1338.29443359375
+            }
+          }
+        },
+        {
+          "case": "array-elements-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 285.66357421875,
+              "worker_wall_ns_per_call": 1628.662109375,
+              "worker_process_cpu_ns_per_call": 3554.612548828125,
+              "paired_extra_wall_ns_per_call": 1342.12548828125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 284.508056640625,
+              "worker_wall_ns_per_call": 1669.0205078125,
+              "worker_process_cpu_ns_per_call": 3608.06103515625,
+              "paired_extra_wall_ns_per_call": 1394.690673828125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 284.508056640625,
+              "worker_wall_ns_per_call": 1669.0205078125,
+              "worker_process_cpu_ns_per_call": 3608.06103515625,
+              "paired_extra_wall_ns_per_call": 1394.690673828125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 285.66357421875,
+              "worker_wall_ns_per_call": 1628.662109375,
+              "worker_process_cpu_ns_per_call": 3554.612548828125,
+              "paired_extra_wall_ns_per_call": 1342.12548828125
+            }
+          }
+        },
+        {
+          "case": "array-region-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 62.38720703125,
+              "worker_wall_ns_per_call": 1237.013671875,
+              "worker_process_cpu_ns_per_call": 3166.109619140625,
+              "paired_extra_wall_ns_per_call": 1174.7109375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 62.90380859375,
+              "worker_wall_ns_per_call": 1213.435302734375,
+              "worker_process_cpu_ns_per_call": 3136.70947265625,
+              "paired_extra_wall_ns_per_call": 1150.653564453125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 62.90380859375,
+              "worker_wall_ns_per_call": 1213.435302734375,
+              "worker_process_cpu_ns_per_call": 3136.70947265625,
+              "paired_extra_wall_ns_per_call": 1150.653564453125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 62.38720703125,
+              "worker_wall_ns_per_call": 1237.013671875,
+              "worker_process_cpu_ns_per_call": 3166.109619140625,
+              "paired_extra_wall_ns_per_call": 1174.7109375
+            }
+          }
+        },
+        {
+          "case": "array-region-1048575",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 47165.6025390625,
+              "worker_wall_ns_per_call": 49933.068359375,
+              "worker_process_cpu_ns_per_call": 49684.1923828125,
+              "paired_extra_wall_ns_per_call": 2732.9482421875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 56480.919921875,
+              "worker_wall_ns_per_call": 59555.326171875,
+              "worker_process_cpu_ns_per_call": 59106.5927734375,
+              "paired_extra_wall_ns_per_call": 3047.7392578125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 56480.919921875,
+              "worker_wall_ns_per_call": 59555.326171875,
+              "worker_process_cpu_ns_per_call": 59106.5927734375,
+              "paired_extra_wall_ns_per_call": 3047.7392578125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 47165.6025390625,
+              "worker_wall_ns_per_call": 49933.068359375,
+              "worker_process_cpu_ns_per_call": 49684.1923828125,
+              "paired_extra_wall_ns_per_call": 2732.9482421875
+            }
+          }
+        },
+        {
+          "case": "array-region-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 62275.953125,
+              "worker_wall_ns_per_call": 66263.78515625,
+              "worker_process_cpu_ns_per_call": 100385.255859375,
+              "paired_extra_wall_ns_per_call": 4043.419921875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 62521.8603515625,
+              "worker_wall_ns_per_call": 64809.6455078125,
+              "worker_process_cpu_ns_per_call": 100663.533203125,
+              "paired_extra_wall_ns_per_call": 2665.490234375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 62521.8603515625,
+              "worker_wall_ns_per_call": 64809.6455078125,
+              "worker_process_cpu_ns_per_call": 100663.533203125,
+              "paired_extra_wall_ns_per_call": 2665.490234375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 62275.953125,
+              "worker_wall_ns_per_call": 66263.78515625,
+              "worker_process_cpu_ns_per_call": 100385.255859375,
+              "paired_extra_wall_ns_per_call": 4043.419921875
+            }
+          }
+        },
+        {
+          "case": "array-region-1572864",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 88087.58984375,
+              "worker_wall_ns_per_call": 90479.6806640625,
+              "worker_process_cpu_ns_per_call": 89878.2294921875,
+              "paired_extra_wall_ns_per_call": 2581.2421875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 86735.0126953125,
+              "worker_wall_ns_per_call": 89060.7353515625,
+              "worker_process_cpu_ns_per_call": 88444.865234375,
+              "paired_extra_wall_ns_per_call": 3156.775390625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 86735.0126953125,
+              "worker_wall_ns_per_call": 89060.7353515625,
+              "worker_process_cpu_ns_per_call": 88444.865234375,
+              "paired_extra_wall_ns_per_call": 3156.775390625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 88087.58984375,
+              "worker_wall_ns_per_call": 90479.6806640625,
+              "worker_process_cpu_ns_per_call": 89878.2294921875,
+              "paired_extra_wall_ns_per_call": 2581.2421875
+            }
+          }
+        },
+        {
+          "case": "array-region-2097152",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 137385.705078125,
+              "worker_wall_ns_per_call": 143611.81640625,
+              "worker_process_cpu_ns_per_call": 142584.0234375,
+              "paired_extra_wall_ns_per_call": 6383.978515625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 139745.6796875,
+              "worker_wall_ns_per_call": 142704.40234375,
+              "worker_process_cpu_ns_per_call": 141964.650390625,
+              "paired_extra_wall_ns_per_call": 2503.7568359375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 139745.6796875,
+              "worker_wall_ns_per_call": 142704.40234375,
+              "worker_process_cpu_ns_per_call": 141964.650390625,
+              "paired_extra_wall_ns_per_call": 2503.7568359375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 137385.705078125,
+              "worker_wall_ns_per_call": 143611.81640625,
+              "worker_process_cpu_ns_per_call": 142584.0234375,
+              "paired_extra_wall_ns_per_call": 6383.978515625
+            }
+          }
+        },
+        {
+          "case": "array-region-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 11013.033203125,
+              "worker_wall_ns_per_call": 11985.578125,
+              "worker_process_cpu_ns_per_call": 23483.474609375,
+              "paired_extra_wall_ns_per_call": 989.4462890625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 10285.3447265625,
+              "worker_wall_ns_per_call": 11461.5380859375,
+              "worker_process_cpu_ns_per_call": 26889.1220703125,
+              "paired_extra_wall_ns_per_call": 1177.3212890625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 10285.3447265625,
+              "worker_wall_ns_per_call": 11461.5380859375,
+              "worker_process_cpu_ns_per_call": 26889.1220703125,
+              "paired_extra_wall_ns_per_call": 1177.3212890625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 11013.033203125,
+              "worker_wall_ns_per_call": 11985.578125,
+              "worker_process_cpu_ns_per_call": 23483.474609375,
+              "paired_extra_wall_ns_per_call": 989.4462890625
+            }
+          }
+        },
+        {
+          "case": "array-region-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 1080.11572265625,
+              "worker_wall_ns_per_call": 2265.5498046875,
+              "worker_process_cpu_ns_per_call": 4194.927001953125,
+              "paired_extra_wall_ns_per_call": 1196.702392578125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 1069.673828125,
+              "worker_wall_ns_per_call": 2254.281982421875,
+              "worker_process_cpu_ns_per_call": 4200.3359375,
+              "paired_extra_wall_ns_per_call": 1178.354248046875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 1069.673828125,
+              "worker_wall_ns_per_call": 2254.281982421875,
+              "worker_process_cpu_ns_per_call": 4200.3359375,
+              "paired_extra_wall_ns_per_call": 1178.354248046875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 1080.11572265625,
+              "worker_wall_ns_per_call": 2265.5498046875,
+              "worker_process_cpu_ns_per_call": 4194.927001953125,
+              "paired_extra_wall_ns_per_call": 1196.702392578125
+            }
+          }
+        },
+        {
+          "case": "array-region-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 192.635986328125,
+              "worker_wall_ns_per_call": 1374.06103515625,
+              "worker_process_cpu_ns_per_call": 3298.71484375,
+              "paired_extra_wall_ns_per_call": 1178.82373046875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 193.584716796875,
+              "worker_wall_ns_per_call": 1357.36572265625,
+              "worker_process_cpu_ns_per_call": 3286.574462890625,
+              "paired_extra_wall_ns_per_call": 1164.3720703125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 193.584716796875,
+              "worker_wall_ns_per_call": 1357.36572265625,
+              "worker_process_cpu_ns_per_call": 3286.574462890625,
+              "paired_extra_wall_ns_per_call": 1164.3720703125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 192.635986328125,
+              "worker_wall_ns_per_call": 1374.06103515625,
+              "worker_process_cpu_ns_per_call": 3298.71484375,
+              "paired_extra_wall_ns_per_call": 1178.82373046875
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 37.24072265625,
+              "worker_wall_ns_per_call": 1037.531982421875,
+              "worker_process_cpu_ns_per_call": 2801.794677734375,
+              "paired_extra_wall_ns_per_call": 999.99072265625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 36.44287109375,
+              "worker_wall_ns_per_call": 989.201416015625,
+              "worker_process_cpu_ns_per_call": 2732.243896484375,
+              "paired_extra_wall_ns_per_call": 952.69287109375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 36.44287109375,
+              "worker_wall_ns_per_call": 989.201416015625,
+              "worker_process_cpu_ns_per_call": 2732.243896484375,
+              "paired_extra_wall_ns_per_call": 952.69287109375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 37.24072265625,
+              "worker_wall_ns_per_call": 1037.531982421875,
+              "worker_process_cpu_ns_per_call": 2801.794677734375,
+              "paired_extra_wall_ns_per_call": 999.99072265625
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 40.9404296875,
+              "worker_wall_ns_per_call": 1035.720703125,
+              "worker_process_cpu_ns_per_call": 1051.6826171875,
+              "paired_extra_wall_ns_per_call": 994.81640625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 46.3876953125,
+              "worker_wall_ns_per_call": 993.9150390625,
+              "worker_process_cpu_ns_per_call": 1012.431640625,
+              "paired_extra_wall_ns_per_call": 949.330078125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 46.3876953125,
+              "worker_wall_ns_per_call": 993.9150390625,
+              "worker_process_cpu_ns_per_call": 1012.431640625,
+              "paired_extra_wall_ns_per_call": 949.330078125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 40.9404296875,
+              "worker_wall_ns_per_call": 1035.720703125,
+              "worker_process_cpu_ns_per_call": 1051.6826171875,
+              "paired_extra_wall_ns_per_call": 994.81640625
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 37.5986328125,
+              "worker_wall_ns_per_call": 1030.611328125,
+              "worker_process_cpu_ns_per_call": 1039.0625,
+              "paired_extra_wall_ns_per_call": 992.5625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 37.1103515625,
+              "worker_wall_ns_per_call": 993.0888671875,
+              "worker_process_cpu_ns_per_call": 1009.126953125,
+              "paired_extra_wall_ns_per_call": 956.466796875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 37.1103515625,
+              "worker_wall_ns_per_call": 993.0888671875,
+              "worker_process_cpu_ns_per_call": 1009.126953125,
+              "paired_extra_wall_ns_per_call": 956.466796875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 37.5986328125,
+              "worker_wall_ns_per_call": 1030.611328125,
+              "worker_process_cpu_ns_per_call": 1039.0625,
+              "paired_extra_wall_ns_per_call": 992.5625
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 38.142333984375,
+              "worker_wall_ns_per_call": 1042.208251953125,
+              "worker_process_cpu_ns_per_call": 2973.078857421875,
+              "paired_extra_wall_ns_per_call": 1003.92529296875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 37.926513671875,
+              "worker_wall_ns_per_call": 997.91552734375,
+              "worker_process_cpu_ns_per_call": 1963.78271484375,
+              "paired_extra_wall_ns_per_call": 961.041015625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 37.926513671875,
+              "worker_wall_ns_per_call": 997.91552734375,
+              "worker_process_cpu_ns_per_call": 1963.78271484375,
+              "paired_extra_wall_ns_per_call": 961.041015625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 38.142333984375,
+              "worker_wall_ns_per_call": 1042.208251953125,
+              "worker_process_cpu_ns_per_call": 2973.078857421875,
+              "paired_extra_wall_ns_per_call": 1003.92529296875
+            }
+          }
+        },
+        {
+          "case": "cached-pointer-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 36.9873046875,
+              "worker_wall_ns_per_call": 1049.44775390625,
+              "worker_process_cpu_ns_per_call": 1326.7255859375,
+              "paired_extra_wall_ns_per_call": 1013.343017578125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 36.73388671875,
+              "worker_wall_ns_per_call": 1001.0517578125,
+              "worker_process_cpu_ns_per_call": 1965.379150390625,
+              "paired_extra_wall_ns_per_call": 964.252197265625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 36.73388671875,
+              "worker_wall_ns_per_call": 1001.0517578125,
+              "worker_process_cpu_ns_per_call": 1965.379150390625,
+              "paired_extra_wall_ns_per_call": 964.252197265625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 36.9873046875,
+              "worker_wall_ns_per_call": 1049.44775390625,
+              "worker_process_cpu_ns_per_call": 1326.7255859375,
+              "paired_extra_wall_ns_per_call": 1013.343017578125
+            }
+          }
+        },
+        {
+          "case": "callback-1",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 226.731689453125,
+              "worker_wall_ns_per_call": 1460.51513671875,
+              "worker_process_cpu_ns_per_call": 3393.5263671875,
+              "paired_extra_wall_ns_per_call": 1229.294921875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 326.199951171875,
+              "worker_wall_ns_per_call": 1480.806640625,
+              "worker_process_cpu_ns_per_call": 3405.996826171875,
+              "paired_extra_wall_ns_per_call": 1151.62060546875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 326.199951171875,
+              "worker_wall_ns_per_call": 1480.806640625,
+              "worker_process_cpu_ns_per_call": 3405.996826171875,
+              "paired_extra_wall_ns_per_call": 1151.62060546875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 226.731689453125,
+              "worker_wall_ns_per_call": 1460.51513671875,
+              "worker_process_cpu_ns_per_call": 3393.5263671875,
+              "paired_extra_wall_ns_per_call": 1229.294921875
+            }
+          }
+        },
+        {
+          "case": "callback-8",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 1644.108642578125,
+              "worker_wall_ns_per_call": 6534.423828125,
+              "worker_process_cpu_ns_per_call": 12372.8115234375,
+              "paired_extra_wall_ns_per_call": 4897.489013671875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 1577.815185546875,
+              "worker_wall_ns_per_call": 6566.659912109375,
+              "worker_process_cpu_ns_per_call": 12407.517822265625,
+              "paired_extra_wall_ns_per_call": 4991.05126953125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 1577.815185546875,
+              "worker_wall_ns_per_call": 6566.659912109375,
+              "worker_process_cpu_ns_per_call": 12407.517822265625,
+              "paired_extra_wall_ns_per_call": 4991.05126953125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 1644.108642578125,
+              "worker_wall_ns_per_call": 6534.423828125,
+              "worker_process_cpu_ns_per_call": 12372.8115234375,
+              "paired_extra_wall_ns_per_call": 4897.489013671875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 70.10595703125,
+              "worker_wall_ns_per_call": 1250.929443359375,
+              "worker_process_cpu_ns_per_call": 3170.776123046875,
+              "paired_extra_wall_ns_per_call": 1180.785888671875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 70.35009765625,
+              "worker_wall_ns_per_call": 1224.215087890625,
+              "worker_process_cpu_ns_per_call": 3154.89794921875,
+              "paired_extra_wall_ns_per_call": 1153.855712890625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 70.35009765625,
+              "worker_wall_ns_per_call": 1224.215087890625,
+              "worker_process_cpu_ns_per_call": 3154.89794921875,
+              "paired_extra_wall_ns_per_call": 1153.855712890625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 70.10595703125,
+              "worker_wall_ns_per_call": 1250.929443359375,
+              "worker_process_cpu_ns_per_call": 3170.776123046875,
+              "paired_extra_wall_ns_per_call": 1180.785888671875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-1048576",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 82.369140625,
+              "worker_wall_ns_per_call": 1241.2861328125,
+              "worker_process_cpu_ns_per_call": 1257.3984375,
+              "paired_extra_wall_ns_per_call": 1160.6435546875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 85.86328125,
+              "worker_wall_ns_per_call": 1216.0458984375,
+              "worker_process_cpu_ns_per_call": 1236.6669921875,
+              "paired_extra_wall_ns_per_call": 1132.513671875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 85.86328125,
+              "worker_wall_ns_per_call": 1216.0458984375,
+              "worker_process_cpu_ns_per_call": 1236.6669921875,
+              "paired_extra_wall_ns_per_call": 1132.513671875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 82.369140625,
+              "worker_wall_ns_per_call": 1241.2861328125,
+              "worker_process_cpu_ns_per_call": 1257.3984375,
+              "paired_extra_wall_ns_per_call": 1160.6435546875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-262144",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 76.5478515625,
+              "worker_wall_ns_per_call": 1239.6708984375,
+              "worker_process_cpu_ns_per_call": 1249.7373046875,
+              "paired_extra_wall_ns_per_call": 1159.818359375
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 76.998046875,
+              "worker_wall_ns_per_call": 1213.75390625,
+              "worker_process_cpu_ns_per_call": 1228.1015625,
+              "paired_extra_wall_ns_per_call": 1136.080078125
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 76.998046875,
+              "worker_wall_ns_per_call": 1213.75390625,
+              "worker_process_cpu_ns_per_call": 1228.1015625,
+              "paired_extra_wall_ns_per_call": 1136.080078125
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 76.5478515625,
+              "worker_wall_ns_per_call": 1239.6708984375,
+              "worker_process_cpu_ns_per_call": 1249.7373046875,
+              "paired_extra_wall_ns_per_call": 1159.818359375
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-32768",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 75.260986328125,
+              "worker_wall_ns_per_call": 1241.39892578125,
+              "worker_process_cpu_ns_per_call": 1247.01416015625,
+              "paired_extra_wall_ns_per_call": 1165.875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 74.0029296875,
+              "worker_wall_ns_per_call": 1234.619140625,
+              "worker_process_cpu_ns_per_call": 3157.470947265625,
+              "paired_extra_wall_ns_per_call": 1160.82275390625
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 74.0029296875,
+              "worker_wall_ns_per_call": 1234.619140625,
+              "worker_process_cpu_ns_per_call": 3157.470947265625,
+              "paired_extra_wall_ns_per_call": 1160.82275390625
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 75.260986328125,
+              "worker_wall_ns_per_call": 1241.39892578125,
+              "worker_process_cpu_ns_per_call": 1247.01416015625,
+              "paired_extra_wall_ns_per_call": 1165.875
+            }
+          }
+        },
+        {
+          "case": "direct-lookup-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 76.866455078125,
+              "worker_wall_ns_per_call": 1248.582275390625,
+              "worker_process_cpu_ns_per_call": 3178.40087890625,
+              "paired_extra_wall_ns_per_call": 1172.147705078125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 75.96533203125,
+              "worker_wall_ns_per_call": 1232.262451171875,
+              "worker_process_cpu_ns_per_call": 3675.583251953125,
+              "paired_extra_wall_ns_per_call": 1156.56005859375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 75.96533203125,
+              "worker_wall_ns_per_call": 1232.262451171875,
+              "worker_process_cpu_ns_per_call": 3675.583251953125,
+              "paired_extra_wall_ns_per_call": 1156.56005859375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 76.866455078125,
+              "worker_wall_ns_per_call": 1248.582275390625,
+              "worker_process_cpu_ns_per_call": 3178.40087890625,
+              "paired_extra_wall_ns_per_call": 1172.147705078125
+            }
+          }
+        },
+        {
+          "case": "native-batch-32",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 19.005615234375,
+              "worker_wall_ns_per_call": 697.519287109375,
+              "worker_process_cpu_ns_per_call": 700.30810546875,
+              "paired_extra_wall_ns_per_call": 675.509033203125
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 22.723876953125,
+              "worker_wall_ns_per_call": 713.820556640625,
+              "worker_process_cpu_ns_per_call": 720.88134765625,
+              "paired_extra_wall_ns_per_call": 688.185302734375
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 22.723876953125,
+              "worker_wall_ns_per_call": 713.820556640625,
+              "worker_process_cpu_ns_per_call": 720.88134765625,
+              "paired_extra_wall_ns_per_call": 688.185302734375
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 19.005615234375,
+              "worker_wall_ns_per_call": 697.519287109375,
+              "worker_process_cpu_ns_per_call": 700.30810546875,
+              "paired_extra_wall_ns_per_call": 675.509033203125
+            }
+          }
+        },
+        {
+          "case": "scalar-0",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 35.269287109375,
+              "worker_wall_ns_per_call": 785.945068359375,
+              "worker_process_cpu_ns_per_call": 804.198974609375,
+              "paired_extra_wall_ns_per_call": 750.7041015625
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 36.311279296875,
+              "worker_wall_ns_per_call": 753.68115234375,
+              "worker_process_cpu_ns_per_call": 1344.68896484375,
+              "paired_extra_wall_ns_per_call": 716.76904296875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 36.311279296875,
+              "worker_wall_ns_per_call": 753.68115234375,
+              "worker_process_cpu_ns_per_call": 1344.68896484375,
+              "paired_extra_wall_ns_per_call": 716.76904296875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 35.269287109375,
+              "worker_wall_ns_per_call": 785.945068359375,
+              "worker_process_cpu_ns_per_call": 804.198974609375,
+              "paired_extra_wall_ns_per_call": 750.7041015625
+            }
+          }
+        },
+        {
+          "case": "scalar-128",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 181.687744140625,
+              "worker_wall_ns_per_call": 866.013671875,
+              "worker_process_cpu_ns_per_call": 1831.702392578125,
+              "paired_extra_wall_ns_per_call": 683.321044921875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 182.4765625,
+              "worker_wall_ns_per_call": 883.009765625,
+              "worker_process_cpu_ns_per_call": 2827.298583984375,
+              "paired_extra_wall_ns_per_call": 698.40185546875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 182.4765625,
+              "worker_wall_ns_per_call": 883.009765625,
+              "worker_process_cpu_ns_per_call": 2827.298583984375,
+              "paired_extra_wall_ns_per_call": 698.40185546875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 181.687744140625,
+              "worker_wall_ns_per_call": 866.013671875,
+              "worker_process_cpu_ns_per_call": 1831.702392578125,
+              "paired_extra_wall_ns_per_call": 683.321044921875
+            }
+          }
+        },
+        {
+          "case": "scalar-4096",
+          "groups": {
+            "off": {
+              "direct_wall_ns_per_call": 5668.794921875,
+              "worker_wall_ns_per_call": 6345.853271484375,
+              "worker_process_cpu_ns_per_call": 12171.75341796875,
+              "paired_extra_wall_ns_per_call": 675.26513671875
+            },
+            "auto": {
+              "direct_wall_ns_per_call": 5657.958740234375,
+              "worker_wall_ns_per_call": 6349.947265625,
+              "worker_process_cpu_ns_per_call": 12150.569580078125,
+              "paired_extra_wall_ns_per_call": 672.785888671875
+            }
+          },
+          "per_run": {
+            "array-cache-fast-20261115-v1-1-domain": {
+              "direct_wall_ns_per_call": 5657.958740234375,
+              "worker_wall_ns_per_call": 6349.947265625,
+              "worker_process_cpu_ns_per_call": 12150.569580078125,
+              "paired_extra_wall_ns_per_call": 672.785888671875
+            },
+            "array-cache-fast-20261115-v1-2-domain": {
+              "direct_wall_ns_per_call": 5668.794921875,
+              "worker_wall_ns_per_call": 6345.853271484375,
+              "worker_process_cpu_ns_per_call": 12171.75341796875,
+              "paired_extra_wall_ns_per_call": 675.26513671875
+            }
+          }
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Immediate reclamation is forced only in disposable test processes; not a claim about the original policy setter.",
+    "The delayed-policy pair did not stay low-fault in all timed phases.",
+    "Exactly 2 MiB was already cached before the threshold change.",
+    "Content copying, first touch and fallback remain.",
+    "Historical measurement digests predate source cleanup; retained artifacts identify the measured build, not the current checkout."
+  ]
+}
