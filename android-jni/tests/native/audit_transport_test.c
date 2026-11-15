@@ -15,6 +15,11 @@
 #include "host_internal.h"
 #include "dlopen_backend.h"
 
+/* The fake VM negotiates JNI 1.8; NDK's ART header omits this JRE constant. */
+#ifndef JNI_VERSION_1_8
+#define JNI_VERSION_1_8 0x00010008
+#endif
+
 static struct full_bridge bridge;
 struct full_bridge *gw_host_bridge = &bridge;
 jint gw_host_jni_version = JNI_VERSION_1_8;
@@ -28,7 +33,16 @@ static struct binding binding;
 static int fail_pages;
 static _Atomic int stall, published, returned;
 static int monitor_fd, lose_reply;
+static int complete_on_notify, host_polls, nested_callback;
 void *__real_mmap(void *, size_t, int, int, int, off_t);
+
+/* Complete a fake Guest reply inside the real command's notification boundary.
+   This deterministically exercises a response visible before the first poll;
+   wall-clock sleeps cannot guarantee that interleaving. */
+static void command_notify(struct fb_event *event);
+#define fb_event_notify command_notify
+#include "../../src/host/command.c"
+#undef fb_event_notify
 
 void *__wrap_mmap(void *p, size_t n, int prot, int flags, int fd, off_t off) {
   if (fail_pages) {
@@ -92,7 +106,11 @@ static void delete_local(JNIEnv *env, jobject object) {
   (void)env;
   (void)object;
 }
+#ifdef __ANDROID__
+static const struct JNINativeInterface vm = {
+#else
 static const struct JNINativeInterface_ vm = {
+#endif
     .PushLocalFrame = push_frame,
     .PopLocalFrame = pop_frame,
     .ExceptionCheck = exception_check,
@@ -152,7 +170,7 @@ struct binding *make_binding(uint64_t id, uintptr_t guest, const char *sig,
   return &binding;
 }
 
-void full_host_poll(void) {
+static void complete_command(void) {
   struct fb_call *command = fb_call_at(&bridge.ctx[0], context.depth - 1);
   int sequence = atomic_load_explicit(&command->request, memory_order_acquire);
 
@@ -187,6 +205,30 @@ void full_host_poll(void) {
   }
 
   atomic_store_explicit(&command->response, sequence, memory_order_release);
+}
+
+static void command_notify(struct fb_event *event) {
+  fb_event_notify(event);
+  if (complete_on_notify == 1 ||
+      (complete_on_notify == 2 && context.depth > 1)) {
+    complete_command();
+  }
+}
+
+void full_host_poll(void) {
+  host_polls++;
+  if (nested_callback && context.depth == 1) {
+    /* Simulate Java re-entering a native method while the outer Guest call
+       awaits its synchronous JNI callback. The two frames must stay distinct.
+     */
+    nested_callback = 0;
+    struct fb_call *outer = fb_call_at(&bridge.ctx[0], 0);
+    assert(atomic_load(&outer->request) != atomic_load(&outer->response));
+    fh_command(&context, FB_OWNER, 0, NULL, NULL);
+    assert(context.depth == 1 && !context.command_error);
+    assert(atomic_load(&outer->request) != atomic_load(&outer->response));
+  }
+  complete_command();
 }
 
 static void scenario(unsigned test) {
@@ -282,6 +324,29 @@ static void scenario(unsigned test) {
       hello->args[field].j++;
       assert(!fb_loader_acknowledge(hello) && !fb_loader_accepted(hello));
     }
+    return;
+  } else if (test == 13) {
+    complete_on_notify = 1;
+    for (int i = 0; i < 4; i++) {
+      jvalue result = fh_command(&context, FB_LOOKUP, 0, "symbol", NULL);
+      assert(result.j == 31 && !context.depth && !context.command_error);
+    }
+    assert(!host_polls && operation_count == 4);
+    return;
+  } else if (test == 14 || test == 16) {
+    complete_on_notify = test == 16 ? 2 : 0;
+    nested_callback = 1;
+    fh_command(&context, FB_OWNER, 0, NULL, NULL);
+    assert(host_polls == (test == 16 ? 1 : 2) && operation_count == 2 &&
+           !context.depth);
+    return;
+  } else if (test == 15) {
+    complete_on_notify = 1;
+    fail_command = FB_NATIVE;
+    fh_command(&context, FB_NATIVE, 0, "()I", NULL);
+    assert(!host_polls && operation_count == 1 && !context.depth);
+    assert(context.command_error == 9 && pending &&
+           !strcmp(context.diagnostic, "controlled Guest failure"));
     return;
   } else {
     assert(test == 10);
@@ -397,7 +462,7 @@ static void pending_case(int lost) {
 }
 
 int main(void) {
-  for (unsigned test = 0; test < 13; test++) {
+  for (unsigned test = 0; test < 17; test++) {
     pid_t pid = fork();
     assert(pid >= 0);
     if (!pid) {
@@ -416,7 +481,8 @@ int main(void) {
   pending_case(1);
 
   puts(
-      "{\"result\":\"PASS\",\"scenarios\":15,\"cleanup_order\":true,"
+      "{\"result\":\"PASS\",\"scenarios\":19,\"cleanup_order\":true,"
+      "\"completed_reply_skips_poll\":true,\"nested_callback\":true,"
       "\"quarantine\":true,\"exception_preserved\":true,"
       "\"pending_call_retained\":true,\"late_reply\":true,"
       "\"supervisor_disposal\":true}");

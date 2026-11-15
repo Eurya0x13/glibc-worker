@@ -46,7 +46,6 @@ command = [
         str(ROOT / p)
         for p in (
             "android-jni/tests/native/audit_transport_test.c",
-            "android-jni/src/host/command.c",
             "android-jni/src/host/failure.c",
             "android-jni/src/host/loader_transport.c",
             "bionic-dlopen/src/loader.c",

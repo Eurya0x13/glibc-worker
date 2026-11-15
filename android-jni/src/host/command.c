@@ -82,7 +82,12 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   GW_RPC_SCOPE_END(pack);
   fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
 
-  for (;;) {
+  /* A final response implies that synchronous reverse JNI calls have already
+     returned. Avoid polling their slots again on the completed path. Keep
+     sample-before-pump and the second response check: a callback can complete
+     this command while the pump runs, and its notification must not be lost.
+     The Guest pump is different: it also services owner lifecycle work. */
+  while (atomic_load_explicit(&r->response, memory_order_acquire) != seq) {
     uint32_t observed = fb_event_sample(event);
     full_host_poll();
     if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
