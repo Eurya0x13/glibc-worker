@@ -145,3 +145,19 @@ GW_JRE_ARTIFACT=angelaura-8-arm64 jvm-jni/tests/coverage/run.sh \
 此入口保留全部功能覆盖，同时执行既有的附加基准。它不是严格组的替代品，也不能凭单次结果下性能结论。制品支持模式见 [兼容性契约](../docs/JRE_COMPATIBILITY.md)。
 
 已保留的 ARM64 制品/模式结果、APK 与原始报告摘要、独立 VM 反例及校验器反例见 [android-jres-arm64.json](results/android-jres-arm64.json)。其中严格矩阵整体为 FAIL，原因是上述 JRE8 VM 缺陷；每项结果和正常模式证据独立列出。新的运行由 runner 生成新的 run_id，不能沿用这份记录作为新制品通过证明。
+
+## 调度与 CPU 归因
+
+`coverage/trace_waiting.py` 对保留的标量/回调工作负载采集 Perfetto 调度轨迹或 CPU 样本；必须指定 APK 和匹配的 `--checker-ref` 提交，功能检查通过才接受结果。命令需要独立空输出目录，采样运行不并入无采样的 A/B 延迟数据：
+
+```sh
+python3 jvm-jni/tests/coverage/trace_waiting.py \
+  --device "$ANDROID_SERIAL" --apk /path/to/coverage.apk \
+  --checker-ref REVIEWED_COMMIT --kind scheduler \
+  --output jvm-jni/build/waiting-profile
+python3 jvm-jni/tests/coverage/analyze_waiting_trace.py \
+  --processor /path/to/trace_processor --trace /path/to/scheduler.pftrace \
+  --output jvm-jni/build/waiting-analysis
+```
+
+`--kind cpu` 选择 CPU 采样。调度分析按线程 start-latch 推断六组八线程窗口，并按同进程 waker 推断对端；窗口包括清理阶段，不等于 Java 精确计时区间。必须检查 peer 映射完整性及 trace 健康状态；不能用一次诊断采样解释另一轮的全部波动，也不能把 runnable 均值当作 P99。

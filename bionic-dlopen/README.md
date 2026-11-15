@@ -38,3 +38,17 @@ AUTO 路由只在 ELF 元数据成功解析、没有 GNU 标记时返回 `GW_PAS
 `tests/elf_route.py` 在 ASan/UBSan 下检查 49 项真实 Android/GNU ELF、无标记映像、损坏和资源上限条件，同时核对分类与错误码；该集成夹具可消费上层测试产生的 DSOs。C contract 另外确保 AUTO 分类失败不会返回 PASS 或调用 Guest transport。真实双 libc 生命周期由 jvm-jni 的集成测试覆盖。
 
 后端每进程只配置一次；STOPPED 与 quarantine 都不可重新配置。stop 只检查并停止装载后端，不取消在途调用，也不销毁 GNU runtime。宿主须先停止生产者、归还借用并关闭模块；close 的借用等待和 transport 执行没有通用期限。watchdog 可标记 quarantine，但这不证明已发布调用停止访问资源，不能据此释放调用栈、buffer 或映像；进程处置由宿主负责。
+
+## 装载借用成本诊断
+
+`tests/scope_cost.c` 通过真实导出接口及 mutex 比较旧 pin 与执行 scope 的记账成本，使用测试 transport，不执行 JNI、Guest 或 RPC。`tests/scope_cost.py` 要求显式提供旧版与候选库、NDK、设备和空输出目录，采用 1/8 线程、预热及十对平衡顺序，保留每轮数据、温度和输入散列：
+
+```sh
+python3 bionic-dlopen/tests/scope_cost.py \
+  --device "$ANDROID_SERIAL" --android-ndk "$ANDROID_NDK" \
+  --baseline-library /path/to/baseline/libgw_dlopen.so \
+  --candidate-library /path/to/candidate/libgw_dlopen.so \
+  --output bionic-dlopen/build/scope-cost-review
+```
+
+测试的 wall/CPU 数值是每次 enter/leave 的批均摊成本，不是 JNI 调用延迟，也不表示游戏收益。两个库必须来自实际构建，并支持各自选定的导出接口；脚本不会从文件名推断实现版本。
