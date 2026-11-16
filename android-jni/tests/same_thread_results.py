@@ -23,11 +23,10 @@ SUITES = [
     ),
 ]
 REMAINING = [
-    "Remaining Host descriptor lifecycle/alias paths and concurrent dispositions",
+    "Remaining deferred Host dequeue ordering and context/lifecycle windows",
     "Independent asynchronous Guest delivery and tagged sends",
-    "External Host delivery received on GNU-created pthreads",
     "General saved/resumable continuations and Guest targets beyond C-only GetVersion",
-    "Reviewed live VM/ART quiescence and late integration acceptance",
+    "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",
 ]
 
 
@@ -41,11 +40,13 @@ def inspect_suite(relative):
     }
     if not summary.is_file() or not manifest.is_file():
         return {**row, "result": "MISSING"}
+
     try:
         result = json.loads(summary.read_text())
         inputs = json.loads(manifest.read_text())["sha256"]
         if not inputs:
             raise ValueError("manifest has no input hashes")
+
         changed = []
         for name, expected in inputs.items():
             path = Path(name)
@@ -58,6 +59,7 @@ def inspect_suite(relative):
                     observed = hashlib.file_digest(stream, "sha256").hexdigest()
                 if observed != expected:
                     changed.append({"path": name, "reason": "changed"})
+
         state = "STALE" if changed else "PASS"
         # Some SDK summaries are a list of individually checked cases.
         cases = (
@@ -74,6 +76,7 @@ def inspect_suite(relative):
             )
         ):
             state = "FAIL"
+
         return {
             **row,
             "result": state,
@@ -93,6 +96,7 @@ def main():
     )
     parser.add_argument("--require-current", action="store_true")
     args = parser.parse_args()
+
     cases = [inspect_suite(path) for path in SUITES]
     report = {
         "full_compatibility": "INCOMPLETE",
@@ -101,6 +105,7 @@ def main():
         "remaining_acceptance": REMAINING,
         "cases": cases,
     }
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(
@@ -112,6 +117,7 @@ def main():
             }
         )
     )
+
     if args.require_current and not report["evidence_current"]:
         raise SystemExit(1)
 

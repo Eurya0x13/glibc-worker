@@ -27,12 +27,14 @@ set_target_properties(domains PROPERTIES OUTPUT_NAME glibc_worker_domains)
 add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-mask-interpose.c src/domain/signal-wait-interpose.c
   src/domain/signal-suspend-interpose.c src/domain/signal-fd-interpose.c
-  src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S)
+  src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S
+  src/domain/signal-stdio.c)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 target_link_libraries(signal_interpose PUBLIC domains)
 target_link_options(signal_interpose INTERFACE -Wl,-u,sigaction -Wl,-u,signal
   -Wl,-u,pthread_sigmask -Wl,-u,sigpending -Wl,-u,sigtimedwait
-  -Wl,-u,sigsuspend -Wl,-u,ppoll -Wl,-u,signalfd -Wl,-u,fcntl)
+  -Wl,-u,sigsuspend -Wl,-u,ppoll -Wl,-u,signalfd -Wl,-u,fcntl
+  -Wl,-u,signal_stdio_enable)
 set_target_properties(signal_interpose PROPERTIES OUTPUT_NAME glibc_worker_signal_interpose)
 # Native capture/restore interposition stays opt-in during recovery integration.
 add_library(nonlocal_interpose STATIC src/domain/nonlocal-interpose.c
@@ -64,6 +66,11 @@ if(BUILD_TESTING)
   target_compile_options(signal_relay_test PRIVATE -UNDEBUG)
   add_test(NAME signal_relay COMMAND signal_relay_test)
   set_tests_properties(signal_relay PROPERTIES TIMEOUT 15)
+  add_executable(signal_stdio_test tests/signal_stdio.c)
+  target_link_libraries(signal_stdio_test PRIVATE signal_interpose)
+  target_compile_options(signal_stdio_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_stdio COMMAND signal_stdio_test)
+  set_tests_properties(signal_stdio PROPERTIES TIMEOUT 15)
   add_executable(signal_pending_test tests/signal_pending.c)
   target_link_libraries(signal_pending_test PRIVATE domains)
   target_compile_options(signal_pending_test PRIVATE -UNDEBUG)

@@ -3,12 +3,14 @@
 #include "signal-router.h"
 #include "signal-consume.h"
 #include "signal-fd-kernel.h"
+#include "signal-fd-adapter.h"
 #include "nonlocal-mask.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/signalfd.h>
 #include <sys/uio.h>
@@ -267,17 +269,25 @@ struct read_arguments {
   size_t size;
   const struct iovec *vectors;
   void *function;
+  gw_signal_fd_reader backend;
+  void *cookie;
   ssize_t native_result;
 };
 
 static long invoke_read(void *argument) {
   struct read_arguments *args = argument;
+  if (args->backend) {
+    args->native_result = args->backend(args->cookie, args->buffer, args->size);
+    return args->native_result;
+  }
+
   if (args->vector) {
     typedef ssize_t (*function_type)(int, const struct iovec *, int);
     args->native_result = ((function_type)args->function)(
         args->descriptor, args->vectors, args->count);
     return args->native_result;
   }
+
   typedef ssize_t (*function_type)(int, void *, size_t);
   args->native_result = ((function_type)args->function)(
       args->descriptor, args->buffer, args->size);
@@ -289,38 +299,140 @@ static long decode_read(void *argument, long result) {
   if (result <= 0) {
     return result;
   }
+
   if (args->vector) {
     return translate(args->vectors, args->count, result);
   }
+
   struct iovec vector = {.iov_base = args->buffer, .iov_len = result};
   return translate(&vector, 1, result);
 }
 
-static ssize_t read_bytes(int descriptor, void *buffer, size_t size) {
-  typedef ssize_t (*function_type)(int, void *, size_t);
-  function_type function = (function_type)resolve(B_READ, "read");
-  if (!function) {
-    return -1;
-  }
+ssize_t gw_signal_fd_read_backend(int descriptor, void *buffer, size_t size,
+                                  gw_signal_fd_reader backend, void *cookie) {
   int translated = translated_descriptor(descriptor);
   if (translated < 0) {
     return -1;
   }
   if (!translated) {
-    return function(descriptor, buffer, size);
+    return backend(cookie, buffer, size);
   }
+
   for (;;) {
     signal_host_prune_notifications();
     struct read_arguments args = {.descriptor = descriptor,
                                   .buffer = buffer,
                                   .size = size,
-                                  .function = (void *)function};
+                                  .backend = backend,
+                                  .cookie = cookie};
     ssize_t result = gw_signal_consume_call(invoke_read, decode_read, &args);
     if (result || args.native_result == 0) {
       return result;
     }
   }
 }
+
+struct native_read {
+  int descriptor;
+  ssize_t (*function)(int, void *, size_t);
+};
+
+static ssize_t descriptor_read(void *cookie, void *buffer, size_t size) {
+  struct native_read *native = cookie;
+  return native->function(native->descriptor, buffer, size);
+}
+
+static ssize_t read_bytes(int descriptor, void *buffer, size_t size) {
+  struct native_read native = {.descriptor = descriptor,
+                               .function = (void *)resolve(B_READ, "read")};
+
+  return native.function ? gw_signal_fd_read_backend(descriptor, buffer, size,
+                                                     descriptor_read, &native)
+                         : -1;
+}
+
+#ifdef __ANDROID__
+static _Atomic(void *) probe_native;
+static _Atomic int probe_descriptor = -1, probe_observed;
+
+static ssize_t probe_stdio_read(int descriptor, void *buffer, size_t size) {
+  if (descriptor ==
+      atomic_load_explicit(&probe_descriptor, memory_order_relaxed)) {
+    atomic_store_explicit(&probe_observed, 1, memory_order_relaxed);
+  }
+
+  typedef ssize_t (*function_type)(int, void *, size_t);
+  function_type function =
+      (void *)atomic_load_explicit(&probe_native, memory_order_acquire);
+  return function(descriptor, buffer, size);
+}
+
+int gw_signal_fd_probe_stdio(void) {
+  void *native = resolve(B_READ, "read");
+  if (!native) {
+    return ENOTSUP;
+  }
+
+  int descriptors[2];
+  if (pipe2(descriptors, O_CLOEXEC)) {
+    return errno;
+  }
+
+  FILE *stream = fdopen(descriptors[0], "r");
+  if (!stream) {
+    int error = errno;
+    close(descriptors[0]);
+    close(descriptors[1]);
+    return error;
+  }
+
+  char expected_byte = 'x', observed_byte = 0;
+  if (write(descriptors[1], &expected_byte, 1) != 1) {
+    int error = errno;
+    fclose(stream);
+    close(descriptors[1]);
+    return error ? error : EIO;
+  }
+  close(descriptors[1]);
+
+  /* Observe actual native fread -> public read dispatch. Temporarily replace
+   * only our cached bottom backend, with stdio users quiescent at bootstrap.
+   * Once restored there is no probe branch/load on normal read calls. A late
+   * in-flight probe callback is safe: its native target remains pinned.
+   * https://github.com/aosp-mirror/platform_bionic/blob/main/libc/stdio/stdio.cpp
+   */
+  atomic_store_explicit(&probe_native, native, memory_order_release);
+  atomic_store_explicit(&probe_observed, 0, memory_order_relaxed);
+  atomic_store_explicit(&probe_descriptor, descriptors[0],
+                        memory_order_relaxed);
+
+  void *expected = native;
+  if (!atomic_compare_exchange_strong_explicit(
+          &natives[B_READ], &expected, (void *)probe_stdio_read,
+          memory_order_acq_rel, memory_order_acquire)) {
+    atomic_store_explicit(&probe_descriptor, -1, memory_order_relaxed);
+    fclose(stream);
+    return EBUSY;
+  }
+
+  size_t received = fread(&observed_byte, 1, 1, stream);
+  int observed = atomic_load_explicit(&probe_observed, memory_order_relaxed);
+
+  expected = (void *)probe_stdio_read;
+  int restored = atomic_compare_exchange_strong_explicit(
+      &natives[B_READ], &expected, native, memory_order_acq_rel,
+      memory_order_acquire);
+  atomic_store_explicit(&probe_descriptor, -1, memory_order_relaxed);
+  fclose(stream);
+
+  if (!restored) {
+    return EBUSY;
+  }
+
+  return received == 1 && observed_byte == expected_byte && observed ? 0
+                                                                     : ENOTSUP;
+}
+#endif
 
 ssize_t read(int descriptor, void *buffer, size_t size) {
   return read_bytes(descriptor, buffer, size);

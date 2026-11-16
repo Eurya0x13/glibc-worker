@@ -178,6 +178,12 @@ discarding only that recipient's pending work. Two further calls consume through
 Host signalfd, using ordinary and vectored reads and a duplicated descriptor.
 Both check original metadata, poll readiness before/after consumption, and a
 subsequent JNI call. The `host-signalfd` JSON row is required by the oracle.
+
+Host `fdopen/fread` additionally consumes a Guest-produced packet through a real
+native FILE. The `host-signalfd-stdio` row requires original metadata, unchanged
+fileno identity, native reopen/close and a subsequent JNI call. Core's native
+[stdio comparison](../../../core/docs/en/STDIO.md) covers wide and partial reads
+and distinguishes the GNU hidden-read fix from Bionic's already working path.
 Four further calls exercise read/readv abandonment and fresh consumption after
 recovery. A native Host handler jumps after kernel consumption and before
 decoding, without calling JNI or crossing Java frames. Each recovery must allow

@@ -115,6 +115,11 @@ PID、UID 和来源码。Host `sigpending` 显示原始信号，隐藏私有通�
 另由 core 用例验证。再有两次调用通过 Host signalfd 消费，分别使用普通读取、向量
 读取和复制描述符。两者均检查原始元数据、消费前后的 poll 就绪以及再次 JNI 调用。
 判定器要求存在正确的 `host-signalfd` JSON 记录。
+
+Host `fdopen/fread` 另通过真实原生 FILE 消费 Guest 产生的信号包。
+`host-signalfd-stdio` 记录要求原始元数据、fileno 身份保持、原生重开/关闭及随后
+JNI 调用正常。core 的 [stdio 原生对照](../../../core/docs/zh/STDIO.md) 覆盖宽字符
+和部分读取，并区分 GNU 隐藏读取修复与 bionic 原本已工作的路径。
 另四次调用验证 read/readv 放弃及恢复后的新信号消费。原生 Host 处理器在内核消费后、
 解码前跳出，不执行 JNI，也不跨过 Java 帧。每次恢复后均须允许释放上下文、再次 JNI
 调用及新信号读取。判定器还要求存在正确的 `host-signalfd-unwind` 记录。

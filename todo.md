@@ -12,9 +12,9 @@ and Host delivery on GNU-created threads first. Independent Guest asynchronous
 delivery and general saved/resumable native contexts are deferred, not removed.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
-[Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Host stdio
-consumption of the opt-in deferred signalfd channel is the next integration
-item; it does not concern ordinary file stdio.
+[Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
+[Host stdio backends](core/docs/en/STDIO.md) cover the opt-in deferred signalfd
+channel while retaining real FILE objects and the verified Bionic native path.
 
 ## Agreed signal ownership
 
@@ -51,7 +51,7 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   metadata and six readiness interfaces are implemented. Kernel-authoritative
   descriptor inspection now covers imported/duplicate aliases, range close and
   private tables; lifecycle scans include every live task's table. Complete
-  hidden stdio reads, Host `setcontext`/resumable read-decode and close windows and paths
+  Host `setcontext`/resumable read-decode and close windows and paths
   without initialized native-jump interposition. Managed consuming operations
   now retire consumed packets before outside native jumps or cancellation;
   nested readers and fresh handler sends retain separate ownership. Complete

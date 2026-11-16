@@ -84,9 +84,9 @@ or metadata lease to retire after close/replacement. Duplication, SCM_RIGHTS
 imports, raw close and `close_range` therefore retain the actual OFD semantics.
 Owners must still serialize replacement against active reads. Inspection uses
 raw, non-cancelling syscalls with catchable signals blocked, allocates no memory
-and closes its temporary proc descriptors before restoring delivery. Hidden
-stdio reads still need integration; raw reads/private libc handles bypass this
-public adapter.
+and closes its temporary proc descriptors before restoring delivery. Native
+[Host stdio backends](STDIO.md) translate before bytes enter FILE buffers;
+raw reads/private libc handles outside those backends bypass the public adapter.
 Logical dequeue ordering across native signals and deferred notification lanes
 also remains unfinished; the mixed-record test checks metadata, not equivalence
 of signal-selection priority. A native metadata comparison is not that proof.

@@ -103,7 +103,9 @@ def execute_case(
             for p in parts
         )
         returncode = None
+
     (out / (mode + ".log")).write_text(output)
+
     rows = []
     malformed = False
     for line in output.splitlines():
@@ -116,6 +118,7 @@ def execute_case(
                     malformed = True
             except json.JSONDecodeError:
                 malformed = True
+
     terminal = [r for r in rows if r.get("result") == "PASS"]
     transfer = [r for r in rows if r.get("stage") == "nonlocal-transfer"]
     fpe = [r for r in rows if r.get("stage") == "guest-fpe"]
@@ -160,7 +163,7 @@ def execute_case(
                         "value": 73,
                     },
                 ]
-                or len(guest_fault_masks) != 13
+                or len(guest_fault_masks) != 14
                 or any(
                     r.get("signal") != int(signal.SIGTRAP)
                     or r.get("logical_blocked") is not False
@@ -201,6 +204,18 @@ def execute_case(
                         "read": True,
                         "readv": True,
                         "context_release": True,
+                        "jni_retry": True,
+                    }
+                ]
+                or [r for r in rows if r.get("stage") == "host-signalfd-stdio"]
+                != [
+                    {
+                        "stage": "host-signalfd-stdio",
+                        "native_file": True,
+                        "metadata": True,
+                        "fileno": True,
+                        "freopen": True,
+                        "close": True,
                         "jni_retry": True,
                     }
                 ]
@@ -282,6 +297,7 @@ def execute_case(
             )
         )
     )
+
     if fatal is not None:
         armed = [r for r in rows if r.get("stage") == "guest-default"]
         executed = [
@@ -308,6 +324,7 @@ def execute_case(
         terminal = [
             {"case": mode, "signal": int(signal.SIGTRAP), "result": "PASS"}
         ]
+
     evidence = {
         "case": mode,
         "returncode": returncode,
@@ -322,6 +339,7 @@ def execute_case(
         raise SystemExit(
             "Runtime SDK case failed: " + str(out / (mode + ".log"))
         )
+
     summary = {"case": mode, **terminal[0]}
     if mode == "nonlocal":
         skipped = transfer[0]["guest_wait_skipped"]
@@ -333,4 +351,5 @@ def execute_case(
             wait_skipped=skipped,
             wait_unwinds=transfer[0]["wait_unwinds"],
         )
+
     return summary

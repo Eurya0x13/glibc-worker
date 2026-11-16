@@ -26,6 +26,9 @@ extern int signal_fd_channel_ready(void) __attribute__((weak));
 extern int signal_fd_channel_busy(void) __attribute__((weak));
 extern int signal_host_relay_running(void) __attribute__((weak));
 extern int signal_host_relay_busy(void) __attribute__((weak));
+extern int signal_stdio_enable(void) __attribute__((weak));
+extern int signal_stdio_verify(void) __attribute__((weak));
+extern int signal_stdio_disable(void) __attribute__((weak));
 
 struct disposition {
   struct sigaction action;
@@ -98,12 +101,14 @@ int signal_router_defer_faults(const int *notifications) {
   if (!signal_router_enabled() || !signal_host_physical_mask) {
     return EINVAL;
   }
+
   uint64_t mask;
   lock_writer(&mask);
   if (atomic_load(&deferred_faults)) {
     unlock_writer(mask);
     return EALREADY;
   }
+
   if (signal_fd_channel_ready) {
     int error = signal_fd_channel_ready();
     if (error) {
@@ -111,6 +116,7 @@ int signal_router_defer_faults(const int *notifications) {
       return error;
     }
   }
+
   uint64_t used = 0;
   for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
     int number = notifications[i];
@@ -132,6 +138,15 @@ int signal_router_defer_faults(const int *notifications) {
       return EBUSY;
     }
   }
+
+  if (signal_stdio_enable) {
+    int error = signal_stdio_enable();
+    if (error) {
+      unlock_writer(mask);
+      return error;
+    }
+  }
+
   const int faults[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGSYS};
   int installed = 0, result = 0;
   for (; installed < GW_SIGNAL_FAULT_LANES; ++installed) {
@@ -149,6 +164,7 @@ int signal_router_defer_faults(const int *notifications) {
       break;
     }
   }
+
   if (result) {
     while (installed) {
       --installed;
@@ -156,6 +172,12 @@ int signal_router_defer_faults(const int *notifications) {
                         &notification_original[installed], NULL)) {
         _exit(105);
       }
+    }
+
+    if (signal_stdio_disable && signal_stdio_disable()) {
+      /* Stdio callbacks remain mapped. A failed rollback is terminal for
+       * this runtime; the owner disposes of the quarantined process. */
+      result = EIO;
     }
   } else {
     memcpy(fault_notifications, notifications, sizeof fault_notifications);
@@ -167,6 +189,7 @@ int signal_router_defer_faults(const int *notifications) {
     notification_owner = syscall(SYS_gettid);
     atomic_store_explicit(&deferred_faults, 1, memory_order_release);
   }
+
   unlock_writer(mask);
   return result;
 }
@@ -773,6 +796,13 @@ _Noreturn void signal_router_default(int number) {
 }
 
 int signal_router_verify(void) {
+  if (signal_stdio_verify) {
+    int error = signal_stdio_verify();
+    if (error) {
+      return error;
+    }
+  }
+
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -789,6 +819,7 @@ int signal_router_verify(void) {
       }
     }
   }
+
   for (int number = 1; number < NSIG; ++number) {
     struct disposition *record =
         atomic_load_explicit(&current[number], memory_order_acquire);
@@ -866,12 +897,14 @@ int signal_router_restore(void) {
   if (signal_host_relay_running && signal_host_relay_running()) {
     return EBUSY;
   }
+
   if (signal_fd_channel_busy) {
     int error = signal_fd_channel_busy();
     if (error) {
       return error;
     }
   }
+
   /* Caller has joined all test carriers and destroyed the VM. */
   if (signal_router_fault_notifications() && signal_deferred_recipients &&
       signal_deferred_recipients()) {
@@ -881,12 +914,14 @@ int signal_router_restore(void) {
   if (notifications && notification_owner != syscall(SYS_gettid)) {
     return EBUSY;
   }
+
   uint64_t previous = gw_nonlocal_mask_block(), notification_bits = 0;
   int error = signal_router_verify();
   if (error) {
     gw_nonlocal_mask_restore(previous);
     return error;  // Do not overwrite a handler installed outside this router.
   }
+
   for (int number = 1; number < NSIG; ++number) {
     if (managed[number] && system_action(number, &original[number], NULL)) {
       error = errno;
@@ -894,6 +929,7 @@ int signal_router_restore(void) {
       return error;
     }
   }
+
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
       if (system_action(notifications[i], &notification_original[i], NULL)) {
@@ -903,10 +939,21 @@ int signal_router_restore(void) {
       }
       notification_bits |= UINT64_C(1) << (notifications[i] - 1);
     }
+
+    if (signal_stdio_disable) {
+      error = signal_stdio_disable();
+      if (error) {
+        gw_nonlocal_mask_restore(previous);
+        return error;
+      }
+    }
+
     atomic_store_explicit(&deferred_faults, 0, memory_order_release);
   }
+
   atomic_store(&enabled, 0);
   atomic_store(&guest_faults, 0);
+
   /* Private mask bits must not leak into the Host mask after disabling the
    * translator. Other Host mask changes made during runtime use are retained.
    * The integration owner has joined the remaining recipients before restore.
@@ -948,6 +995,7 @@ int signal_router_reclaim(const struct signal_router_quiescence *gate,
       !reclaimed) {
     return EINVAL;
   }
+
   uint64_t mask;
   lock_writer(&mask);
   int error = gate->enter(gate->context);
@@ -955,11 +1003,13 @@ int signal_router_reclaim(const struct signal_router_quiescence *gate,
     unlock_writer(mask);
     return error;
   }
+
   if (signal_host_relay_busy && signal_host_relay_busy()) {
     gate->leave(gate->context);
     unlock_writer(mask);
     return EBUSY;
   }
+
   unsigned count = 0;
   int live = atomic_load_explicit(&enabled, memory_order_acquire);
   struct disposition **link = &allocations;

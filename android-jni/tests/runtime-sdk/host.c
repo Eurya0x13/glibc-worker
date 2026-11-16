@@ -98,15 +98,18 @@ static void host_relay(int number, siginfo_t *information, void *frame) {
          relay_canary == 0x7193);
   assert(information->si_code == SI_QUEUE && information->si_pid == getpid() &&
          information->si_uid == getuid());
+
   long tid = syscall(SYS_gettid);
   assert(tid != information->si_value.sival_int);
   long previous = atomic_load(&relay_tid);
   assert(!previous || previous == tid);
   atomic_store(&relay_tid, tid);
+
   sigset_t mask;
   assert(!pthread_sigmask(SIG_SETMASK, NULL, &mask));
   assert(sigismember(&mask, number) && sigismember(&mask, SIGWINCH));
   sigaddset(&((ucontext_t *)frame)->uc_sigmask, SIGWINCH);
+
   atomic_fetch_add(&relay_deliveries, 1);
   errno = ERANGE;
 }
@@ -119,10 +122,13 @@ static void host_gnu_thread_relay(JNIEnv *env, jclass cls) {
   sigaddset(&action.sa_mask, SIGWINCH);
   assert(!sigaction(SIGURG, &action, &previous));
   assert(!sigaction(SIGTRAP, &action, &trap_previous));
+
   assert(native_entry(env, cls, 88) == 73);
   assert(atomic_load(&relay_deliveries) == 64);
+
   assert(!sigaction(SIGURG, &previous, NULL));
   assert(!sigaction(SIGTRAP, &trap_previous, NULL));
+
   puts(
       "{\"stage\":\"gnu-host-relay\",\"threads\":8,\"deliveries\":64,"
       "\"host_tls\":true,\"guest_tls_errno\":true,\"original_siginfo\":true,"
@@ -750,10 +756,12 @@ static void host_signal_descriptor(JNIEnv *env, jclass cls,
   assert(descriptor >= 0);
   int alias = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
   assert(alias >= 0);
+
   for (int vector = 0; vector < 2; ++vector) {
     assert(native_entry(env, cls, 84) == 73);
     struct pollfd ready = {.fd = alias, .events = POLLIN};
     assert(poll(&ready, 1, 0) == 1 && (ready.revents & POLLIN));
+
     struct signalfd_siginfo information;
     errno = EDOM;
     if (!vector) {
@@ -766,17 +774,47 @@ static void host_signal_descriptor(JNIEnv *env, jclass cls,
                               {&unused, sizeof unused}};
       assert(readv(descriptor, parts, 2) == sizeof information);
     }
+
     assert(errno == EDOM);
     assert(information.ssi_signo == SIGTRAP &&
            information.ssi_code == SI_QUEUE);
     assert(information.ssi_pid == (unsigned)getpid() &&
            information.ssi_uid == getuid() && information.ssi_int == 0x7193);
+
     assert(poll(&ready, 1, 0) == 0);
     assert(native_entry(env, cls, 0) == 73);
   }
+
   host_descriptor_ignore(env, cls, descriptor);
   host_descriptor_unwind(env, cls, descriptor);
   assert(!close(descriptor) && !close(alias));
+
+  descriptor = signalfd(-1, set, SFD_NONBLOCK | SFD_CLOEXEC);
+  assert(descriptor >= 0);
+  FILE *stream = fdopen(descriptor, "rb");
+  assert(stream && fileno(stream) == descriptor);
+
+  assert(native_entry(env, cls, 84) == 73);
+  struct signalfd_siginfo information;
+  assert(fread(&information, sizeof information, 1, stream) == 1);
+  assert(information.ssi_signo == SIGTRAP && information.ssi_code == SI_QUEUE &&
+         information.ssi_int == 0x7193);
+  assert(information.ssi_pid == (unsigned)getpid() &&
+         information.ssi_uid == getuid());
+
+  assert(native_entry(env, cls, 0) == 73);
+
+  assert(freopen("/dev/null", "r", stream) == stream);
+  assert(fileno(stream) == descriptor);
+  assert(fgetc(stream) == EOF && feof(stream));
+
+  assert(!fclose(stream));
+  assert(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF);
+
+  puts(
+      "{\"stage\":\"host-signalfd-stdio\",\"native_file\":true,"
+      "\"metadata\":true,\"fileno\":true,\"freopen\":true,\"close\":true,"
+      "\"jni_retry\":true}");
   puts(
       "{\"stage\":\"host-signalfd\",\"read\":true,\"readv\":true,"
       "\"readiness\":true,\"metadata\":true,\"alias\":true,"
