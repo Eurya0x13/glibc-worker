@@ -16,6 +16,16 @@ does not establish app sandbox compatibility.
 `--ffi` selects GNU Guest libffi (`core/build/ffi-linux/<ABI>`), including on
 Android. The bionic Host archive under `ffi-android` is not a GNU service input.
 
+The positive default/worker cases reject two malformed bridge configurations
+before process ownership is claimed, verify `GW_HOST_NEW`, unchanged masks and
+relay ownership, then successfully start the actual runtime. Two additional
+`borrowed-relay` cases supply an already running Host dispatcher for each
+backend. Shutdown must leave borrowed dispatchers running and join owned ones;
+the external owner then stops its dispatcher before VM/router teardown.
+The `runtime-relay-lifecycle` observation is required for positive cases,
+including native recovery. Incompatible libc rejection must instead retain the
+dispatcher and quarantine the already claimed bridge.
+
 ## Native unwind validation
 
 Build and install android-jni with `-DGW_NATIVE_UNWIND_INTEGRATION=ON`. Run the

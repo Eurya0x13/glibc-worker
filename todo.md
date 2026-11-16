@@ -7,9 +7,9 @@ Normal JNI returns, Java exception propagation and surviving outer Java frames
 remain bridge compatibility obligations. See the
 [VM boundary and reproducer](jvm-jni/docs/en/NONLOCAL_VM.md).
 
-Current implementation order: descriptor lifecycle/concurrent Host delivery
-and Host delivery on GNU-created threads first. Independent Guest asynchronous
-delivery and general saved/resumable native contexts are deferred, not removed.
+Current priority: remaining deferred Host dequeue ordering and native
+consumption/lifecycle windows. Independent Guest asynchronous delivery and
+general saved/resumable native contexts are deferred, not removed.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native

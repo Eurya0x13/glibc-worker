@@ -299,7 +299,13 @@ def write_manifest():
 
 
 rows = []
-cases = [("default", False), ("worker", False), ("reject-ordinary-libc", True)]
+cases = [
+    ("default", False),
+    ("worker", False),
+    ("borrowed-relay", False),
+    ("worker-borrowed-relay", False),
+    ("reject-ordinary-libc", True),
+]
 if args.expect_unconfigured_profile:
     cases = [("unconfigured-profile", False)]
 if args.nonlocal_test:

@@ -30,8 +30,11 @@ extern "C" {
  * router before releasing VM/application threads; jvm-jni supplies any pinned
  * VM/ART integration. This API never selects a VM profile automatically.
  * Paths must refer to the matching packaged loader, GNU service and libc.
- * Returns zero or an errno value. Once initialization starts, failure is
- * terminal: retain mappings and dispose of the process, never retry start.
+ * Returns zero or an errno value. Validation failures that leave the bridge
+ * NEW admit a corrected retry without creating helpers. Once the bridge
+ * claims initialization, failure is terminal: retain mappings and dispose of
+ * the process, never retry start. An existing relay is borrowed; otherwise
+ * startup creates and owns it before admitting GNU code.
  * The selected VM is obtained from env by the bridge, not created here.
  * Use a dedicated bootstrap/lifecycle thread. Its context zero is the GNU
  * supervisor's control channel; application JNI calls use other VM threads. */

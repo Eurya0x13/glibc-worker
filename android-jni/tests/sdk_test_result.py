@@ -76,6 +76,19 @@ def valid_guest_target_observations(rows):
     ]
 
 
+def valid_relay_lifecycle(rows, mode):
+    return [r for r in rows if r.get("stage") == "runtime-relay-lifecycle"] == [
+        {
+            "stage": "runtime-relay-lifecycle",
+            "preclaim_failures": 2,
+            "retry": True,
+            "borrowed": "borrowed-relay" in mode,
+            "shutdown_preserved_owner": True,
+            "masks_preserved": True,
+        }
+    ]
+
+
 def execute_case(
     command,
     out,
@@ -151,6 +164,17 @@ def execute_case(
         or len(terminal) != 1
         or malformed
         or warnings
+        or (
+            mode
+            in (
+                "default",
+                "worker",
+                "borrowed-relay",
+                "worker-borrowed-relay",
+                "nonlocal",
+            )
+            and not valid_relay_lifecycle(rows, mode)
+        )
         or (
             require_host_fault_mask
             and (

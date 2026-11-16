@@ -9,6 +9,13 @@
 `--ffi` 选择 GNU Guest libffi（`core/build/ffi-linux/<ABI>`），Android 测试也如此；
 `ffi-android` 下的 bionic Host 归档库不能作为 GNU 服务输入。
 
+默认/worker 正向用例先拒绝两份错误桥配置，确认进程所有权尚未认领、状态仍为
+`GW_HOST_NEW`、掩码及分发线程所有权不变，再成功启动真实 runtime。另有两个
+`borrowed-relay` 用例为两个后端分别提供已运行的 Host 分发线程。关闭必须保留借用的
+分发线程，并 join 自建线程；外部所有者随后在 VM/路由器清理前停止其分发线程。
+所有正向用例（包括原生恢复）均要求 `runtime-relay-lifecycle` 观测。
+拒绝不匹配 libc 则必须保留分发线程，并隔离已认领的桥。
+
 ## 原生展开验证
 
 使用 `-DGW_NATIVE_UNWIND_INTEGRATION=ON` 构建并安装 android-jni，然后给消费者 runner 传 `--native-unwind --nonlocal`，以链接 core 的显式拦截目标并构建匹配 Guest 服务。不传 --nonlocal 则检查普通同线程、worker 和缺少收养能力的普通 libc 拒绝路径。

@@ -5,7 +5,7 @@
 #include "signal-relay.h"
 #include <errno.h>
 
-static int owned_runtime;
+static int owned_runtime, owned_relay;
 
 int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
   if (!env || !c || c->version != GW_HOST_RUNTIME_CONFIG_V1 ||
@@ -36,19 +36,6 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
     return EALREADY;
   }
 
-  if (!signal_host_relay_running()) {
-    error = signal_host_relay_start();
-    if (error) {
-      return error;
-    }
-  }
-#ifdef GW_DOMAIN_NONLOCAL
-  error = signal_router_guest_faults();
-  if (error) {
-    return error;
-  }
-#endif
-
   session.shared.magic = MAGIC;
   session.domain = c->backend == GW_EXECUTION_SAME_THREAD;
   session.reserved_signals = c->signals->host_reserved;
@@ -57,12 +44,28 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
 #ifdef GW_DOMAIN_NONLOCAL
   session.bind_guest_signal = signal_guest_fault_bind;
 #endif
+  /* Claim bridge ownership before creating helpers or changing Guest fault
+   * routing. A validation failure leaves NEW and permits a corrected retry;
+   * every later failure retains resources under the terminal contract. */
   if (full_host_start(&session.shared, env, c->bridge) != JNI_OK) {
     return EIO;
   }
   owned_runtime = 1;
 
-  error = domain_owner_start(c->loader_path, c->library_path, c->service_path);
+  if (!signal_host_relay_running()) {
+    error = signal_host_relay_start();
+    owned_relay = !error;
+  }
+#ifdef GW_DOMAIN_NONLOCAL
+  if (!error) {
+    error = signal_router_guest_faults();
+  }
+#endif
+
+  if (!error) {
+    error =
+        domain_owner_start(c->loader_path, c->library_path, c->service_path);
+  }
   if (!error && full_host_ready() != JNI_OK) {
     error = EPROTO;
   }
@@ -87,8 +90,11 @@ int gw_host_runtime_shutdown(void) {
   }
 
   int error = owner_command(NULL, JNI_DOMAIN_STOP);
-  if (!error) {
+  if (!error && owned_relay) {
     error = signal_host_relay_stop();
+    if (!error) {
+      owned_relay = 0;
+    }
   }
   if (error) {
     gw_dlopen_quarantine();

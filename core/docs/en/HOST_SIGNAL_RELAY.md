@@ -54,10 +54,14 @@ Before stop, quiesce external senders and GNU recipients. Stop returns `EBUSY`
 while a request owns an original frame and `EDEADLK` when called by its own
 dispatcher. Busy stop retains the working dispatcher; a later stop can retry.
 Successful stop joins the real Host pthread. JNI shutdown checks pending work
-before retiring the bridge and stops the dispatcher after Guest control stops.
+before retiring the bridge and stops an owned dispatcher after Guest control
+stops. JNI startup borrows a dispatcher already started by the embedder; that
+owner stops it after runtime shutdown and before router restoration. A rejected
+bridge configuration that leaves `GW_HOST_NEW` does not create a dispatcher or
+enable Guest fault routing and permits a corrected retry.
 The router cannot restore while the relay runs, and reclamation cannot release
 queued immutable action tokens. Failed runtime initialization retains resources
-under the existing process-disposal contract.
+after the bridge claims initialization under the process-disposal contract.
 
 ## Verification
 

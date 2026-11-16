@@ -38,14 +38,21 @@ capabilities, and the service verifies the patched libc's adoption ABI.
 An ordinary or incompatible libc is rejected. A failure after bridge
 initialization begins quarantines the runtime and retains its resources; the
 caller must discard the process rather than retry initialization.
+Validation failures that leave the bridge in `GW_HOST_NEW` permit a corrected
+retry. The runtime claims the bridge before creating a dispatcher or enabling
+Guest fault routing, so a rejected configuration cannot leave either side
+effect behind. Terminal failures after that claim do not roll back helpers.
 
 Before starting GNU code, startup creates the real Host dispatcher described by
 the [signal relay contract](../../../core/docs/en/HOST_SIGNAL_RELAY.md). A routed
 Host arrival on a genuine GNU pthread waits for that dispatcher to finish its
 handler. Both backends preserve this explicit change of handler thread; the
 dispatcher is not implicitly attached to the VM and must not invoke JNI from a
-signal handler. Shutdown rejects pending relay work and joins the dispatcher
-after Guest control stops. External senders must already be quiescent.
+signal handler. If the embedder already started the dispatcher, startup borrows
+it and shutdown leaves it running. Otherwise startup owns it and shutdown joins
+it after Guest control stops. Pending relay work refuses shutdown in either
+case. The external owner joins a borrowed dispatcher after runtime shutdown and
+before restoring the router. External senders must already be quiescent.
 
 Shutdown requires the lifecycle owner, stopped producers, quiesced native work
 and closed modules. It does not cancel native calls, destroy the VM or unload

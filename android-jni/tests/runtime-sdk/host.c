@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "runtime_bridge.h"
 #include "signal-router.h"
+#include "signal-relay.h"
 #ifdef GW_TEST_NATIVE_UNWIND
 #include "nonlocal.h"
 #endif
@@ -1179,6 +1180,34 @@ static void *application_run(void *argument) {
   return NULL;
 }
 
+static void retry_preclaim_failure(JNIEnv *env,
+                                   const struct gw_host_runtime_config *config,
+                                   int borrowed_relay) {
+  sigset_t before, after;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &before));
+
+  for (int invalid = 0; invalid < 2; ++invalid) {
+    struct gw_host_bridge_config bridge = *config->bridge;
+    if (invalid) {
+      bridge.flags |= UINT32_C(1) << 31;
+    } else {
+      bridge.abi_version = 0;
+    }
+    struct gw_host_runtime_config rejected = *config;
+    rejected.bridge = &bridge;
+
+    assert(gw_host_runtime_start(env, &rejected) == EIO);
+    assert(full_host_state() == GW_HOST_NEW);
+    assert(signal_host_relay_running() == borrowed_relay);
+    assert(!(*env)->ExceptionCheck(env));
+  }
+
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &after));
+  for (int number = 1; number < NSIG; ++number) {
+    assert(sigismember(&before, number) == sigismember(&after, number));
+  }
+}
+
 /* argv: libjvm classpath loader library-path service module directory backend.
  * This consumer uses installed headers/libraries, with no source-tree include.
  */
@@ -1244,14 +1273,24 @@ int main(int argc, char **argv) {
                                           .service_path = argv[5],
                                           .bridge = &bridge,
                                           .signals = &signals};
-  int worker = !strcmp(argv[8], "worker");
+  int worker =
+      !strcmp(argv[8], "worker") || !strcmp(argv[8], "worker-borrowed-relay");
   if (worker) {
     config.backend = GW_EXECUTION_WORKER;
   }
+
+  int borrowed_relay = strstr(argv[8], "borrowed-relay") != NULL;
+  assert(!signal_host_relay_running());
+  if (borrowed_relay) {
+    assert(!signal_host_relay_start());
+  }
+  retry_preclaim_failure(env, &config, borrowed_relay);
+
   int result = gw_host_runtime_start(env, &config);
   if (getenv("GW_EXPECT_RUNTIME_REJECTION")) {
     assert(result == ELIBBAD || result == EPROTO);
     assert(full_host_state() == GW_HOST_QUARANTINED);
+    assert(signal_host_relay_running());
     puts("{\"result\":\"PASS\",\"case\":\"artifact-rejection\"}");
     fflush(NULL);
     _exit(0);
@@ -1283,6 +1322,16 @@ int main(int argc, char **argv) {
   assert(!(*env)->ExceptionCheck(env));
   assert(!gw_host_runtime_shutdown());
   assert(full_host_state() == GW_HOST_STOPPED);
+  assert(signal_host_relay_running() == borrowed_relay);
+  if (borrowed_relay) {
+    assert(!signal_host_relay_stop());
+  }
+  printf(
+      "{\"stage\":\"runtime-relay-lifecycle\",\"preclaim_failures\":2,"
+      "\"retry\":true,\"borrowed\":%s,\"shutdown_preserved_owner\":true,"
+      "\"masks_preserved\":true}\n",
+      borrowed_relay ? "true" : "false");
+
   assert((*vm)->DestroyJavaVM(vm) == JNI_OK);
 #ifdef GW_TEST_LATE_SIGNALS
   assert(!domain_late_signal_restore());

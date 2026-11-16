@@ -210,6 +210,8 @@ rows = []
 cases = (
     ("default", args.runtime, False),
     ("worker", args.runtime, False),
+    ("borrowed-relay", args.runtime, False),
+    ("worker-borrowed-relay", args.runtime, False),
     ("reject-ordinary-libc", args.ordinary_runtime, True),
 )
 if args.nonlocal_test:
