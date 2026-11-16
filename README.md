@@ -1,19 +1,21 @@
 # glibc-worker workspace
 
-在 Android bionic 进程中运行独立的 GNU libc 线程域。这个工作区包含四个独立子项目；Java/HotSpot 是可选接入层。
+[English](docs/en/README.md) | [简体中文](docs/zh/README.md)
 
-| 项目 | 职责 | 依赖 |
+Run an independent GNU libc domain inside an Android bionic process. This workspace contains four independent projects; Java/HotSpot integration is optional.
+
+| Project | Responsibility | Dependencies |
 | --- | --- | --- |
-| [core](core/README.md) | 固定 GNU loader 的 bootstrap、架构入口、事件通知与 RPC 诊断原语 | Linux/Android 系统接口，无 JNI/Java |
-| [bionic-dlopen](bionic-dlopen/README.md) | C 装载契约、ELF 路由、句柄所有权、装卸载同步 | core，无 JNI/Java |
-| [android-jni](android-jni/README.md) | 公开 JNI 的 Host/Guest 桥、引用/异常/回调、GNU service | core、bionic-dlopen、两侧 libffi |
-| [jvm-jni](jvm-jni/README.md) | 可选的 HotSpot/JRE 私有装载适配与真实 JRE 集成测试 | android-jni |
+| [core](core/docs/en/README.md) | Bootstrap a pinned GNU loader, architecture entrypoints, events and RPC diagnostics | Linux/Android interfaces; no JNI/Java |
+| [bionic-dlopen](bionic-dlopen/docs/en/README.md) | C loading contract, ELF routing, handle ownership and load/unload synchronization | core; no JNI/Java |
+| [android-jni](android-jni/docs/en/README.md) | Public JNI Host/Guest bridge, references, exceptions, callbacks and GNU service | core, bionic-dlopen, libffi for both domains |
+| [jvm-jni](jvm-jni/docs/en/README.md) | Optional private HotSpot/JRE loading adapters and real JRE integration tests | android-jni |
 
-每个项目的实现源码统一放在 `src/`；公开接口放在 `include/`，测试留在 `tests/`。每个项目都有自己的 `CMakeLists.txt`、`build.sh`、`docs/` 和 `build/`。它们可以分别构建和安装；通过安装的 CMake 包和头文件声明依赖。没有公共 `build/` 或公共测试目录。
+Each project keeps implementation in `src/`, public interfaces in `include/`, and tests in `tests/`. Each owns its CMake build, `build.sh`, documentation and `build/` outputs. Dependencies use installed CMake packages and headers. There is no shared build or test directory.
 
-`android-jni/build.zig` 负责必需的 Zig Host 存储对象的编译；CMake 继续负责跨项目依赖、C/JNI 和 SDK 安装。尚未将四个项目的构建全部迁移到 Zig。
+`android-jni/build.zig` compiles the required Zig Host stores. CMake still owns inter-project dependencies, C/JNI compilation and SDK installation; the four builds have not all migrated to Zig.
 
-根目录 `scripts/` 只提供工作区组合构建、工具链发现、格式和导出。组合入口调用各项目的构建入口；制品仍归各自项目：
+Root `scripts/` provides workspace composition, toolchain discovery, formatting and export. It invokes project build entrypoints while leaving artifacts with their owners:
 
 ```sh
 GW_ABI=arm64-v8a scripts/build-runtime.sh --module core
@@ -22,16 +24,16 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module android-jni
 GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 ```
 
-上层选择会按顺序构建所需依赖。也可直接使用各项目的 `build.sh`，参见各自 README 与 [组合构建](docs/BUILD.md)。
+Selecting an upper layer builds its dependencies in order. Individual `build.sh` entrypoints are also available; see the project guides and [workspace builds](docs/en/BUILD.md).
 
-`jvm-jni` 的组合构建额外提供旧宿主使用的单文件 `libglibc_bridge.so` 和辅助 JAR。这是上层兼容制品，不属于 core，也不能与模块化 DSOs 在同一个进程重复加载。
+The jvm-jni composition additionally provides the single `libglibc_bridge.so` and helper JAR used by legacy embedders. This upper-layer compatibility artifact is not core and must not coexist with the modular DSOs in one process.
 
-当前真实验证仍主要覆盖 Android HotSpot。公开 JNI 层已与 JRE 私有接口分离，这不等于 ART 的完整 JNI 桥已验证。Pojav 与真实模组接入在外部验证工程，本工作区不包含启动器源码。
+Real validation primarily covers Android HotSpot. Separating public JNI from private JRE interfaces does not prove full ART compatibility. Pojav and real-mod integration live in external validation projects; this workspace contains no launcher source.
 
-依赖下载和源码缓存分别归所属项目的 `vendor/`、`work/`，构建输出归各自 `build/`；根目录不保存这些缓存。代码格式见 [STYLE](docs/STYLE.md)，项目边界、契约文档与 review 顺序见 [REVIEW_GUIDE](docs/REVIEW_GUIDE.md)。
+Downloads, source caches and outputs belong to each project's `vendor/`, `work/` and `build/`. The workspace root keeps none of these caches. See [style](docs/en/STYLE.md) and [review order](docs/en/REVIEW_GUIDE.md).
 
-## 同线程域实验
+## Same-thread domains
 
-受限的同线程后端保留在各项目 `experiments/same-thread/`，使用单独构建和测试入口。该接入构建默认同线程，`GW_DOMAIN_MODE=worker` 显式选择 worker；空值和未知名称拒绝。常规 SDK 安装与组合构建仍使用原 worker 路径，迁移清单见 [todo.md](todo.md)。阅读顺序为 [core 收养与信号机制](core/experiments/same-thread/README.md)、[公开 JNI 接入与生命周期](android-jni/experiments/same-thread/README.md)、[JVM System.load](jvm-jni/experiments/same-thread/SYSTEM_LOAD.md) 和 [晚加载信号链](jvm-jni/experiments/same-thread/LATE_SIGNALS.md)。
+Context switching, adoption patches and signal routing are maintained core source; the public JNI runtime belongs to android-jni. The new `runtime_bridge.h` startup API defaults to same-thread execution and offers an explicit worker backend. See [domain and signal boundaries](core/docs/en/DOMAINS.md) and [runtime integration](android-jni/docs/en/RUNTIME.md). `experiments/same-thread/` retains validation entrypoints and historical evidence. Full dual-domain signal virtualization remains unfinished; see [todo.md](todo.md).
 
-[测量方法](jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](android-jni/docs/ARRAY_COPY_CACHE.md)。这些固定制品的结果不等同于通用 ART/JRE/模组兼容保证；完整双域信号语义仍见 [todo.md](todo.md)。
+The [measurement method](jvm-jni/experiments/same-thread/PERFORMANCE.md) is separate from historical raw evidence under experiment `results/` directories. Controlled array-copy/allocator-page-return comparisons are in the [1–2 MiB cache results](android-jni/experiments/same-thread/results/array-cache/README.md); caller obligations are in the [array-copy contract](android-jni/docs/en/ARRAY_COPY_CACHE.md). Results for pinned artifacts do not establish general ART/JRE/mod compatibility.

@@ -1,5 +1,7 @@
 # C 装载后端契约
 
+[English](../en/LOADER.md) | [简体中文](../zh/LOADER.md)
+
 `include/dlopen_backend.h` 是不依赖 JNI 的公开接口。后端只管理 Host 侧逻辑状态，实际 GNU 加载和执行由调用者提供的 transport 在正确的 Guest 域完成。
 
 ## 初始化

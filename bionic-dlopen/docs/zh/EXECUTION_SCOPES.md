@@ -1,5 +1,7 @@
 # 执行借用与关闭规则
 
+[English](../en/EXECUTION_SCOPES.md) | [简体中文](../zh/EXECUTION_SCOPES.md)
+
 本契约解决同步重入中的自等待：`A → Java → B → Java → close(A)`。只检查当前最内层模块 B 会遗漏仍在执行的 A；关闭 A 若进入 CLOSING 并等待 active 清零，当前线程就无法返回并归还 A。
 
 同一规则还覆盖跨线程的借用等待环：线程一持 A 关闭 B、线程二持 B 关闭 A。桥不构造完整等待图，而是在持有执行 scope 时拒绝需要等待其他借用的关闭。
@@ -40,7 +42,7 @@ BUSY 是本次关闭未执行的结果，不会自动排队、卸载或安排异
 
 这不证明整个程序无死锁。可转移 pin 没有线程所有者，纯 pin 环仍需调用方避免。transport.close / JNI_OnUnload、用户 mutex、join、任意 RPC 中的等待不属于本次检查；目标 active 为零也不代表其 teardown 不会阻塞。Guest 自建后台线程、缓存函数指针和脱离同步回调链的工作也不会自动登记。
 
-上下文扩容、注册类所有权与共享依赖归属由上层 [JNI 交互契约](../../android-jni/docs/CONTEXTS_AND_OWNERSHIP.md) 处理；本层仍没有 deadline/取消确认机制。宿主仍需同步卸载、停止并 join 后台工作；不能用超时返回释放仍可能被远端访问的栈或 JNI frame。任意等待的 deadline/取消仍属于 AUD-08。
+上下文扩容、注册类所有权与共享依赖归属由上层 [JNI 交互契约](../../../android-jni/docs/zh/CONTEXTS_AND_OWNERSHIP.md) 处理；本层仍没有 deadline/取消确认机制。宿主仍需同步卸载、停止并 join 后台工作；不能用超时返回释放仍可能被远端访问的栈或 JNI frame。任意等待的 deadline/取消仍属于 AUD-08。
 
 ## 研究依据与区别
 

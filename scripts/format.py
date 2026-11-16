@@ -12,9 +12,13 @@ EXTENSIONS = {".c", ".h", ".java", ".py", ".sh", ".zig"}
 # Hand-maintained C fragments injected into the experimental runtime. Generated
 # JNI .inc files are intentionally absent: their generators own their format.
 C_FRAGMENTS = {
-    "core/experiments/same-thread/adopt-nptl.inc",
-    "core/experiments/same-thread/signal-guard.inc",
-    "core/experiments/same-thread/signal-registry.inc",
+    "core/src/runtime/adopt-nptl.inc",
+    "core/src/runtime/signal-guard.inc",
+    "core/src/runtime/signal-mask.inc",
+    "core/src/runtime/context-mask.inc",
+    "core/src/runtime/wait-mask.inc",
+    "core/src/runtime/jump-hook.inc",
+    "core/src/domain/signal-registry.inc",
 }
 TEXT_EXTENSIONS = EXTENSIONS | {".md", ".json", ".kts", ".properties"}
 
@@ -26,7 +30,7 @@ def executable(name):
         path = str(ROOT / "scripts/build/tools" / name)
     if not path:
         raise SystemExit(
-            "Install " + name + " or put it on PATH (see docs/STYLE.md)"
+            "Install " + name + " or put it on PATH (see docs/en/STYLE.md)"
         )
     return path
 

@@ -1,12 +1,12 @@
 # glibc-worker bionic-dlopen
 
-JNI 无关的 Host 装载层：ELF GNU 标记分类、映像路由、带代数的逻辑句柄、重复 inode 拒绝、借用计数和关闭同步。
+[English](docs/en/README.md) | [简体中文](docs/zh/README.md)
 
-`src/` 保存 C 装载器与 ELF 分类实现；`include/` 保存公开装载契约。
+A JNI-independent Host loading layer: GNU ELF classification, image routing, generation-tagged logical handles, duplicate-inode rejection, borrow counts and close synchronization. Implementation lives in `src/`; public loading contracts live in `include/`.
 
-## 独立构建
+## Standalone build
 
-先安装 core，再构建本项目；只读取 core 的安装包，不读取其源码或测试：
+Install core first, then run from this project. Only core's installed package is consumed, not its source or tests:
 
 ```sh
 ./build.sh -DCMAKE_PREFIX_PATH=/path/to/core/install \
@@ -15,33 +15,33 @@ cmake --install build
 ctest --test-dir build --output-on-failure
 ```
 
-输出 `build/libgw_dlopen.so`、`build/libgw_dlopen.a` 与包 `GlibcWorkerDlopen`，导出目标 `glibc_worker::dlopen`。不查找 Java、JNI 头或 libffi。
+Outputs are `build/libgw_dlopen.so`, `build/libgw_dlopen.a` and the `GlibcWorkerDlopen` package exporting `glibc_worker::dlopen`. Java, JNI headers and libffi are not discovered.
 
-## 接口
+## Interface
 
-公开接口为 [dlopen_backend.h](include/dlopen_backend.h)，生命周期和并发要求见 [C 装载契约](docs/LOADER.md)。调用者配置 C `transport`、映像解析器和可选观察回调，再 activate 后使用版本化函数表。
+See [dlopen_backend.h](include/dlopen_backend.h) and the [C loading contract](docs/en/LOADER.md). Configure the C transport, image resolver and optional observer, activate, then use the versioned function table.
 
-调用上下文为 `void *`，纯 C 客户端可传 NULL；metadata 是适配层的 int32 结果，不由本层解释。符号绑定说明也由适配层解释，JNI 描述符和 JNI_OnLoad 版本校验均不在这里。
+The call context is `void *`; pure C clients may pass NULL. Metadata is an adapter-defined int32 result. Binding descriptions, JNI descriptors and JNI_OnLoad version validation are interpreted above this layer.
 
-本项目不会在 bionic 线程直接执行 GNU 符号，也不重写 ELF loader。实际 GNU dlopen/调用/关闭由 transport 在正确的 Guest 线程域完成，返回入口的 ABI 与生命周期由适配层保证。它不是进程内全局 dlopen 劫持。
+GNU symbols are not executed directly in the bionic domain, and no ELF loader is reimplemented. The transport performs GNU dlopen/call/close in the correct Guest domain; its adapter guarantees returned entrypoint ABI and lifetime. This is not process-wide dlopen interception.
 
-AUTO 路由只在 ELF 元数据成功解析、没有 GNU 标记时返回 `GW_PASS`。无法读取、损坏或不支持的映像返回 `GW_ERROR/GW_E_IMAGE`；分类器资源上限返回 `GW_ERROR/GW_E_CAPACITY`。两类失败均不允许交给原平台 loader 重试。显式 `GW_OPEN_GUEST` 由调用方确认 GNU 域，跳过自动分类。
+AUTO returns `GW_PASS` only after successful ELF parsing finds no GNU marker. Unreadable, malformed or unsupported images return `GW_ERROR/GW_E_IMAGE`; classifier resource limits return `GW_ERROR/GW_E_CAPACITY`. Neither failure may retry through the platform loader. Explicit `GW_OPEN_GUEST` requires caller-confirmed GNU ABI and skips classification.
 
-分类器保留有界资源：128 个 program headers、512 个 dynamic entries、256 字节名字（含终止符）、64 个版本依赖组、每组 256 个版本。超限是显式失败，不是“非 glibc”。元数据分类也不代替真正 loader 的重定位、符号与 ELF 完整性检查。
+Classifier bounds are 128 program headers, 512 dynamic entries, 256-byte names including terminators, 64 version-dependency groups and 256 versions per group. Exceeding them is a failure, not a non-glibc result. Classification does not replace relocation, symbol resolution or full validation by the real loader.
 
-## 测试
+## Tests
 
-`tests/loader_contract.c` 使用普通 C transport 验证 NULL 上下文、非 JNI metadata、查找/调用、重复映像、失败回滚、旧句柄、忙碌关闭和停止约束。它验证 Host 契约，不宣称单独建立双 libc。
+`tests/loader_contract.c` uses a C transport to check NULL contexts, non-JNI metadata, lookup/calls, duplicate images, rollback, stale handles, busy close and stop restrictions. It proves the Host contract, not independent dual-libc startup.
 
-`tests/execution_scopes.c` 验证祖先/递归 scope、线程归属和正常跨线程关闭；`close_waits.c` 验证两/三线程的 scope 关闭环拒绝以及无活跃借用目标关闭；`loader_quarantine.c` 覆盖四种隔离场景。执行借用与可转移保活 pin 的区别见 [执行借用规则](docs/EXECUTION_SCOPES.md)。
+`execution_scopes.c` checks ancestor/recursive scopes, thread ownership and cross-thread close; `close_waits.c` checks two/three-thread close cycles and unborrowed targets; `loader_quarantine.c` covers four quarantine cases. See [execution scopes](docs/en/EXECUTION_SCOPES.md) for execution borrows versus transferable lifetime pins.
 
-`tests/elf_route.py` 在 ASan/UBSan 下检查 49 项真实 Android/GNU ELF、无标记映像、损坏和资源上限条件，同时核对分类与错误码；该集成夹具可消费上层测试产生的 DSOs。C contract 另外确保 AUTO 分类失败不会返回 PASS 或调用 Guest transport。真实双 libc 生命周期由 jvm-jni 的集成测试覆盖。
+`tests/elf_route.py` checks 49 real Android/GNU ELF, unmarked, malformed and resource-limit cases under ASan/UBSan, including classification and error codes. It can consume upper-layer test DSOs. C tests also ensure AUTO errors neither return PASS nor call Guest transport. jvm-jni owns real dual-libc lifecycle integration.
 
-后端每进程只配置一次；STOPPED 与 quarantine 都不可重新配置。stop 只检查并停止装载后端，不取消在途调用，也不销毁 GNU runtime。宿主须先停止生产者、归还借用并关闭模块；close 的借用等待和 transport 执行没有通用期限。watchdog 可标记 quarantine，但这不证明已发布调用停止访问资源，不能据此释放调用栈、buffer 或映像；进程处置由宿主负责。
+The backend is configured once per process. STOPPED and quarantine cannot be reconfigured. Stop checks/stops the loading backend; it does not cancel calls or destroy GNU runtime. Embedders must stop producers, return borrows and close modules. Close waits and transport execution have no universal deadline. Watchdog quarantine does not prove published calls stopped accessing resources; stacks, buffers and images must remain until safe. The embedder owns process disposal.
 
-## 装载借用成本诊断
+## Borrow-cost diagnostics
 
-`tests/scope_cost.c` 通过真实导出接口及 mutex 比较旧 pin 与执行 scope 的记账成本，使用测试 transport，不执行 JNI、Guest 或 RPC。`tests/scope_cost.py` 要求显式提供旧版与候选库、NDK、设备和空输出目录，采用 1/8 线程、预热及十对平衡顺序，保留每轮数据、温度和输入散列：
+`tests/scope_cost.c` compares legacy pins and execution-scope bookkeeping through real exports/mutexes with a test transport; it executes no JNI, Guest or RPC. The runner requires explicit old/candidate libraries, NDK, device and an empty output directory. It uses 1/8 threads, warmup and ten balanced pairs, retaining samples, temperature and input hashes:
 
 ```sh
 python3 bionic-dlopen/tests/scope_cost.py \
@@ -51,4 +51,4 @@ python3 bionic-dlopen/tests/scope_cost.py \
   --output bionic-dlopen/build/scope-cost-review
 ```
 
-测试的 wall/CPU 数值是每次 enter/leave 的批均摊成本，不是 JNI 调用延迟，也不表示游戏收益。两个库必须来自实际构建，并支持各自选定的导出接口；脚本不会从文件名推断实现版本。
+Wall/CPU values are batch-amortized enter/leave costs, not JNI latency or game gains. Both libraries must be actual builds supporting their selected exports; filenames do not establish implementation versions.
