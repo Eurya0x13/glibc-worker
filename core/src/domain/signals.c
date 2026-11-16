@@ -2,6 +2,7 @@
 #include "signals.h"
 #include "signal-stack.h"
 #include "signal-consume.h"
+#include "signal-relay.h"
 #include "raw_syscall.h"
 #include "nonlocal-mask.h"
 #include <errno.h>
@@ -116,17 +117,20 @@ __attribute__((no_stack_protector)) int signal_guest_fault_bind(
              : EINVAL;
 }
 
-/* A real GNU pthread has no suspended Host continuation. Keep its native TP
- * and enter only the Guest service's signal entry. Host/VM handlers must not
- * be called on this thread under a fabricated Host/JVM identity. */
+/* Genuine GNU pthreads keep their real TLS. Hardware faults stay in Guest;
+ * asynchronous Host handlers explicitly run on the real Host dispatcher. */
 __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
-    int number, siginfo_t *info, void *context) {
+    int number, siginfo_t *info, void *context, void *token, uint64_t mask) {
   uintptr_t entry =
       atomic_load_explicit(&guest_fault_entry, memory_order_acquire);
-  if (entry && info->si_code > 0 &&
+  if (info->si_code > 0 &&
       (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
-       number == SIGFPE || number == SIGTRAP || number == SIGSYS) &&
-      !((int (*)(int, void *, void *))entry)(number, info, context)) {
+       number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
+    if (entry &&
+        !((int (*)(int, void *, void *))entry)(number, info, context)) {
+      return;
+    }
+  } else if (!signal_host_relay(number, info, context, token, mask)) {
     return;
   }
   gw_raw3(SYS_exit_group, 96, 0, 0);

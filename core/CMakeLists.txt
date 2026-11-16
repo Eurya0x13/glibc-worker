@@ -12,7 +12,7 @@ add_library(core STATIC src/bootstrap/loader_image.c src/bootstrap/clone.S
 add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/signals.c src/domain/signal-entry.S src/domain/signal-router.c
   src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-pending.c
-  src/domain/signal-deferred.c src/domain/signal-consume.c)
+  src/domain/signal-deferred.c src/domain/signal-consume.c src/domain/signal-relay.c)
 add_library(glibc_worker::domains ALIAS domains)
 target_compile_definitions(domains PRIVATE GW_DOMAIN_CHAIN)
 target_include_directories(domains PUBLIC
@@ -59,6 +59,11 @@ if(BUILD_TESTING)
   target_link_libraries(carrier_lifecycle_test PRIVATE signal_interpose)
   target_compile_options(carrier_lifecycle_test PRIVATE -UNDEBUG)
   add_test(NAME carrier_lifecycle COMMAND carrier_lifecycle_test)
+  add_executable(signal_relay_test tests/signal_relay.c)
+  target_link_libraries(signal_relay_test PRIVATE signal_interpose)
+  target_compile_options(signal_relay_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_relay COMMAND signal_relay_test)
+  set_tests_properties(signal_relay PROPERTIES TIMEOUT 15)
   add_executable(signal_pending_test tests/signal_pending.c)
   target_link_libraries(signal_pending_test PRIVATE domains)
   target_compile_options(signal_pending_test PRIVATE -UNDEBUG)

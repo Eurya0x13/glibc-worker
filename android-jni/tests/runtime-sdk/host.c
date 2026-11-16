@@ -15,6 +15,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +89,45 @@ static _Thread_local volatile sig_atomic_t deferred_faults;
 static _Thread_local volatile sig_atomic_t async_fault_active, async_fault_hits;
 static _Thread_local volatile sig_atomic_t unreserved_signal_hits;
 static struct sigaction original_segv;
+static _Thread_local int relay_canary = 0x7193;
+static _Atomic unsigned relay_deliveries;
+static _Atomic long relay_tid;
+
+static void host_relay(int number, siginfo_t *information, void *frame) {
+  assert((number == SIGURG || number == SIGTRAP) && frame &&
+         relay_canary == 0x7193);
+  assert(information->si_code == SI_QUEUE && information->si_pid == getpid() &&
+         information->si_uid == getuid());
+  long tid = syscall(SYS_gettid);
+  assert(tid != information->si_value.sival_int);
+  long previous = atomic_load(&relay_tid);
+  assert(!previous || previous == tid);
+  atomic_store(&relay_tid, tid);
+  sigset_t mask;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &mask));
+  assert(sigismember(&mask, number) && sigismember(&mask, SIGWINCH));
+  sigaddset(&((ucontext_t *)frame)->uc_sigmask, SIGWINCH);
+  atomic_fetch_add(&relay_deliveries, 1);
+  errno = ERANGE;
+}
+
+static void host_gnu_thread_relay(JNIEnv *env, jclass cls) {
+  struct sigaction action = {.sa_sigaction = host_relay,
+                             .sa_flags = SA_SIGINFO | SA_RESTART},
+                   previous, trap_previous;
+  sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGWINCH);
+  assert(!sigaction(SIGURG, &action, &previous));
+  assert(!sigaction(SIGTRAP, &action, &trap_previous));
+  assert(native_entry(env, cls, 88) == 73);
+  assert(atomic_load(&relay_deliveries) == 64);
+  assert(!sigaction(SIGURG, &previous, NULL));
+  assert(!sigaction(SIGTRAP, &trap_previous, NULL));
+  puts(
+      "{\"stage\":\"gnu-host-relay\",\"threads\":8,\"deliveries\":64,"
+      "\"host_tls\":true,\"guest_tls_errno\":true,\"original_siginfo\":true,"
+      "\"different_thread\":true,\"source_context_edits\":true}");
+}
 
 static void asynchronous_fault(int number, siginfo_t *information,
                                void *frame) {
@@ -824,6 +864,7 @@ static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
                            &entry, &error) == GW_OK);
   native_entry = (void *)entry;
   assert(native_entry(env, cls, 0) == 73);
+  host_gnu_thread_relay(env, cls);
   host_unblocked_fault(env, cls);
   host_unreserved_signal(env, cls);
   host_fault_masks(env, cls);

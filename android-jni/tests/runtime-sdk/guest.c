@@ -166,7 +166,7 @@ static jint cross_guest_target(JNIEnv *env, int mode) {
 JNIEXPORT jint JNICALL sdk_nonlocal_probe(JNIEnv *env, jclass cls, jint mode) {
   (void)env;
   (void)cls;
-  if (mode == 87) {
+  if (mode == 87 || mode == 88) {
     return sdk_guest_fault_probe(mode);
   }
   if (mode == 90 || mode == 91 || mode == 94 || mode == 95 || mode == 96) {

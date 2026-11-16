@@ -222,6 +222,19 @@ def execute_case(
             mode == "nonlocal"
             and (
                 len(transfer) != 1
+                or [r for r in rows if r.get("stage") == "gnu-host-relay"]
+                != [
+                    {
+                        "stage": "gnu-host-relay",
+                        "threads": 8,
+                        "deliveries": 64,
+                        "host_tls": True,
+                        "guest_tls_errno": True,
+                        "original_siginfo": True,
+                        "different_thread": True,
+                        "source_context_edits": True,
+                    }
+                ]
                 or not (fpe_supported or fpe_unavailable)
                 or [r for r in rows if r.get("stage") == "host-async-fault"]
                 != [

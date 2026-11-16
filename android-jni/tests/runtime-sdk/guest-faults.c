@@ -134,6 +134,55 @@ static int thread_faults(void) {
   return result;
 }
 
+static void *thread_relay(void *unused) {
+  (void)unused;
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGURG);
+  sigaddset(&mask, SIGTRAP);
+  sigaddset(&mask, SIGWINCH);
+  if (pthread_sigmask(SIG_UNBLOCK, &mask, NULL)) {
+    return (void *)(intptr_t)-88;
+  }
+  pthread_t self = pthread_self();
+  for (int round = 0; round < 8; ++round) {
+    int number = round % 2 ? SIGTRAP : SIGURG;
+    siginfo_t information = {.si_signo = number, .si_code = SI_QUEUE};
+    information.si_pid = getpid();
+    information.si_uid = getuid();
+    information.si_value.sival_int = (int)syscall(SYS_gettid);
+    errno = EDOM;
+    if (syscall(SYS_rt_tgsigqueueinfo, getpid(), syscall(SYS_gettid), number,
+                &information) ||
+        errno != EDOM || tls_canary != 0x7193 ||
+        !pthread_equal(self, pthread_self())) {
+      return (void *)(intptr_t)-89;
+    }
+    if (pthread_sigmask(SIG_SETMASK, NULL, &mask) ||
+        !sigismember(&mask, SIGWINCH)) {
+      return (void *)(intptr_t)-90;
+    }
+  }
+  return (void *)(intptr_t)73;
+}
+
+static int thread_relays(void) {
+  pthread_t threads[8];
+  for (int i = 0; i < 8; ++i) {
+    if (pthread_create(&threads[i], NULL, thread_relay, NULL)) {
+      _exit(174);
+    }
+  }
+  int result = 73;
+  for (int i = 0; i < 8; ++i) {
+    void *value;
+    if (pthread_join(threads[i], &value) || (intptr_t)value != 73) {
+      result = -88;
+    }
+  }
+  return result;
+}
+
 static void trigger_trap(void) {
 #if defined(__x86_64__)
   __asm__ volatile("int3" ::: "memory");
@@ -214,6 +263,9 @@ static _Noreturn void default_fault(int selected) {
 }
 
 int sdk_guest_fault_probe(int selected) {
+  if (selected == 88) {
+    return thread_relays();
+  }
   if ((selected >= 33 && selected <= 35) || selected == 82 || selected == 83) {
     default_fault(selected);
   }

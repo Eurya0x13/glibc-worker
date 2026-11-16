@@ -56,7 +56,7 @@ int signal_host_defer(struct signal_slot *, const siginfo_t *);
 int signal_host_take_notification(int, siginfo_t *);
 /* -1 means no armed notification; zero means a consumed cancellation level. */
 int signal_host_collect_notification(int, siginfo_t *);
-void domain_guest_thread_dispatch(int, siginfo_t *, void *);
+void domain_guest_thread_dispatch(int, siginfo_t *, void *, void *, uint64_t);
 struct signal_slot *signal_dynamic_lookup(long, uintptr_t);
 void domain_fault(void *);
 extern char domain_fault_instruction[], domain_fault_resume[];

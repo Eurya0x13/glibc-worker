@@ -91,6 +91,8 @@ domain_signal_entry:
     mov 0(%rsp), %rdi
     mov 8(%rsp), %rsi
     mov 16(%rsp), %rdx
+    mov 32(%rsp), %rcx
+    mov 48(%rsp), %r8
     call domain_guest_thread_dispatch
     jmp .Lrestore_signal
 #endif
@@ -218,6 +220,8 @@ domain_signal_entry:
 .Lguest_thread_signal:
     ldp x0, x1, [sp, #32]
     ldr x2, [sp, #48]
+    ldr x3, [sp, #56]
+    ldr x4, [sp, #64]
     bl domain_guest_thread_dispatch
     b .Lrestore_signal
 #endif

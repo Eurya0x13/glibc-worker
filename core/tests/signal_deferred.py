@@ -43,6 +43,7 @@ run(configure)
 targets = [
     "signal_deferred_test",
     "carrier_lifecycle_test",
+    "signal_relay_test",
     "signal_waiting_test",
     "signal_fd_test",
     "signal_fd_lifecycle_test",
@@ -56,6 +57,7 @@ inputs = [
     core / "CMakeLists.txt",
     core / "tests/signal_deferred.c",
     core / "tests/carrier_lifecycle.c",
+    core / "tests/signal_relay.c",
     core / "tests/signal_waiting.c",
     core / "tests/signal_fd.c",
     core / "tests/signal_fd_lifecycle.c",

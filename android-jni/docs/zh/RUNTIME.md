@@ -21,6 +21,12 @@ start 在桥初始化前检查 `signal_router_guest_ready()`。已有自定义 H
 
 start 返回零或 errno。激活前，Host/服务协商私有传输版本、会话布局和必需能力，服务核对补丁 libc 的收养 ABI；普通或不匹配的 libc 会被拒绝。桥初始化开始后的失败使 runtime 隔离并保留资源；调用方必须丢弃进程，不能重试初始化。
 
+启动 GNU 代码前，接口创建真实 Host 分发线程，遵守
+[信号转交契约](../../../core/docs/zh/HOST_SIGNAL_RELAY.md)。真正 GNU pthread 收到
+路由的 Host 信号后，等待分发线程执行完处理器。两种后端均明确改变处理线程；
+分发线程不会自动附着到 VM，也不能在信号处理器中调用 JNI。关闭时拒绝未完成
+请求，在 Guest 控制停止后 join 分发线程；外部发送者必须已静止。
+
 shutdown 要求生命周期所有者、停止生产者、native 工作静止且模块已关闭。它不取消调用、不销毁 VM，也不卸载已保存栈/TLS/代码。空闲 VM 绑定和 GNU 监督线程保持固定。两个后端均遵守 [生命周期契约](LIFECYCLE.md)。
 
 `build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及 domain-runtime.json 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI 或收养版本错误的清单。低层 full_host_start 仍供自备 worker 启动机制的宿主使用，不会静默创建 runtime。

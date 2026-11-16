@@ -39,6 +39,14 @@ An ordinary or incompatible libc is rejected. A failure after bridge
 initialization begins quarantines the runtime and retains its resources; the
 caller must discard the process rather than retry initialization.
 
+Before starting GNU code, startup creates the real Host dispatcher described by
+the [signal relay contract](../../../core/docs/en/HOST_SIGNAL_RELAY.md). A routed
+Host arrival on a genuine GNU pthread waits for that dispatcher to finish its
+handler. Both backends preserve this explicit change of handler thread; the
+dispatcher is not implicitly attached to the VM and must not invoke JNI from a
+signal handler. Shutdown rejects pending relay work and joins the dispatcher
+after Guest control stops. External senders must already be quiescent.
+
 Shutdown requires the lifecycle owner, stopped producers, quiesced native work
 and closed modules. It does not cancel native calls, destroy the VM or unload
 saved stacks/TLS/code. Idle VM bindings and the GNU supervisor remain pinned.

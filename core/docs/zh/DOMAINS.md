@@ -60,8 +60,9 @@ Guest 执行期间，Host 保留的待处理异步信号继续留在内核队列
 
 这些是部分机制，不是完整双域独立投递。显式服务支持独立原生信号栈及已测的 AUTODISARM
 暂停/恢复路径；[信号等待适配](SIGNAL_WAITING.md) 还在临时掩码等待、消费型等待、待决查询及
-signalfd 创建/更新时保护 Host 保留队列。标记的异步发送、Guest 通用待决队列及
-GNU pthread 上的 Host 投递仍未完成。最终要求见
+signalfd 创建/更新时保护 Host 保留队列。真正 GNU pthread 收到的 Host 信号采用
+显式 [Host 分发线程策略](HOST_SIGNAL_RELAY.md)，改变处理线程并保留原始信号帧。
+标记的异步发送和 Guest 通用待决队列仍未完成。最终要求见
 [非局部恢复](NONLOCAL_RECOVERY.md) 与仓库 todo.md；普通 SDK 不会静默启用显式展开能力。
 
 绕过运行时的原始信号系统调用不携带逻辑域身份。GNU 自建 pthread 也没有隐含的 Host TLS/JVM 线程身份，不能带着 Guest TP 执行 Host 处理器。

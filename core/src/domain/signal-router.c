@@ -24,6 +24,8 @@ extern int signal_suspend_prepare(void) __attribute__((weak));
 extern int signal_fd_prepare(void) __attribute__((weak));
 extern int signal_fd_channel_ready(void) __attribute__((weak));
 extern int signal_fd_channel_busy(void) __attribute__((weak));
+extern int signal_host_relay_running(void) __attribute__((weak));
+extern int signal_host_relay_busy(void) __attribute__((weak));
 
 struct disposition {
   struct sigaction action;
@@ -861,6 +863,9 @@ int signal_router_guest_ready(void) {
 }
 
 int signal_router_restore(void) {
+  if (signal_host_relay_running && signal_host_relay_running()) {
+    return EBUSY;
+  }
   if (signal_fd_channel_busy) {
     int error = signal_fd_channel_busy();
     if (error) {
@@ -949,6 +954,11 @@ int signal_router_reclaim(const struct signal_router_quiescence *gate,
   if (error) {
     unlock_writer(mask);
     return error;
+  }
+  if (signal_host_relay_busy && signal_host_relay_busy()) {
+    gate->leave(gate->context);
+    unlock_writer(mask);
+    return EBUSY;
   }
   unsigned count = 0;
   int live = atomic_load_explicit(&enabled, memory_order_acquire);

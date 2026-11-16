@@ -91,8 +91,10 @@ These are partial mechanisms, not independent dual-domain signal delivery.
 Independent native signal stacks and the tested AUTODISARM suspend/resume paths
 are available in the opt-in service. Its [signal wait adapter](SIGNAL_WAITING.md)
 protects Host-reserved queues across mask-and-wait, consuming waits, pending
-queries and signalfd creation/update. Tagged asynchronous sends, general Guest
-pending queues and Host delivery on GNU pthreads remain incomplete. See
+queries and signalfd creation/update. Host arrivals on genuine GNU pthreads use
+the explicit [Host dispatcher policy](HOST_SIGNAL_RELAY.md), which changes the
+handler thread while retaining the original signal frame. Tagged asynchronous
+sends and general Guest pending queues remain incomplete. See
 [nonlocal recovery](NONLOCAL_RECOVERY.md) and the repository `todo.md` for the
 required final contract. The regular SDK does not silently enable the opt-in
 unwind capability.

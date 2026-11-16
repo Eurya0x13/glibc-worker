@@ -11,11 +11,10 @@ Current implementation order: descriptor lifecycle/concurrent Host delivery
 and Host delivery on GNU-created threads first. Independent Guest asynchronous
 delivery and general saved/resumable native contexts are deferred, not removed.
 
-Pending review: original-thread semantics for Host handlers received on genuine
-GNU pthreads, and Host stdio consumption of the opt-in deferred signalfd channel.
-No Host-thread adoption, dispatcher handoff or stdio rejection policy has been
-selected. These questions do not concern ordinary GNU pthread management or
-ordinary file stdio.
+Host handlers received on genuine GNU pthreads use the explicitly accepted
+[Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Host stdio
+consumption of the opt-in deferred signalfd channel is the next integration
+item; it does not concern ordinary file stdio.
 
 ## Agreed signal ownership
 
@@ -73,8 +72,10 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   actions and targets; keep overlapping registrations from replacing VM handlers.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,
   preserving sender information, queue semantics and errors.
-- Route process-directed/external Host signals received by GNU-created pthreads
-  without invoking Host code with Guest TLS or a fictitious JVM thread identity.
+- Keep the explicit GNU-to-Host relay contract covered while extending signal
+  integration. Relayed handlers intentionally execute on a different, real Host
+  pthread; source frames remain alive until they return. No fictitious JVM
+  identity or original-thread Host TLS adoption is implied.
 - Complete general saved-continuation lifetime accounting beyond the tested
   owned signal stacks and AUTODISARM suspend/resume paths. Independent native
   alternate stacks are implemented in the opt-in integration. Extend synchronous
