@@ -4,6 +4,12 @@
 #include <string.h>
 #include "guest_internal.h"
 #include "generated/guest-policy.inc"
+#ifdef GW_DOMAIN_NONLOCAL
+#include "nonlocal-mask.h"
+#include "domain_jump.h"
+extern int gw_domain_guest_active(void);
+extern uint64_t gw_domain_rpc_return_mask(uint64_t);
+#endif
 
 /* A JNIEnv passes only when it is this thread's own Guest facade: the bridge
    is mapped, the thread holds a live context slot, and the pointer equals
@@ -22,6 +28,14 @@ int fg_valid(JNIEnv *env) {
    yields the canned failure value for this api. */
 static jvalue exchange(int api, jvalue *args, int slot) {
   jvalue zero = {0};
+  uint64_t execution_mask = 0;
+  (void)execution_mask;
+#ifdef GW_DOMAIN_NONLOCAL
+  int domain = gw_domain_guest_active();
+  if (domain) {
+    execution_mask = gw_nonlocal_mask_block();
+  }
+#endif
   GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
 #if GW_RPC_PROFILE
   struct gw_rpc_token metrics = gw_rpc_begin();
@@ -54,9 +68,9 @@ static jvalue exchange(int api, jvalue *args, int slot) {
   atomic_store_explicit(&r->request, seq, memory_order_release);
   GW_RPC_SCOPE_END(pack);
 
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-  extern int gw_experiment_rpc(struct fb_rpc *, int);
-  if (!gw_experiment_rpc(r, seq)) {
+#ifdef GW_DOMAIN_JNI
+  extern int gw_domain_rpc(struct fb_rpc *, int, uint64_t);
+  if (!gw_domain_rpc(r, seq, execution_mask)) {
 #endif
     fb_event_notify(&fb_context_at(G, gid)->host_event);
     for (;;) {
@@ -72,7 +86,7 @@ static jvalue exchange(int api, jvalue *args, int slot) {
     fb_event_wait_active(&fb_context_at(G, gid)->guest_event, observed);
 #endif
     }
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#ifdef GW_DOMAIN_JNI
   }
 #endif
 #if GW_RPC_PROFILE
@@ -97,6 +111,15 @@ static jvalue exchange(int api, jvalue *args, int slot) {
     atomic_store_explicit(&context->rpc_top, previous_top,
                           memory_order_release);
   }
+#ifdef GW_DOMAIN_NONLOCAL
+  if (domain) {
+    /* A suspended RPC returns through its normal ownership/metrics cleanup
+     * before a pending transfer abandons its caller. Do not jump directly
+     * from a disjoint scratch stack over these bridge-owned frames. */
+    gw_domain_rpc_finish();
+    gw_nonlocal_mask_restore(gw_domain_rpc_return_mask(execution_mask));
+  }
+#endif
   return r->error ? fg_failure_result(api) : r->result;
 }
 

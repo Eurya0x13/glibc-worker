@@ -14,6 +14,16 @@
 #include "full_bridge.h"
 #include "jni_signature.h"
 #include "guest_internal.h"
+#ifdef GW_DOMAIN_NONLOCAL
+#include <setjmp.h>
+#include "domain_unwind.h"
+#include "domain_jump.h"
+#include "nonlocal-mask.h"
+extern uint64_t gw_domain_execution_mask(void);
+extern int gw_domain_native_enter(void);
+extern void gw_domain_native_leave(int, int);
+extern int gw_domain_guest_active(void);
+#endif
 
 /* One slot per guest image, indexed by the low byte of the module id. The
    slot is claimed under modules_lock before dlopen runs so two loads of the
@@ -246,7 +256,30 @@ void fg_execute(struct fb_call *cmd) {
       GW_RPC_SCOPE_END(prepare);
 
       GW_RPC_SCOPE(execute, GW_RPC_GUEST_NATIVE_EXECUTE, -1);
+#ifdef GW_DOMAIN_NONLOCAL
+      sigjmp_buf landing;
+      struct gw_domain_native_checkpoint checkpoint = {.buffer = &landing,
+                                                       .call = cmd};
+      gw_domain_checkpoint_enter(&checkpoint);
+      int domain = gw_domain_guest_active();
+      volatile int previous_native = domain ? gw_domain_native_enter() : 0;
+      /* Guest framework work is masked until its native landing and command
+       * identity are both published. Unmask only for module execution. */
+      if (sigsetjmp(landing, 0) == 0) {
+        if (domain) {
+          gw_nonlocal_mask_restore(gw_domain_execution_mask());
+        }
+        ffi_call(&cif, (void (*)(void))cmd->function, &cmd->result, args);
+        if (domain) {
+          gw_domain_native_leave(previous_native, 1);
+        }
+      } else if (domain) {
+        gw_domain_native_leave(previous_native, 0);
+      }
+      gw_domain_checkpoint_leave(&checkpoint);
+#else
       ffi_call(&cif, (void (*)(void))cmd->function, &cmd->result, args);
+#endif
       GW_RPC_SCOPE_END(execute);
       gdepth--;
       atomic_fetch_add(&G->native_calls, 1);
@@ -270,12 +303,12 @@ done:
   /* The release publishes result/error/diagnostic before the wake below can
      make the Host observe the completed sequence number. */
   atomic_store_explicit(&cmd->response, seq, memory_order_release);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-  extern int gw_experiment_guest_domain(void);
-  if (!gw_experiment_guest_domain()) {
+#ifdef GW_DOMAIN_JNI
+  extern int gw_domain_guest_active(void);
+  if (!gw_domain_guest_active()) {
 #endif
     fb_event_notify(&fb_context_at(G, gid)->host_event);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#ifdef GW_DOMAIN_JNI
   }
 #endif
 }

@@ -70,7 +70,11 @@ command = [
     "--host-source",
     str(source / "vm-start.c"),
     "--host-source",
-    str(core_probe / "signal-router.c"),
+    str(root / "core/src/domain/signal-router.c"),
+    "--host-source",
+    str(root / "core/src/domain/signal-stack.S"),
+    "--host-source",
+    str(root / "core/src/domain/signal-interpose.c"),
 ]
 flags = [
     "-DGW_DOMAIN_HOOKS",
@@ -123,7 +127,7 @@ manifest = json.loads((output / "manifest.json").read_text())
 for path in (
     source / "DomainProbe.java",
     source / "hotspot.c",
-    core_probe / "signal-router.h",
+    root / "core/src/domain/signal-router.h",
     Path(__file__),
     jar,
 ):

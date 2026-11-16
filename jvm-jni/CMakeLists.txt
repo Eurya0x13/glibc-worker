@@ -18,7 +18,15 @@ else()
 #define GW_JVM_PROFILE_FAMILY GW_JVM_NATIVE_LIBRARIES_15
 ]=])
 endif()
-add_library(jvm_jni_objects OBJECT src/native/adapter.c src/native/profiles.c src/native/calls.c src/native/families.c)
+set(GW_SIGNAL_PROFILE_HEADER "" CACHE FILEPATH "Reviewed exact VM/ART signal profile")
+add_library(jvm_jni_objects OBJECT src/native/signal_profile.c src/native/adapter.c src/native/profiles.c src/native/calls.c src/native/families.c)
+if(GW_SIGNAL_PROFILE_HEADER)
+  configure_file(${GW_SIGNAL_PROFILE_HEADER} ${CMAKE_CURRENT_BINARY_DIR}/late-signal-profile.h COPYONLY)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/late-signal-profile.h
+          DESTINATION share/glibc-worker/jvm-jni RENAME signal-profile.h)
+else()
+  target_compile_definitions(jvm_jni_objects PRIVATE GW_SIGNAL_PROFILE_DISABLED)
+endif()
 target_include_directories(jvm_jni_objects PRIVATE include src/native ${CMAKE_CURRENT_BINARY_DIR} ${GW_JNI_INCLUDE_DIR})
 target_link_libraries(jvm_jni_objects PUBLIC glibc_worker::android_jni)
 add_library(jvm_jni SHARED $<TARGET_OBJECTS:jvm_jni_objects>)
@@ -47,7 +55,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/jvm-jni-helpers.jar DESTINATION share/
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
-install(FILES include/jvm_adapter.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/jvm-jni)
+install(FILES include/jvm_adapter.h include/signal_profile.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/jvm-jni)
 install(TARGETS jvm_jni jvm_jni_static EXPORT GlibcWorkerJvmJniTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

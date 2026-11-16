@@ -1,0 +1,66 @@
+# Runtime bootstrap API
+
+[English](../en/RUNTIME.md) | [简体中文](../zh/RUNTIME.md)
+
+The installed `runtime_bridge.h` provides `gw_host_runtime_start` and
+`gw_host_runtime_shutdown`. It uses the installed core domain target and the
+normal JNI bridge; no experiment header or test executable is required.
+
+The start configuration is versioned and explicit:
+
+- `backend`: zero selects same-thread; `GW_EXECUTION_WORKER` selects worker.
+- `loader_path`, `library_path`, `service_path`: the matching packaged GNU
+  runtime and service, deployed by the embedder.
+- `bridge`: the existing image policy, JNI bridge flags and optional registered
+  VM adapter.
+- `signals`: the immutable ownership contract matching the already prepared
+  Host signal router.
+
+The selected VM comes from the supplied real `JNIEnv`. android-jni neither
+creates a VM nor chooses an ART/HotSpot profile. An embedder prepares the signal
+chain before admitting application calls; any pinned VM-specific late routing
+is supplied by jvm-jni. It must not pass an environment from another VM.
+
+Start checks `signal_router_guest_ready()` before bridge initialization. A
+pre-existing custom Host action that has not been explicitly adopted returns
+`ENOTSUP`. Executable bootstrap consumers can initialize/adopt the router before
+creating the VM; late consumers use their reviewed integration. Host registration
+routing does not make unreserved signal numbers exclusive to the VM.
+
+Use a dedicated bootstrap/lifecycle thread. Its context zero serves the Guest
+supervisor's control channel. Application native calls run on other attached VM
+threads, which receive same-thread adopted domains or worker bindings according
+to the configured backend. This preserves the existing owner/control model.
+
+Start returns zero or an errno value. Before activation, the service and Host
+negotiate their private transport version, session layout and required
+capabilities, and the service verifies the patched libc's adoption ABI.
+An ordinary or incompatible libc is rejected. A failure after bridge
+initialization begins quarantines the runtime and retains its resources; the
+caller must discard the process rather than retry initialization.
+
+Shutdown requires the lifecycle owner, stopped producers, quiesced native work
+and closed modules. It does not cancel native calls, destroy the VM or unload
+saved stacks/TLS/code. Idle VM bindings and the GNU supervisor remain pinned.
+The bridge's [lifecycle contract](LIFECYCLE.md) applies to both backends.
+
+`build-guest.sh` builds the matching service, and `scripts/package-runtime.sh`
+stages it with the adoption-enabled libc and a `domain-runtime.json` manifest.
+`GW_DOMAIN_RUNTIME` can select an explicitly built matching runtime directory.
+The package script rejects a manifest with the wrong ABI or adoption version.
+The low-level `full_host_start` API remains available for embedders that supply
+their own worker bootstrap; it does not silently create a runtime.
+
+`tests/runtime_sdk.py` builds a consumer using only installed CMake packages and
+headers. It checks default/worker selection, JNI load/callback/array/TLS paths,
+lifecycle and rejection of an ordinary libc. All dependency paths are explicit
+command-line arguments. Its build logs, manifest and structured results live in
+`android-jni/build/tests/runtime-sdk/`. `tests/runtime_sdk_android.py` repeats the
+installed-package checks on ARM64 with an explicitly supplied reviewed JRE
+startup fixture/profile; this test does not move VM creation into android-jni.
+Android results live in `android-jni/build/tests/runtime-sdk-android/`.
+
+The ownership classifier is implemented, but full independent Guest signal
+semantics are still pending; [core domains](../../../core/docs/en/DOMAINS.md) lists the
+current supported boundary. Default same-thread selection does not remove that
+boundary.

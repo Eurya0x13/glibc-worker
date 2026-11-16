@@ -10,7 +10,7 @@
 
 - 复用 `full_host_start`、`full_guest_start`、Host controller、公开 loader API，以及真实的 `JNI_OnLoad`、`RegisterNatives`、`JNI_OnUnload` 和关闭流程。
 - 复用生产生成的 JNI 表、参数封送、引用/ID 存储、Zig 绑定存储和 libffi 跳板。没有用测试专用 JNI 函数表代替生产桥。
-- `command.c` / `rpc.c` 的可选 hook 改变请求发布后的等待方式；`full_host.c` / `guest_loader.c` 的 hook 在同线程模式跳过无需发送的对端通知。未定义 `GW_EXPERIMENT_DOMAIN_JNI` 时保持原有路径。
+- `command.c` / `rpc.c` 的可选 hook 改变请求发布后的等待方式；`full_host.c` / `guest_loader.c` 的 hook 在同线程模式跳过无需发送的对端通知。未定义 `GW_DOMAIN_JNI` 时保持原有路径。
 - Host 进入 Guest 时换栈和 TLS。Guest JNI 回调先切回原 Host 栈/TLS，再调用该载体所属的真实 `JNIEnv`。嵌套 native 调用仍使用生产深度槽和 dispatcher。
 - `fh_context` 在真实首次 native 调用时申请上下文；同线程扩展在此分配栈/TCB，使用原 pthread-key 析构路径回收。Java 创建的线程不再由夹具预绑定槽位。上下文和重入沿用生产分块扩容；信号登记也改为稳定分页存储，可复用记录。
 - Guest 自建 pthread 继续使用原附着 helper / worker 路径，包含从这些线程回调 Java 后再次进入 native。实验 glibc 在 NPTL 线程入口/出口自动登记 Guest TLS，避免这些线程被当作 Host 转发信号。

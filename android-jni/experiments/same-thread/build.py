@@ -11,7 +11,8 @@ from pathlib import Path
 source = Path(__file__).resolve().parent
 project = source.parents[1]
 root = project.parent
-core = root / "core/experiments/same-thread"
+core = root / "core/src/domain"
+core_fixture = root / "core/experiments/same-thread"
 jvm = root / "jvm-jni/experiments/same-thread"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], required=True)
@@ -98,7 +99,8 @@ flags = [
     "-Wextra",
     "-Werror",
     "-fstack-protector-strong",
-    "-DGW_EXPERIMENT_DOMAIN_JNI",
+    "-DGW_DOMAIN_TEST_SIGNALS",
+    "-DGW_DOMAIN_JNI",
     "-DGW_DOMAIN_CHAIN",
     "-DGW_DOMAIN_SIGNALS",
     "-DGW_RPC_SPIN_NS=20000",
@@ -120,15 +122,19 @@ host_ffi = (
 )
 host_sources = [
     source / "host.c",
-    source / "host-runtime.c",
     jvm / "vm-start.c",
     core / "switch.S",
     core / "start.S",
     core / "signals.c",
     core / "signal-entry.S",
+    core / "signal-pending.c",
+    core / "signal-deferred.c",
+    core / "signal-stack.S",
     core / "signal-router.c",
+    core / "signal-interpose.c",
     root / "core/src/bootstrap/clone.S",
     root / "core/src/bootstrap/loader_image.c",
+    root / "core/src/domain/signal-contract.c",
     root / "bionic-dlopen/src/loader.c",
     root / "bionic-dlopen/src/elf_route.c",
     *sorted((project / "src/host").glob("*.c")),
@@ -292,7 +298,7 @@ if args.late_signal:
         )
 
     host_sources = [p for p in host_sources if p not in launcher]
-    host_sources += [jvm / "late-signal.c"]
+    host_sources += [root / "jvm-jni/src/native/signal_profile.c"]
     compile(
         host_cc,
         "late-bridge.so",
@@ -315,7 +321,7 @@ else:
     )
 
 guest_sources = [
-    source / "guest.c",
+    project / "src/guest/domain_service.c",
     project / "src/guest/full_guest.c",
     project / "src/guest/rpc.c",
     project / "src/guest/guest_loader.c",
@@ -426,17 +432,18 @@ files = [
     *host_sources,
     *guest_sources,
     source / "module.c",
-    source / "transport.h",
+    project / "src/common/domain_transport.h",
     core / "signal-registry.inc",
     core / "signals.h",
     core / "domain.h",
-    core / "adopt.h",
+    core_fixture / "adopt.h",
     jvm / "vm-start.h",
     project / "tests/native/guest_conformance.c",
     out / "conformance/fixture_generated.inc",
     *java,
     *sorted((project / "src/common").glob("*.h")),
     *sorted((out / "generated").glob("*")),
+    *sorted((root / "core/include").glob("*.h")),
     runtime / loader,
     runtime / "libc.so.6",
     runtime / "libm.so.6",
@@ -473,7 +480,7 @@ if args.system_load:
 if args.late_signal:
     files += [
         *launcher,
-        jvm / "late-signal.h",
+        root / "jvm-jni/include/signal_profile.h",
         out / "late-signal-profile.h",
         out / "late-bridge.so",
         vm_file,
@@ -482,7 +489,7 @@ if args.late_signal and android:
     files += [out / "inline-host.so"]
 if args.art_signal_profile:
     files += [args.art_signal_profile.resolve()]
-files += [core / "signal-router.h", source / "host-runtime.h"]
+files += [core / "signal-router.h", project / "src/host/domain_runtime.h"]
 manifest = {
     "late_signal": args.late_signal,
     "art_signal_profile": art_profile if args.art_signal_profile else None,

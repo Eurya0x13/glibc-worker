@@ -52,12 +52,25 @@ set_source_files_properties(${binding_objects} PROPERTIES EXTERNAL_OBJECT TRUE G
 add_custom_target(android_jni_binding_store DEPENDS ${binding_objects})
 install(FILES third_party/zig/LICENSE
         DESTINATION share/licenses/glibc-worker/android-jni RENAME zig-LICENSE.txt)
-add_library(android_jni_objects OBJECT src/host/full_host.c src/host/references.c
+add_library(android_jni_objects OBJECT src/host/domain_runtime.c
+  src/host/runtime_bridge.c src/host/full_host.c src/host/references.c
   src/host/bindings.c src/host/failure.c src/host/slot_allocator.c src/host/loader_transport.c src/host/command.c src/host/binding_table.c src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
 add_dependencies(android_jni_objects jni_tables)
+target_compile_definitions(android_jni_objects PRIVATE GW_DOMAIN_JNI)
+option(GW_NATIVE_UNWIND_INTEGRATION "Enable incomplete native nonlocal recovery validation" OFF)
+if(GW_NATIVE_UNWIND_INTEGRATION)
+  target_compile_definitions(android_jni_objects PRIVATE GW_DOMAIN_NONLOCAL)
+endif()
+option(GW_NATIVE_UNWIND_TEST_HOOKS "Enable deterministic native unwind injection" OFF)
+if(GW_NATIVE_UNWIND_TEST_HOOKS)
+  if(NOT GW_NATIVE_UNWIND_INTEGRATION)
+    message(FATAL_ERROR "Unwind test hooks require native unwind integration")
+  endif()
+  target_compile_definitions(android_jni_objects PRIVATE GW_DOMAIN_NONLOCAL_TEST)
+endif()
 target_include_directories(android_jni_objects PRIVATE include src/common src/host src/guest
   ${CMAKE_CURRENT_BINARY_DIR} ${GW_JNI_INCLUDE_DIR} ${GW_FFI_INCLUDE_DIR})
-target_link_libraries(android_jni_objects PUBLIC glibc_worker::dlopen)
+target_link_libraries(android_jni_objects PUBLIC glibc_worker::dlopen glibc_worker::domains)
 add_library(android_jni SHARED $<TARGET_OBJECTS:android_jni_objects> ${binding_objects})
 add_library(android_jni_static STATIC $<TARGET_OBJECTS:android_jni_objects> ${binding_objects})
 foreach(target android_jni android_jni_static)
@@ -65,7 +78,7 @@ foreach(target android_jni android_jni_static)
   target_include_directories(${target} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include/glibc-worker/android-jni>)
-  target_link_libraries(${target} PUBLIC glibc_worker::dlopen PRIVATE glibc_worker::android_ffi ${CMAKE_DL_LIBS})
+  target_link_libraries(${target} PUBLIC glibc_worker::dlopen glibc_worker::domains PRIVATE glibc_worker::android_ffi ${CMAKE_DL_LIBS})
   set_target_properties(${target} PROPERTIES OUTPUT_NAME gw_android_jni)
 endforeach()
 find_package(Java COMPONENTS Development REQUIRED)

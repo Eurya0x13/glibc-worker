@@ -13,6 +13,10 @@
 #include "jni_vm_adapter.h"
 #include "image_policy.h"
 #include "host_bridge.h"
+#ifdef GW_DOMAIN_NONLOCAL
+#include "domain_runtime.h"
+#include "domain_unwind.h"
+#endif
 
 struct full_bridge *gw_host_bridge;
 JavaVM *gw_host_vm;
@@ -409,19 +413,43 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
     c->emergency = 1;
   }
   c->marshal_error = 0;
-  if (r->api == FB_RPC_REPORT_FAILURE) {
-    enum fb_failure kind = r->a[0].i;
-    if (kind < FB_FAILURE_MEMORY || kind > FB_FAILURE_STATE) {
-      kind = FB_FAILURE_STATE;
+  /* GetVersion has no temporary marshal ownership and enters no Java frame.
+   * Other JNI entrypoints need their own reviewed VM/resource unwind contract
+   * before they can become Guest-target landing boundaries. */
+#ifdef GW_DOMAIN_NONLOCAL
+  /* Protocol API zero excludes the JNI table's four reserved entries. */
+  int recover = gw_domain_rpc_recoverable() && r->api == 0;
+  struct gw_domain_rpc_scope scope;
+  uint64_t admission_mask = recover ? gw_nonlocal_mask_block() : 0;
+  int transferred = 0;
+  if (recover) {
+    if (!sigsetjmp(scope.unwind.landing, 0)) {
+      gw_domain_rpc_enter(&scope);
+      gw_nonlocal_mask_restore(admission_mask);
+    } else {
+      transferred = 1;
     }
-    fh_throw(env, kind,
-             kind == FB_FAILURE_DEPTH ? "Guest bridge nesting limit exceeded"
-                                      : "Guest bridge request rejected");
-    r->error = kind;
-    r->result.i = JNI_ERR;
-  } else {
-#include "generated/host-jni.inc"
   }
+  if (!transferred) {
+    GW_UNWIND_POINT(GW_UNWIND_RPC_READY);
+#endif
+    if (r->api == FB_RPC_REPORT_FAILURE) {
+      enum fb_failure kind = r->a[0].i;
+      if (kind < FB_FAILURE_MEMORY || kind > FB_FAILURE_STATE) {
+        kind = FB_FAILURE_STATE;
+      }
+      fh_throw(env, kind,
+               kind == FB_FAILURE_DEPTH ? "Guest bridge nesting limit exceeded"
+                                        : "Guest bridge request rejected");
+      r->error = kind;
+      r->result.i = JNI_ERR;
+    } else {
+#include "generated/host-jni.inc"
+    }
+#ifdef GW_DOMAIN_NONLOCAL
+  }
+  uint64_t cleanup_mask = recover ? gw_nonlocal_mask_block() : 0;
+#endif
   if (c->marshal_error && !r->error) {
     r->error = c->marshal_error;
   }
@@ -442,12 +470,18 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
   }
 #endif
   atomic_store_explicit(&r->response, seq, memory_order_release);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-  extern int gw_experiment_host_domain(void);
-  if (!gw_experiment_host_domain()) {
+#ifdef GW_DOMAIN_NONLOCAL
+  if (recover) {
+    gw_domain_rpc_leave(&scope);
+    gw_nonlocal_mask_restore(transferred ? admission_mask : cleanup_mask);
+  }
+#endif
+#ifdef GW_DOMAIN_JNI
+  extern int gw_domain_host_active(void);
+  if (!gw_domain_host_active()) {
 #endif
     fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#ifdef GW_DOMAIN_JNI
   }
 #endif
 }
@@ -456,25 +490,32 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
    its Guest worker to wind down, wait for FB_JOINED, then drop every bridge
    local and free the slot. Context zero (the launcher) and Guest-attached
    helper contexts (origin set) clean themselves up elsewhere. */
-static void context_destructor(void *ptr) {
-  struct host_context *c = ptr;
+static int context_finish(struct host_context *c, int thread_exiting) {
+#ifndef GW_DOMAIN_JNI
+  (void)thread_exiting;
+#endif
   if (gw_dlopen_is_quarantined()) {
-    return; /* Context/resources stay pinned. */
+    return EIO; /* Context/resources stay pinned. */
   }
   if (!gw_host_bridge || !atomic_load(&gw_host_bridge->running) || !c ||
       c->id == 0) {
-    return;
+    return 0;
   }
 
   struct fb_context *w = fb_context_at(gw_host_bridge, c->id);
   if (w->origin) {
-    return;
+    return 0;
   }
 
   atomic_store(&w->closing, 1);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-  extern int gw_experiment_context_stop(struct host_context *);
-  if (!gw_experiment_context_stop(c)) {
+#ifdef GW_DOMAIN_JNI
+  extern int gw_domain_context_stop(struct host_context *, int);
+  int stopped = gw_domain_context_stop(c, thread_exiting);
+  if (stopped < 0) {
+    atomic_store(&w->closing, 0);
+    return -stopped;
+  }
+  if (!stopped) {
 #endif
     fb_event_notify(&w->guest_event);
     for (;;) {
@@ -485,7 +526,7 @@ static void context_destructor(void *ptr) {
       }
       fb_event_wait(&w->host_event, observed);
     }
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#ifdef GW_DOMAIN_JNI
   }
 #endif
 
@@ -495,15 +536,25 @@ static void context_destructor(void *ptr) {
 #endif
   atomic_store_explicit(&w->state, FB_FREE, memory_order_release);
   gw_host_current = NULL;
+  return 0;
 }
 
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+static void context_destructor(void *ptr) {
+  if (context_finish(ptr, 1)) {
+    gw_dlopen_quarantine();
+  }
+}
+
+#ifdef GW_DOMAIN_JNI
 /* The standalone VM fixture releases while its caller is still attached.
  * Ordinary Java-created threads use the existing pthread-key destructor. */
-void gw_experiment_release_context(void) {
+int gw_domain_release_context(void) {
   struct host_context *c = gw_host_current;
-  pthread_setspecific(context_key, NULL);
-  context_destructor(c);
+  int error = context_finish(c, 0);
+  if (!error) {
+    pthread_setspecific(context_key, NULL);
+  }
+  return error;
 }
 #endif
 
@@ -571,13 +622,13 @@ struct host_context *fh_context(JNIEnv *env, struct gw_loader_error *error) {
                              "Cannot allocate Host thread-local context");
     }
 
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-    extern int gw_experiment_context_start(struct host_context *);
-    if (!gw_experiment_context_start(c)) {
+#ifdef GW_DOMAIN_JNI
+    extern int gw_domain_context_start(struct host_context *);
+    if (!gw_domain_context_start(c)) {
 #endif
       atomic_store_explicit(&w->state, FB_HOST_REQUEST, memory_order_release);
       fb_owner_post(gw_host_bridge, i);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#ifdef GW_DOMAIN_JNI
     }
 #endif
     for (;;) {
@@ -809,11 +860,12 @@ static int start_bridge(struct shared *s, JNIEnv *env,
   }
 
   struct host_slot *owner = host_slot(0, 1);
-  if (!owner) {
+  struct fb_context *owner_wire = fb_context_at(gw_host_bridge, 0);
+  if (!owner || !owner_wire) {
     fh_throw(env, FB_FAILURE_MEMORY, "Cannot allocate initial JNI context");
     return JNI_ERR;
   }
-  fb_context_reset(fb_context_at(gw_host_bridge, 0));
+  fb_context_reset(owner_wire);
   owner->context = (struct host_context){.env = env, .id = 0};
   gw_host_current = &owner->context;
   if (pthread_setspecific(context_key, gw_host_current)) {
@@ -821,8 +873,8 @@ static int start_bridge(struct shared *s, JNIEnv *env,
     fh_throw(env, FB_FAILURE_MEMORY, "Cannot bind initial JNI context");
     return JNI_ERR;
   }
-  fb_context_at(gw_host_bridge, 0)->host_tid = (int)syscall(SYS_gettid);
-  atomic_store(&fb_context_at(gw_host_bridge, 0)->state, FB_RUNNING);
+  owner_wire->host_tid = (int)syscall(SYS_gettid);
+  atomic_store(&owner_wire->state, FB_RUNNING);
   atomic_store(&gw_host_bridge->running, 1);
 
   jclass cls = (*env)->FindClass(env, "dev/glibc/worker/BridgeTypes");

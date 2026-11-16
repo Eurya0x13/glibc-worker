@@ -9,7 +9,7 @@ from pathlib import Path
 
 source = Path(__file__).resolve().parent
 root = source.parents[2]
-core = root / "core/experiments/same-thread"
+core = root / "core/src/domain"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--ndk", type=Path)
 parser.add_argument("--serial")
@@ -43,6 +43,7 @@ flags = [
 files = [
     source / "late-signal-contract.c",
     core / "signal-router.c",
+    core / "signal-stack.S",
     core / "signal-router.h",
     Path(__file__),
 ]
@@ -52,9 +53,11 @@ commands = [
         "-shared",
         "-fPIC",
         "-Wl,-Bsymbolic-functions",
+        "-Wl,-z,defs",
         "-DROUTER_STUB",
         str(files[0]),
         str(files[1]),
+        str(files[2]),
         "-ldl",
         "-o",
         str(out / "router.so"),

@@ -2,6 +2,12 @@
 #include <string.h>
 #include "host_internal.h"
 #include "dlopen_backend.h"
+#ifdef GW_DOMAIN_NONLOCAL
+#include "nonlocal.h"
+#include "domain_unwind.h"
+extern int gw_domain_host_active(void);
+extern void gw_domain_abort_call(struct fb_call *, int);
+#endif
 
 /* Post one fb_call at the current nesting depth and block for its reply.
    Re-entrant by design: a native call may re-enter Java and issue deeper
@@ -53,6 +59,10 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
 #endif
 
   GW_RPC_SCOPE(pack, GW_RPC_HOST_COMMAND_PACK, -1);
+#ifdef GW_DOMAIN_NONLOCAL
+  int recover = gw_domain_host_active();
+  uint64_t publication_mask = recover ? gw_nonlocal_mask_block() : 0;
+#endif
   struct fb_call *r = fb_call_at(w, c->depth++);
   r->op = op;
   r->module = c->module;
@@ -80,32 +90,55 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   atomic_store_explicit(&r->request, seq, memory_order_release);
   struct fb_event *event = &fb_context_at(gw_host_bridge, c->id)->host_event;
   GW_RPC_SCOPE_END(pack);
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
-  extern int gw_experiment_command(struct host_context *, struct fb_call *,
-                                   int);
-  if (!gw_experiment_command(c, r, seq)) {
+#ifdef GW_DOMAIN_NONLOCAL
+  struct gw_nonlocal_scope unwind;
+  int transferred = 0;
+  if (recover) {
+    if (sigsetjmp(unwind.landing, 0) == 0) {
+      gw_nonlocal_enter(&unwind);
+      GW_UNWIND_POINT(GW_UNWIND_COMMAND_PUBLISHED);
+      gw_nonlocal_mask_restore(publication_mask);
+    } else {
+      transferred = 1;
+      gw_domain_abort_call(r, seq);
+    }
+  }
+  if (!transferred) {
 #endif
-    fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
+#ifdef GW_DOMAIN_JNI
+    extern int gw_domain_command(struct host_context *, struct fb_call *, int);
+    if (!gw_domain_command(c, r, seq)) {
+#endif
+      fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
 
-    /* A final response implies that synchronous reverse JNI calls have already
-       returned. Avoid polling their slots again on the completed path. Keep
-       sample-before-pump and the second response check: a callback can complete
-       this command while the pump runs, and its notification must not be lost.
-       The Guest pump is different: it also services owner lifecycle work. */
-    while (atomic_load_explicit(&r->response, memory_order_acquire) != seq) {
-      uint32_t observed = fb_event_sample(event);
-      full_host_poll();
-      if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
-        break;
-      }
+      /* A final response implies that synchronous reverse JNI calls have
+         already returned. Avoid polling their slots again on the completed
+         path. Keep sample-before-pump and the second response check: a callback
+         can complete this command while the pump runs, and its notification
+         must not be lost. The Guest pump is different: it also services owner
+         lifecycle work. */
+      while (atomic_load_explicit(&r->response, memory_order_acquire) != seq) {
+        uint32_t observed = fb_event_sample(event);
+        full_host_poll();
+        if (atomic_load_explicit(&r->response, memory_order_acquire) == seq) {
+          break;
+        }
 #if GW_RPC_READY_POLL
-      fb_event_wait_active_response(event, observed, &r->response, seq);
+        fb_event_wait_active_response(event, observed, &r->response, seq);
 #else
     fb_event_wait_active(event, observed);
 #endif
+      }
+#ifdef GW_DOMAIN_JNI
     }
-#ifdef GW_EXPERIMENT_DOMAIN_JNI
+#endif
+
+#ifdef GW_DOMAIN_NONLOCAL
   }
+  if (recover && !transferred) {
+    GW_UNWIND_POINT(GW_UNWIND_COMMAND_FINISHED);
+  }
+  uint64_t cleanup_mask = recover ? gw_nonlocal_mask_block() : 0;
 #endif
 
 #if GW_RPC_PROFILE
@@ -138,5 +171,11 @@ jvalue fh_command(struct host_context *c, int op, uintptr_t fn, const char *sig,
   gw_rpc_end(metrics);
 #endif
   GW_RPC_SCOPE_END(boundary);
+#ifdef GW_DOMAIN_NONLOCAL
+  if (recover) {
+    gw_nonlocal_leave(&unwind);
+    gw_nonlocal_mask_restore(cleanup_mask);
+  }
+#endif
   return r->result;
 }

@@ -1,12 +1,16 @@
 # glibc-worker jvm-jni
 
-可选的 HotSpot/JRE 接入项目。按经过审阅的装载接口族接入 JRE8–25，维护私有装载钩子、方法签名解析和 libjava 制品校验；通过 android-jni 注册表接入，不被下层反向引用。
+[English](docs/en/README.md) | [简体中文](docs/zh/README.md)
 
-`src/native/` 和 `src/java/` 保存适配实现与辅助类；`include/` 保存公开 JVM 适配头文件。
+Optional HotSpot/JRE integration. Reviewed loading-interface families cover JRE8–25, with private loading hooks, method descriptor handling and libjava artifact checks. Integration uses android-jni's adapter registry; lower layers never depend back on this project.
 
-JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；Android ARM64 固定 JRE17/21/25 通过严格 smoke/coverage；固定 JRE8 通过严格 smoke 与正常 JIT coverage，其 VM 的 CheckJNI 数组提交缺陷已独立复现。装载适配不等于所有 JNI 新槽位或所有 Android JRE 制品均已验证，具体边界见 [兼容性契约](docs/JRE_COMPATIBILITY.md)。JDK28 不在运行支持范围。
+`src/native/` and `src/java/` contain adapters and helpers; `include/` contains public adapter headers.
 
-## 独立构建
+JRE8/11/17/21/25 passed adapter-contract tests on real desktop VMs. Pinned Android ARM64 JRE17/21/25 artifacts passed strict smoke/coverage; pinned JRE8 passed strict smoke and ordinary JIT coverage, with its CheckJNI array-commit defect reproduced independently. Loading adaptation does not validate every new JNI slot or every Android JRE artifact. See [compatibility](docs/en/JRE_COMPATIBILITY.md). JDK28 is outside runtime support.
+
+## Standalone build
+
+Run from this project:
 
 ```sh
 ./build.sh -DCMAKE_PREFIX_PATH="/path/to/android-jni/install;/path/to/loader/install;/path/to/core/install" \
@@ -16,17 +20,17 @@ JRE8、11、17、21、25 已通过真实桌面 VM 的适配器契约测试；And
 cmake --install build
 ```
 
-输出 `build/libgw_jvm_jni.so/.a`、`jvm-jni-helpers.jar` 和包 `GlibcWorkerJvmJni`。JAR 仅编译本项目的 `JvmAdapter`，通过已安装的 android-jni helper JAR 引用公共类。未指定构建 profile 时生成 unconfigured 配置，启用前必须通过 `gw_jvm_jni_set_profile` 提供审阅后的 profile；不会自动按 JRE 主版本放行。旧 JRE17 头文件、C/Java 转发入口、构建宏及枚举别名已删除；升级 SDK 使用新的安装前缀。
+Outputs are `build/libgw_jvm_jni.so/.a`, `jvm-jni-helpers.jar` and `GlibcWorkerJvmJni`. The JAR compiles only `JvmAdapter`, referencing public classes through the installed android-jni helper JAR. Without a build profile, configuration is unconfigured; supply a reviewed profile through `gw_jvm_jni_set_profile` before activation. Major version alone never authorizes an artifact. Old JRE17 headers, C/Java forwarding entrypoints, macros and enum aliases were removed; use a new SDK installation prefix when upgrading.
 
-加载本项目 DSO 只注册可选适配器，不立即修改 VM。宿主在初始化时明确请求 `GW_HOST_VM_ADAPTER` 后才安装，停止时恢复。必须使用已运行的同一 VM 的 JNIEnv。
+Loading this DSO registers the optional adapter but does not immediately modify the VM. The embedder explicitly requests `GW_HOST_VM_ADAPTER` during initialization; stop restores hooks. Use JNIEnv from the same running VM.
 
-profile API、六个接口族、构建配置及停止条件见 [适配器接入](docs/ADAPTER.md)。
+See [adapter integration](docs/en/ADAPTER.md) for the profile API, six families, configuration and stopping conditions.
 
-## 集成测试
+## Integration tests
 
-本项目 `tests/` 拥有 Android/JRE 测试应用、JRE 制品配置、JRE 宿主和集成 runner；显式引用 android-jni 的 JNI 夹具以及 core 的 POD 夹具。
+This project's `tests/` owns the Android/JRE test application, artifact configuration, VM hosts and integration runners. It explicitly references android-jni JNI fixtures and core POD fixtures.
 
-从工作区根目录运行：
+From the workspace root:
 
 ```sh
 GW_ABI=arm64-v8a jvm-jni/tests/android/gradlew -p jvm-jni/tests/android :app:assembleDebug
@@ -34,10 +38,14 @@ jvm-jni/tests/smoke/run.sh --device SERIAL
 jvm-jni/tests/coverage/run.sh --device SERIAL
 ```
 
-输出全部在本项目 `build/`。冒烟与覆盖是同一上层集成的两组测试，不再放在公共 tests 目录；底层事件和 C loader 测试分别归 core 与 bionic-dlopen。
+All outputs remain in this project's `build/`. Smoke and coverage are two suites of the same upper-layer integration; core events and C loader tests belong to their own projects.
 
-主机多 JRE 测试不需要 Android 设备，入口为 `tests/scripts/test-adapters.py`。它在真实 VM 中替换生产装载钩子，验证生命周期、ClassLoader 回收和失败回滚，传输使用主机自身的 libc。固定制品及可复现命令见 [测试手册](tests/README.md)。
+`tests/scripts/test-adapters.py` needs no Android device. It replaces production loading hooks in real desktop VMs and tests lifecycle, ClassLoader collection and rollback using host libc transport. See the [test manual](tests/README.md) for pinned artifacts and commands.
 
-工作区组合构建额外在本项目 `build/<ABI>/compat/` 生成旧宿主所需 `libglibc_bridge.so`、GNU service、辅助 JAR 和旧平面头布局。该单 DSO 与模块化 DSOs 二选一，不可在同一进程混装。
+Workspace composition also produces legacy `libglibc_bridge.so`, GNU service, helpers and the old flat header layout under `build/<ABI>/compat/`. Choose this single DSO or the modular DSOs; never load both in one process.
 
-既有真实 JNI JAR 兼容性、延迟与统计记录归本项目 [docs](docs/)。Pojav 接入代码仍在外部验证工程。长期 GC、完整运行时销毁/重建、任意 C++/信号共存等边界仍需独立验证。
+Native JNI JAR compatibility and latency/statistics documentation belong to [this project](docs/en). Pojav integration remains external. Long-running GC, complete runtime destruction/recreation and arbitrary C++/signal coexistence require separate validation.
+
+## Same-thread signal integration
+
+Maintained signal integration is `src/native/signal_profile.c`, with public `signal_profile.h`. `GW_SIGNAL_PROFILE_HEADER` selects a reviewed, pinned VM/ART artifact profile; workspace builds pass through the environment variable. Without configuration, installation explicitly returns `ENOTSUP`. There is no arbitrary JRE detection or offset inference, and android-jni does not depend on these private interfaces. See [late signal-chain integration](experiments/same-thread/LATE_SIGNALS.md) and [core signal rules](../core/docs/en/DOMAINS.md).

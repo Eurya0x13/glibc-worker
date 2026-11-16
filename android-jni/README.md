@@ -1,14 +1,16 @@
 # glibc-worker android-jni
 
-使用公开 JNI API 的通用桥：真实 Host VM 的引用所有权、异常、JNI 代理、线程配对、回调/重入、libffi 跳板，以及 JNI 装载生命周期。JRE 私有钩子不在本项目。
+[English](docs/en/README.md) | [简体中文](docs/zh/README.md)
 
-`src/host/`、`src/guest/`、`src/common/` 和 `src/java/` 分别保存 Host、GNU service、共享内部协议与 Java 辅助类；`include/` 保存公开接口。
+A bridge using public JNI APIs: real Host VM reference ownership, exceptions, JNI proxies, thread pairing, callbacks/reentry, libffi trampolines and JNI loading lifecycle. Private JRE hooks are outside this project.
 
-Host 与 Guest 分别链接 bionic/GNU libc 和各自的 libffi，不在同一线程切换 TLS。Java 辅助类只有 VM 中立的 `BridgeTypes`、`GuestImages`；Guest 的 JavaVM/JNIEnv 是桥接接口。
+`src/host/`, `src/guest/`, `src/common/` and `src/java/` contain Host, GNU service, shared internal protocols and Java helpers; `include/` contains public interfaces.
 
-## 独立构建
+Host and Guest link their own bionic/GNU libc and libffi. The runtime API defaults to independent stacks/TCBs on the same carrier thread; worker execution is explicit. Low-level APIs also allow caller-owned worker bootstrap. See [runtime integration](docs/en/RUNTIME.md) for startup, artifact handshake and signals. VM-neutral Java helpers are `BridgeTypes` and `GuestImages`; Guest JavaVM/JNIEnv are bridge interfaces.
 
-安装 core 与 bionic-dlopen 后，用安装前缀列表提供依赖：
+## Standalone build
+
+After installing core and bionic-dlopen, run from this project:
 
 ```sh
 ./build.sh -DCMAKE_PREFIX_PATH="/path/to/loader/install;/path/to/core/install" \
@@ -20,24 +22,24 @@ Host 与 Guest 分别链接 bionic/GNU libc 和各自的 libffi，不在同一�
 cmake --install build
 ```
 
-Android 编译还需 NDK toolchain 参数。JDK 只用于生成 Java 8 辅助 JAR。输出 `libgw_android_jni.so/.a`、`android-jni-helpers.jar` 和包 `GlibcWorkerAndroidJni`，目标 `glibc_worker::android_jni`。
+Android also needs NDK toolchain options. The JDK builds Java 8 helper JARs only. Outputs include `libgw_android_jni.so/.a`, `android-jni-helpers.jar` and `GlibcWorkerAndroidJni`, exporting `glibc_worker::android_jni`.
 
-GNU 侧由本项目 `build-guest.sh` 单独构建，通过环境变量显式指定 GNU 编译器、GNU libffi、已安装 core/loader 头和 JNI 头。libffi 构建脚本归 core，制品在 `core/build/ffi-{android,linux}/<ABI>/`；本项目通过显式路径消费。工作区组合入口会填入这些参数。
+`build-guest.sh` separately builds the GNU side from explicit environment paths for the GNU compiler/libffi, installed core/loader headers and JNI headers. Core owns libffi builds and `core/build/ffi-{android,linux}/<ABI>/`; this project consumes explicit paths. Workspace composition supplies those inputs.
 
-## 可选 VM 适配
+## Optional VM adapter
 
-`include/jni_vm_adapter.h` 定义安装/恢复钩子表，必须在 bridge 初始化前注册。未请求 `GW_HOST_VM_ADAPTER` 时不调用它；没有注册却请求该 flag 会失败。只使用 `GW_HOST_VM_ADAPTER`，已删除 JRE17 旧名称别名。私有实现与固定 profile 属于 jvm-jni。
+`include/jni_vm_adapter.h` defines install/restore hooks registered before bridge initialization. They are invoked only for `GW_HOST_VM_ADAPTER`; requesting it without registration fails. The old JRE17 naming alias was removed. Private implementation and pinned profiles belong to jvm-jni.
 
-当前协议、导出名和公开 JNI loader ABI 保留。`host_bridge.h` v2 中的历史 `jre_library_path` 字段仅传给可选适配层；不会被本项目用于推断 JRE 私有布局。
+Existing protocols, exports and public JNI loader ABI are retained. The historical `jre_library_path` field in host configuration v2 is forwarded only to the optional adapter; this project does not infer private JRE layouts from it.
 
-## 测试与验证边界
+## Tests and boundaries
 
-`tests/native/`、`tests/java/` 保存本项目的 JNI 功能矩阵、引用/异常/线程/重入、SQLite 和数组夹具；由真实 VM 集成宿主组合运行，不复制进 jvm-jni。`tests/check-boundary.py` 可检查已构建 DSO/JAR 没有混入 JRE 私有实现。
+`tests/native/` and `tests/java/` own JNI, reference, exception, thread, reentry, SQLite and array fixtures. Real VM integration hosts compose them without copying them into jvm-jni. `tests/check-boundary.py` checks built DSOs/JARs for accidental private JRE implementation.
 
-已有真实覆盖使用 Android HotSpot；ART 完整 JNI 桥尚未验证，不能把“使用公开 JNI”当作 ART 兼容证明。设计与使用约束见 [装载接口](docs/LOADER_BACKEND.md)，数组副本缓存见 [ARRAY_COPY_CACHE](docs/ARRAY_COPY_CACHE.md)。
+Real coverage uses Android HotSpot. Public JNI usage does not prove complete ART compatibility. See [loading](docs/en/LOADER_BACKEND.md) and [array-copy caching](docs/en/ARRAY_COPY_CACHE.md).
 
-Host binding、引用/ID 和注册类记录使用 [Zig 存储](docs/ZIG_BINDINGS.md)，构建需要 Zig 0.16.0。初始容量分别为 512、16,384、256，按 64 槽稳定分块扩容；旧 C 定容后端已移除。模块固定上限为 64。公共 ABI 和 libffi/JNI 执行由 C 薄层维护，Host/Guest 必须成套部署。
+Bindings, reference/ID slots and registered-class records use [Zig stores](docs/en/ZIG_BINDINGS.md), requiring Zig 0.16.0 to build. Initial capacities are 512, 16,384 and 256, growing in stable 64-slot blocks. The fixed C backend is removed; module capacity remains 64. C thin layers retain public ABI and libffi/JNI execution. Deploy matching Host/Guest artifacts together.
 
-线程绑定、动态上下文/重入帧、类注册交接及依赖函数归属见 [JNI 交互契约](docs/CONTEXTS_AND_OWNERSHIP.md)。
+See [contexts and ownership](docs/en/CONTEXTS_AND_OWNERSHIP.md) for thread binding, dynamic contexts/reentry, class handoff and dependency function attribution.
 
-每进程一套 Runtime 绑定一个目标 VM；关闭与隔离后均不可重建。所有者线程、正常关闭顺序、超时不能提前释放在途资源，以及宿主监督责任见 [生命周期与进程处置](docs/LIFECYCLE.md)。
+One runtime per process binds one selected VM. It cannot restart after shutdown or quarantine. See [lifecycle and process disposal](docs/en/LIFECYCLE.md) for owner-thread rules, shutdown order, resource retention after timeout and supervision duties.

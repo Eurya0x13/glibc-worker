@@ -13,7 +13,9 @@ jvm_build="$project/build/$GW_ABI"
 "$ccndk" -shared -Wl,--no-undefined -Wl,-soname,libglibc_bridge.so \
   -Wl,--whole-archive "$jni_build/libgw_android_jni.a" \
   "$jvm_build/libgw_jvm_jni.a" "$loader_build/libgw_dlopen.a" \
-  -Wl,--no-whole-archive "$GW_CORE_PROJECT/build/ffi-android/$GW_ABI/lib/libffi.a" \
+  -Wl,--no-whole-archive "$GW_CORE_PROJECT/build/$GW_ABI/libglibc_worker_domains.a" \
+  "$GW_CORE_PROJECT/build/$GW_ABI/libglibc_worker_core.a" \
+  "$GW_CORE_PROJECT/build/ffi-android/$GW_ABI/lib/libffi.a" \
   -ldl -pthread -o "$out/libglibc_bridge.so"
 rm -rf "$out/classes"
 mkdir -p "$out/classes"

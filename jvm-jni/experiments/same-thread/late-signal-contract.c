@@ -43,6 +43,9 @@ int main(int argc, char **argv) {
   struct sigaction baseline;
   CHECK(!sigaction(52, NULL, &baseline));
   void *library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+  if (!library) {
+    fprintf(stderr, "Late router load: %s\n", dlerror());
+  }
   CHECK(library);
   int (*init)(signal_router_backend) =
       dlsym(library, "signal_router_init_with_backend");

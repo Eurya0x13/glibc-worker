@@ -13,7 +13,7 @@ parser.add_argument("--serial", required=True)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 source = Path(__file__).with_suffix(".c")
-core = root / "core/experiments/same-thread"
+core = root / "core/src/domain"
 out = root / "jvm-jni/build/experiments/system-load/late-signal"
 out.mkdir(parents=True, exist_ok=True)
 (out / "summary.json").unlink(missing_ok=True)
@@ -38,6 +38,7 @@ commands = [
         "-DROUTER_STUB",
         str(source),
         str(core / "signal-router.c"),
+        str(core / "signal-stack.S"),
         "-ldl",
         "-o",
         str(out / "router.so"),
@@ -88,6 +89,7 @@ evidence.update(
             source,
             Path(__file__),
             core / "signal-router.c",
+            core / "signal-stack.S",
             out / "probe",
             out / "router.so",
         )

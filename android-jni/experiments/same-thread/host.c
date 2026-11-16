@@ -1,8 +1,8 @@
 #define _GNU_SOURCE
-#include "host-runtime.h"
+#include "domain_runtime.h"
 #include "vm-start.h"
 #ifdef GW_EXPERIMENT_LATE_SIGNAL
-#include "late-signal.h"
+#include "signal_profile.h"
 #endif
 static pthread_barrier_t loaded, finished;
 static JavaVM *vm;
@@ -102,8 +102,8 @@ static void *carrier(void *opaque) {
             !exception(env));
   }
   pthread_barrier_wait(&finished);
-  extern void gw_experiment_release_context(void);
-  gw_experiment_release_context();
+  extern int gw_domain_release_context(void);
+  REQUIRE(!gw_domain_release_context());
   REQUIRE((*vm)->DetachCurrentThread(vm) == JNI_OK);
   return NULL;
 }
@@ -116,8 +116,8 @@ static void *system_load_carrier(void *unused) {
   JNIEnv *env;
   REQUIRE((*vm)->AttachCurrentThread(vm, &env, NULL) == JNI_OK);
   REQUIRE(domain_system_load_run(env));
-  extern void gw_experiment_release_context(void);
-  gw_experiment_release_context();
+  extern int gw_domain_release_context(void);
+  REQUIRE(!gw_domain_release_context());
   REQUIRE((*vm)->DetachCurrentThread(vm) == JNI_OK);
   return NULL;
 }

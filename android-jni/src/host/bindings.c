@@ -7,6 +7,11 @@
 #include "slot_store.h"
 #include "resource_limits.h"
 #include "dlopen_backend.h"
+#ifdef GW_DOMAIN_NONLOCAL
+#include "nonlocal.h"
+#include "domain_unwind.h"
+extern int gw_domain_host_active(void);
+#endif
 
 static pthread_mutex_t bindings_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t registrations_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -61,12 +66,22 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   GW_RPC_SCOPE(boundary, GW_RPC_STAGE_COUNT, -1);
   GW_RPC_SCOPE(pre, GW_RPC_HOST_TRAMPOLINE_PRE, -1);
 
+#ifdef GW_DOMAIN_NONLOCAL
+  int recover = gw_domain_host_active();
+  uint64_t admission_mask = recover ? gw_nonlocal_mask_block() : 0;
+#endif
+
   atomic_fetch_add(&b->active, 1);
   if (!gw_loader_scope_enter(b->module)) {
     fh_throw(env, FB_FAILURE_STATE, "Guest library is retired or closing");
     atomic_fetch_sub(&b->active, 1);
     GW_RPC_SCOPE_END(pre);
     GW_RPC_SCOPE_END(boundary);
+#ifdef GW_DOMAIN_NONLOCAL
+    if (recover) {
+      gw_nonlocal_mask_restore(admission_mask);
+    }
+#endif
     return;
   }
 
@@ -80,6 +95,11 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
     gw_loader_scope_leave(module);
     GW_RPC_SCOPE_END(pre);
     GW_RPC_SCOPE_END(boundary);
+#ifdef GW_DOMAIN_NONLOCAL
+    if (recover) {
+      gw_nonlocal_mask_restore(admission_mask);
+    }
+#endif
     return;
   }
 
@@ -126,9 +146,28 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
 
   GW_RPC_SCOPE_END(pre);
   jvalue out = {0};
-  if (!c->marshal_error) {
-    out = fh_command(c, FB_NATIVE, b->guest, b->sig, a);
+#ifdef GW_DOMAIN_NONLOCAL
+  struct gw_nonlocal_scope unwind;
+  int transferred = 0;
+  if (recover) {
+    if (sigsetjmp(unwind.landing, 0) == 0) {
+      gw_nonlocal_enter(&unwind);
+      GW_UNWIND_POINT(GW_UNWIND_TRAMPOLINE_READY);
+      gw_nonlocal_mask_restore(admission_mask);
+    } else {
+      transferred = 1;
+      out = (jvalue){0};
+    }
   }
+  if (!transferred) {
+#endif
+    if (!c->marshal_error) {
+      out = fh_command(c, FB_NATIVE, b->guest, b->sig, a);
+    }
+#ifdef GW_DOMAIN_NONLOCAL
+  }
+  uint64_t cleanup_mask = recover ? gw_nonlocal_mask_block() : 0;
+#endif
   if (c->command_error) {
     out = (jvalue){0};
   }
@@ -161,6 +200,13 @@ static void ffi_native(ffi_cif *cif, void *result, void **values,
   gw_loader_scope_leave(module);
   GW_RPC_SCOPE_END(post);
   GW_RPC_SCOPE_END(boundary);
+#ifdef GW_DOMAIN_NONLOCAL
+  if (recover) {
+    GW_UNWIND_POINT(GW_UNWIND_TRAMPOLINE_CLEANED);
+    gw_nonlocal_leave(&unwind);
+    gw_nonlocal_mask_restore(cleanup_mask);
+  }
+#endif
 }
 
 /* Called by the Zig Host store. The registry supplies stable,

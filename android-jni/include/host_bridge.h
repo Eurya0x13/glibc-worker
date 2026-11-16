@@ -50,7 +50,7 @@ enum gw_host_state {
    detach Guest attachments and quiesce Host bindings, then close all modules.
    Idle Host bindings may remain until process exit. Shutdown refuses a busy
    bridge; it does not cancel calls, impose a deadline, destroy the target VM,
-   or reclaim the GNU runtime. See docs/LIFECYCLE.md. */
+   or reclaim the GNU runtime. See docs/en/LIFECYCLE.md. */
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -1,0 +1,323 @@
+"""Preserve consumer observations on failure, timeout, and success."""
+
+import json
+import signal
+import subprocess
+
+
+def valid_registration_observations(rows):
+    cases = [r for r in rows if r.get("stage") == "guest-registration"]
+    return [r.get("alias") for r in cases] == [
+        "signal",
+        "bsd_signal",
+        "ssignal",
+        "sysv_signal",
+        "__sysv_signal",
+        "__sigaction",
+        "siginterrupt",
+        "sigignore",
+        "sigset",
+    ] and all(
+        r.get("value") == 73
+        and r.get("faults") == (0 if r["alias"] == "sigignore" else 1)
+        for r in cases
+    )
+
+
+def valid_wait_observations(rows, summary):
+    waits = [r for r in rows if r.get("stage") == "guest-wait"]
+    unwinds = [r for r in rows if r.get("stage") == "wait-unwind"]
+    if [r.get("mode") for r in waits] != list(range(60, 79)):
+        return False
+    skipped = 0
+    for row in waits:
+        if row.get("value") == 74 and row["mode"] in (67, 72):
+            if row.get("skip") != "ENOSYS":
+                return False
+            skipped += 1
+        elif row.get("value") != 73 or row.get("skip") is not None:
+            return False
+        elif row["mode"] in range(68, 73) and not row.get("interrupts", 0):
+            return False
+    return (
+        skipped in (0, 2)
+        and summary.get("guest_wait_skipped") == skipped
+        and [r.get("saved_mask") for r in unwinds] == [0, 1]
+        and all(
+            r.get("kernel_wait") is True and r.get("subsequent_call") is True
+            for r in unwinds
+        )
+    )
+
+
+def valid_guest_target_observations(rows):
+    targets = [r for r in rows if r.get("stage") == "guest-target"]
+    return targets == [
+        {
+            "stage": "guest-target",
+            "round": round,
+            "depth": depth,
+            "captures": captures,
+            "saved_mask": saved,
+            "value": 73,
+            "checked": checked,
+            "subsequent_call": True,
+            "host_mask_preserved": True,
+            "java_frames_crossed": False,
+        }
+        for round in range(2)
+        for depth, captures, saved, checked in (
+            (1, 1, 1, False),
+            (1, 1, 0, False),
+            (3, 1, 1, False),
+            (5, 300, 0, False),
+            (3, 1, 1, True),
+        )
+    ]
+
+
+def execute_case(
+    command,
+    out,
+    mode,
+    timeout,
+    env=None,
+    require_pending=False,
+    fatal=None,
+    require_host_fault_mask=False,
+    require_guest_target=False,
+    fpe_optional=False,
+):
+    timed_out = False
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout, env=env
+        )
+        output = result.stdout + result.stderr
+        returncode = result.returncode
+    except subprocess.TimeoutExpired as error:
+        timed_out = True
+        parts = [error.stdout or b"", error.stderr or b""]
+        output = "".join(
+            p.decode(errors="replace") if isinstance(p, bytes) else p
+            for p in parts
+        )
+        returncode = None
+    (out / (mode + ".log")).write_text(output)
+    rows = []
+    malformed = False
+    for line in output.splitlines():
+        if line.startswith("{"):
+            try:
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    malformed = True
+            except json.JSONDecodeError:
+                malformed = True
+    terminal = [r for r in rows if r.get("result") == "PASS"]
+    transfer = [r for r in rows if r.get("stage") == "nonlocal-transfer"]
+    fpe = [r for r in rows if r.get("stage") == "guest-fpe"]
+    fpe_supported = fpe == [
+        {
+            "stage": "guest-fpe",
+            "hardware_trap": True,
+            "recovered": True,
+            "skip": None,
+        }
+    ]
+    fpe_unavailable = fpe_optional and fpe == [
+        {
+            "stage": "guest-fpe",
+            "hardware_trap": False,
+            "recovered": False,
+            "skip": "ENOTSUP",
+        }
+    ]
+    fault_masks = [r for r in rows if r.get("stage") == "host-fault-mask"]
+    guest_fault_masks = [
+        r for r in rows if r.get("stage") == "guest-fault-mask"
+    ]
+    warnings = (
+        "WARNING in native method" in output or "Consider using jsig" in output
+    )
+    failed = (
+        timed_out
+        or returncode != 0
+        or len(terminal) != 1
+        or malformed
+        or warnings
+        or (
+            require_host_fault_mask
+            and (
+                fault_masks
+                != [
+                    {"stage": "host-fault-mask", "armed": True},
+                    {
+                        "stage": "host-fault-mask",
+                        "completed": True,
+                        "value": 73,
+                    },
+                ]
+                or len(guest_fault_masks) != 13
+                or any(
+                    r.get("signal") != int(signal.SIGTRAP)
+                    or r.get("logical_blocked") is not False
+                    or r.get("physical_blocked") is not False
+                    for r in guest_fault_masks
+                )
+                or [r for r in rows if r.get("stage") == "host-fault-deferred"]
+                != [
+                    {
+                        "stage": "host-fault-deferred",
+                        "deliveries": 1,
+                        "first_siginfo": True,
+                        "logical_pending": True,
+                        "consuming_waits": 3,
+                        "retirement_busy": True,
+                        "retirement_retry": True,
+                    }
+                ]
+                or not isinstance(
+                    guest_fault_masks[0].get("physical_blocked"), bool
+                )
+                or [r for r in rows if r.get("stage") == "host-signalfd"]
+                != [
+                    {
+                        "stage": "host-signalfd",
+                        "read": True,
+                        "readv": True,
+                        "readiness": True,
+                        "metadata": True,
+                        "alias": True,
+                        "guest_return": True,
+                    }
+                ]
+                or [r for r in rows if r.get("stage") == "host-signalfd-unwind"]
+                != [
+                    {
+                        "stage": "host-signalfd-unwind",
+                        "read": True,
+                        "readv": True,
+                        "context_release": True,
+                        "jni_retry": True,
+                    }
+                ]
+                or [r for r in rows if r.get("stage") == "host-ignore-pending"]
+                != [
+                    {
+                        "stage": "host-ignore-pending",
+                        "discarded": True,
+                        "guest_trap": True,
+                        "fresh_read": True,
+                        "context_release": True,
+                        "jni_retry": True,
+                    }
+                ]
+            )
+            and fatal is None
+        )
+        or (
+            mode == "nonlocal"
+            and (
+                len(transfer) != 1
+                or not (fpe_supported or fpe_unavailable)
+                or [r for r in rows if r.get("stage") == "host-async-fault"]
+                != [
+                    {
+                        "stage": "host-async-fault",
+                        "signal": int(signal.SIGSEGV),
+                        "delivered": True,
+                        "metadata": True,
+                    }
+                ]
+                or [
+                    r
+                    for r in rows
+                    if r.get("stage") == "host-unreserved-signal"
+                ]
+                != [
+                    {
+                        "stage": "host-unreserved-signal",
+                        "signal": int(signal.SIGUSR1),
+                        "host_tls": True,
+                        "metadata": True,
+                        "guest_return": True,
+                        "exclusive": False,
+                    }
+                ]
+                or not transfer[0].get("cooperative_masks")
+                or not transfer[0].get("handler_mask")
+                or not transfer[0].get("reserved_masks")
+                or not transfer[0].get("context_masks")
+                or transfer[0].get("guest_faults") != 15
+                or transfer[0].get("guest_fault_threads") != 8
+                or transfer[0].get("guest_signal_stacks") != 19
+                or transfer[0].get("stack_unwinds") != 8
+                or transfer[0].get("host_signal_numbers") != 2
+                or transfer[0].get("guest_wait_cases") != 19
+                or transfer[0].get("guest_registration_aliases") != 9
+                or not valid_registration_observations(rows)
+                or transfer[0].get("wait_unwinds") != 2
+                or not valid_wait_observations(rows, transfer[0])
+                or (
+                    require_guest_target
+                    and not valid_guest_target_observations(rows)
+                )
+                or (require_pending and not transfer[0].get("kernel_pending"))
+            )
+        )
+    )
+    if fatal is not None:
+        armed = [r for r in rows if r.get("stage") == "guest-default"]
+        executed = [
+            r for r in rows if r.get("stage") == "guest-default-execute"
+        ]
+        # adb reports the remote shell's 128+signal; a direct subprocess uses
+        # -signal. An arbitrary nonzero exit (including our fail-closed codes)
+        # is never proof of the owning libc's default signal action.
+        failed = (
+            timed_out
+            or malformed
+            or warnings
+            or returncode not in (-signal.SIGTRAP, 128 + signal.SIGTRAP)
+            or len(armed) != 1
+            or len(executed) != 1
+            or armed[0].get("mode") != fatal
+            or executed[0].get("mode") != (33 if fatal == 35 else fatal)
+            or not armed[0].get("tid")
+            or not executed[0].get("tid")
+            or (
+                (armed[0].get("tid") != executed[0].get("tid")) != (fatal == 35)
+            )
+        )
+        terminal = [
+            {"case": mode, "signal": int(signal.SIGTRAP), "result": "PASS"}
+        ]
+    evidence = {
+        "case": mode,
+        "returncode": returncode,
+        "timeout": timed_out,
+        "observations": rows,
+        "command": command,
+        "result": "FAIL" if failed else "PASS",
+    }
+    (out / (mode + ".json")).write_text(json.dumps(evidence, indent=2) + "\n")
+    if failed:
+        (out / "failure.json").write_text(json.dumps(evidence, indent=2) + "\n")
+        raise SystemExit(
+            "Runtime SDK case failed: " + str(out / (mode + ".log"))
+        )
+    summary = {"case": mode, **terminal[0]}
+    if mode == "nonlocal":
+        skipped = transfer[0]["guest_wait_skipped"]
+        summary.update(
+            guest_fpe="PASS_REAL_HARDWARE"
+            if fpe_supported
+            else "UNSUPPORTED_HARDWARE",
+            wait_exercised=transfer[0]["guest_wait_cases"] - skipped,
+            wait_skipped=skipped,
+            wait_unwinds=transfer[0]["wait_unwinds"],
+        )
+    return summary

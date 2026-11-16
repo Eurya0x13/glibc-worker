@@ -19,7 +19,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --reuse-apk
 | smoke | 普通应用 UID、真实 JRE、同 PID/不同线程、POD/指针、malloc、errno/TLS、pthread、JNI 回调、Guest 退出、VM 恢复及销毁 |
 | coverage | smoke，加 142 项 Java/JNI 断言、26 项装载契约、引用/异常/线程/重入/卸载/回滚、SQLite/zstd、11 项 JNI 名称回归与 49 项 ELF 元数据检查 |
 
-smoke/coverage 都会执行 core 的 GNU mutex 夹具：普通锁/条件变量回归及 12 种 robust 属性组合的 ENOTSUP 拒绝，共 125 项检查；结构化结果必须存在且通过。旧 runtime 的 owner-death 失败复现、支持边界及独立运行方式见 [mutex 契约](../../core/docs/MUTEXES.md)。
+smoke/coverage 都会执行 core 的 GNU mutex 夹具：普通锁/条件变量回归及 12 种 robust 属性组合的 ENOTSUP 拒绝，共 125 项检查；结构化结果必须存在且通过。旧 runtime 的 owner-death 失败复现、支持边界及独立运行方式见 [mutex 契约](../../core/docs/zh/MUTEXES.md)。
 
 当前默认 Zig 存储的 coverage 运行三个 ClassLoader 周期：每轮 1,024 个不同 JNI 方法、320 个注册类、20,000 个 global 引用及描述符边界检查。每轮另有重入/注册状态/上下文复用检查；32 个 Host 线程保持绑定时，另有 32 个 Guest 来源线程同时附着，且 32 层重入超过初始 12 层和第一扩展页。`DYNAMIC_CAPACITY_TEST` 必须逐轮存在并证明实际容量增长。`AUDIT_FAILURE_TEST` 逐轮要求零桥错误，最终引用和 closure 为零；分配失败由桌面故障注入覆盖，不能再将超过初始容量当作预期失败。
 
@@ -53,7 +53,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar snappy --reuse-apk
 jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 ```
 
-首次选择会启用可选制品构建，随后可复用同 APK。固定散列、依赖闭包、原始映像策略和生命周期边界见 [兼容性手册](../docs/NATIVE_JAR_COMPATIBILITY.md)。额外 JAR 通过不代表所有使用它的模组通过。
+首次选择会启用可选制品构建，随后可复用同 APK。固定散列、依赖闭包、原始映像策略和生命周期边界见 [兼容性手册](../docs/zh/NATIVE_JAR_COMPATIBILITY.md)。额外 JAR 通过不代表所有使用它的模组通过。
 
 ## 计时与诊断
 
@@ -61,7 +61,7 @@ jvm-jni/tests/coverage/run.sh --device SERIAL --native-jar rocksdb --reuse-apk
 
 `--cpu-mask HEX` 仅对测量宿主及后续线程设置可用 CPU 亲和性，必须核对实际生效；`--array-copy-cache auto|on|off` 控制测试配置，on/auto 都保留大小门槛。产品运行时不读取测试标记。
 
-同 APK 十对数据量 A/B 见 [数据量测量](../docs/PAYLOAD_LATENCY.md)，等待策略对照见 [RPC 测量](../docs/RPC_LATENCY.md)。数组语义、阈值和关闭方式见 [公开 JNI 数组约定](../../android-jni/docs/ARRAY_COPY_CACHE.md)。
+同 APK 十对数据量 A/B 见 [数据量测量](../docs/zh/PAYLOAD_LATENCY.md)，等待策略对照见 [RPC 测量](../docs/zh/RPC_LATENCY.md)。数组语义、阈值和关闭方式见 [公开 JNI 数组约定](../../android-jni/docs/zh/ARRAY_COPY_CACHE.md)。
 
 原始延迟、完整性校验、热状态和生命周期必须一并保留。诊断 APK 与普通 APK 分开解读；库内计算、真实 JVM 工作、allocator 和调度不能都记为桥成本，微基准结果不能直接换算游戏收益。
 
@@ -77,7 +77,7 @@ ID 全池扫描替换为专用索引后的组件 A/B、OOM/类身份回归，以
 
 `tests/scripts/check-sdk.py` 接受四个显式安装前缀、`--ndk` 与 `--abi`，复制到新的位置后编译/链接 C 和 C++ 静态 SDK 消费者。它检查导出包的相对依赖、附带的 libffi 和公开 C linkage，不启动 VM。输出默认在本项目 `build/sdk-check/`。
 
-源码级多版本审计独立于真机测试，入口为 `scripts/audit-openjdk-loader.py`；固定输入与结论使用方式见 [JRE 兼容性契约](../docs/JRE_COMPATIBILITY.md)。源码形态相同不计作运行通过。
+源码级多版本审计独立于真机测试，入口为 `scripts/audit-openjdk-loader.py`；固定输入与结论使用方式见 [JRE 兼容性契约](../docs/zh/JRE_COMPATIBILITY.md)。源码形态相同不计作运行通过。
 
 ## 真实桌面 VM 的装载适配测试
 
@@ -101,7 +101,7 @@ python3 jvm-jni/tests/scripts/test-adapters.py --runtime 6:/path/to/reviewed-jre
 
 ## 单 Runtime 生命周期
 
-smoke/coverage 必须各输出唯一且通过的 `RUNTIME_LIFECYCLE_TEST`：一进程一次启动、错误线程关闭拒绝、正常 STOPPED、重复关闭和重启拒绝。后续 Guest 线程退出及 VM 销毁仍独立验证。桌面 `android-jni/tests/lifecycle.py` 覆盖初始化/关闭故障和资源保留；`audit.py` 覆盖隔离后在途调用保留、迟到响应及由外部测试父进程处置永久停滞子进程。见 [生命周期契约](../../android-jni/docs/LIFECYCLE.md)。
+smoke/coverage 必须各输出唯一且通过的 `RUNTIME_LIFECYCLE_TEST`：一进程一次启动、错误线程关闭拒绝、正常 STOPPED、重复关闭和重启拒绝。后续 Guest 线程退出及 VM 销毁仍独立验证。桌面 `android-jni/tests/lifecycle.py` 覆盖初始化/关闭故障和资源保留；`audit.py` 覆盖隔离后在途调用保留、迟到响应及由外部测试父进程处置永久停滞子进程。见 [生命周期契约](../../android-jni/docs/zh/LIFECYCLE.md)。
 
 ## 多 Android JRE 制品
 
@@ -116,7 +116,7 @@ GW_DEPS_READY=1 python3 jvm-jni/tests/scripts/test-android-jres.py \
   --artifact pojav-17-ec28559-arm64-v8a
 ```
 
-首次构建依赖未准备时省略 `GW_DEPS_READY=1`。矩阵先构建并固定全部 APK，再在同一设备顺序安装，保留每个 APK、构建 manifest、散列和运行报告；smoke 通过才继续 coverage。任一失败使整个命令失败，启动受阻单独标注，不能用“识别成功”代替运行验证。单项也可设置 `GW_JRE_ARTIFACT=ID` 后使用上面的构建/运行入口。支持边界见 [JRE 契约](../docs/JRE_COMPATIBILITY.md)。
+首次构建依赖未准备时省略 `GW_DEPS_READY=1`。矩阵先构建并固定全部 APK，再在同一设备顺序安装，保留每个 APK、构建 manifest、散列和运行报告；smoke 通过才继续 coverage。任一失败使整个命令失败，启动受阻单独标注，不能用“识别成功”代替运行验证。单项也可设置 `GW_JRE_ARTIFACT=ID` 后使用上面的构建/运行入口。支持边界见 [JRE 契约](../docs/zh/JRE_COMPATIBILITY.md)。
 
 模拟器使用 `--abi x86_64 --device emulator-5554 --emulator AVD_NAME`，并选择清单中的 x86_64 制品 ID。此模式在构建前关闭指定 AVD，构建结束后停止 Gradle，确认进程退出后才启动 AVD；运行结束关闭 AVD。真机模式不自动管理其他模拟器，执行前应先关闭它们。
 
@@ -142,7 +142,7 @@ GW_JRE_ARTIFACT=angelaura-8-arm64 jvm-jni/tests/coverage/run.sh \
   --benchmark --benchmark-jit --output jvm-jni/build/jre8-normal
 ```
 
-此入口保留全部功能覆盖，同时执行既有的附加基准。它不是严格组的替代品，也不能凭单次结果下性能结论。制品支持模式见 [兼容性契约](../docs/JRE_COMPATIBILITY.md)。
+此入口保留全部功能覆盖，同时执行既有的附加基准。它不是严格组的替代品，也不能凭单次结果下性能结论。制品支持模式见 [兼容性契约](../docs/zh/JRE_COMPATIBILITY.md)。
 
 已保留的 ARM64 制品/模式结果、APK 与原始报告摘要、独立 VM 反例及校验器反例见 [android-jres-arm64.json](results/android-jres-arm64.json)。其中严格矩阵整体为 FAIL，原因是上述 JRE8 VM 缺陷；每项结果和正常模式证据独立列出。新的运行由 runner 生成新的 run_id，不能沿用这份记录作为新制品通过证明。
 
