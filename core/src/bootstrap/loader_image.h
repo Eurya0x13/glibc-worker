@@ -13,6 +13,15 @@ struct gw_bootstrap_image {
   Elf64_Ehdr eh;
 };
 
+/* Checked bootstrap APIs return an errno value, leave the output unchanged
+ * on failure and never terminate the process. On mapping failure all temporary
+ * resources are reclaimed. A successful image may be unmapped by the caller
+ * only before launching Guest code; after launch it is process-pinned. Stack
+ * inputs must be stable and disjoint from the writable stack region. */
+int gw_bootstrap_map_checked(const char *, struct gw_bootstrap_image *);
+int gw_bootstrap_stack_checked(struct gw_bootstrap_image, void *, size_t,
+                               char **, size_t, void **);
+
 /* Maps the pinned glibc dynamic loader, a single ET_DYN image checked against
  * GW_ELF_MACHINE, into fresh private memory. Any failure exits the process:
  * there is no error return and no caller able to recover from a half-built

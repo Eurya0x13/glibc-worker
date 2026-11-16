@@ -178,6 +178,25 @@ static void *carrier_thread(void *argument) {
   errno = EDOM;
   e->swap(&e->host, &e->guest);
   host_check(e);
+  while (e->state == ADOPT_RECOVERY) {
+    /* The fixture deliberately retains the suspended Guest stack and uses a
+     * separate entry stack with its own TCB. This is a controlled C-only
+     * transfer, not a way to abandon arbitrary Host or VM frames. */
+    struct domain transfer = e->guest;
+    transfer.sp = (uintptr_t)c->recovery_stack & ~(uintptr_t)15;
+    transfer.pc = (uintptr_t)domain_start;
+#if defined(__x86_64__)
+    transfer.saved[2] = (uintptr_t)c->recovery_argument;
+    transfer.saved[3] = (uintptr_t)c->recovery_entry;
+#else
+    transfer.saved[0] = (uintptr_t)c->recovery_argument;
+    transfer.saved[1] = (uintptr_t)c->recovery_entry;
+#endif
+    ++c->recovery_transfers;
+    e->swap(&e->host, &transfer);
+    host_check(e);
+  }
+  CHECK(e, c->recovery_transfers == 4 && c->recovery_completions == 4);
   CHECK(e, e->state == DOMAIN_READY && e->guest_tid == e->host_tid);
   CHECK(e, e->guest.tp != e->host.tp && e->guest_tls != e->host_tls);
   for (int i = 0; i < ADOPT_ROUNDS; ++i) {
@@ -280,6 +299,7 @@ int main(int argc, char **argv) {
   }
   int failures = 0, calls = 0, destructors = 0, tls_destructors = 0, exits = 0;
   int signal_events = 0, signal_faults = 0, inherited_signal_masks = 0;
+  int recovery_transfers = 0, recovery_completions = 0;
   for (int batch = 0; batch < ADOPT_BATCHES; ++batch) {
 #ifdef GW_DOMAIN_SIGNALS
     atomic_store(&finished_carriers, 0);
@@ -319,6 +339,8 @@ int main(int argc, char **argv) {
       destructors += carriers[i].guest_destructors;
       tls_destructors += carriers[i].tls_destructors;
       exits += carriers[i].run_status;
+      recovery_transfers += carriers[i].recovery_transfers;
+      recovery_completions += carriers[i].recovery_completions;
 #ifdef GW_DOMAIN_SIGNALS
       signal_events += atomic_load(&signal_slots[i].signals);
       signal_faults += atomic_load(&signal_slots[i].faults);
@@ -344,12 +366,15 @@ int main(int argc, char **argv) {
       "\"carriers\":%d,\"guest_destructors\":%d,\"host_destructors\":%d,"
       "\"tls_destructors\":%d,\"guest_pthread_exits\":%d,"
       "\"signal_events\":%d,\"signal_faults\":%d,"
+      "\"guest_recovery_transfers\":%d,"
+      "\"guest_recovery_completions\":%d,"
       "\"inherited_blocked_signal_masks\":%d,"
       "\"host_join_completed\":true}\n",
       failures ? "FAIL" : "PASS", (unsigned)getuid(), failures, calls,
       ADOPT_THREADS * ADOPT_BATCHES, destructors,
       atomic_load(&host_destructors), tls_destructors, exits, signal_events,
-      signal_faults, inherited_signal_masks);
+      signal_faults, recovery_transfers, recovery_completions,
+      inherited_signal_masks);
   fflush(stdout);
   /* The bootstrap owner and process runtime intentionally outlive carriers. */
   _exit(failures ? 1 : 0);

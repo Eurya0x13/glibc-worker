@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 source = Path(__file__).resolve().parent
+domain = source.parents[1] / "src/domain"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--ndk", type=Path)
 parser.add_argument("--serial")
@@ -28,10 +29,16 @@ compiler = (
     if args.ndk
     else "gcc"
 )
-files = [source / "signal-contract.c", source / "signal-router.c"]
+files = [
+    source / "signal-contract.c",
+    domain / "signal-router.c",
+    domain / "signal-interpose.c",
+    domain / "signal-stack.S",
+]
 command = [
     compiler,
     "-std=gnu17",
+    "-I" + str(domain),
     "-O2",
     "-g",
     "-Wall",
@@ -75,7 +82,9 @@ result = subprocess.run(
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in [
                     *files,
-                    source / "signal-router.h",
+                    domain / "signal-router.h",
+                    domain / "signal-stack.h",
+                    domain / "nonlocal-mask.h",
                     Path(__file__),
                     output / "contract",
                 ]

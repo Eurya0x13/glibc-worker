@@ -17,6 +17,11 @@ for name, sources, modes in (
         ({},),
     ),
     (
+        "bootstrap_checked",
+        ["src/bootstrap/loader_image.c", "tests/native/bootstrap_checked.c"],
+        ({},),
+    ),
+    (
         "rpc_sequence",
         ["tests/native/rpc_sequence.c"],
         (

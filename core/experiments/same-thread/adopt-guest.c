@@ -4,7 +4,10 @@
 #include <errno.h>
 #include <fenv.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <ucontext.h>
 
 static struct adoption *control;
 static int (*allocate_domain)(void *, size_t, void **, void **, void **);
@@ -19,6 +22,88 @@ static domain_probe probe;
 static __thread int guest_tls = 41;
 extern int __cxa_thread_atexit_impl(void (*)(void *), void *, void *);
 extern void *__dso_handle;
+
+struct recovery_probe {
+  struct carrier *carrier;
+  sigjmp_buf jump;
+  ucontext_t context;
+  int mode;
+};
+
+static void recovery_entry(void *argument) {
+  struct recovery_probe *probe = argument;
+  sigset_t blocked;
+  sigemptyset(&blocked);
+  sigaddset(&blocked, SIGUSR1);
+  CHECK(&probe->carrier->exchange,
+        pthread_sigmask(SIG_BLOCK, &blocked, NULL) == 0);
+  if (probe->mode < 2) {
+    siglongjmp(probe->jump, 7);
+  }
+  if (setcontext(&probe->context) != 0) {
+    _exit(112);
+  }
+  _exit(113);
+}
+
+static void recovery_transfer(struct recovery_probe *probe) {
+  struct exchange *e = &probe->carrier->exchange;
+  e->state = ADOPT_RECOVERY;
+  e->swap(&e->guest, &e->host);
+  _exit(114);
+}
+
+static void recovery_probe(struct carrier *c) {
+  struct exchange *e = &c->exchange;
+  struct recovery_probe probe = {.carrier = c};
+  const size_t stack_size = 256 * 1024;
+  size_t page = (size_t)sysconf(_SC_PAGESIZE);
+  char *stack = mmap(NULL, stack_size + 2 * page, PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (stack == MAP_FAILED ||
+      mprotect(stack + page, stack_size, PROT_READ | PROT_WRITE)) {
+    _exit(115);
+  }
+  c->recovery_stack = stack + page + stack_size;
+  c->recovery_entry = recovery_entry;
+  c->recovery_argument = &probe;
+  sigset_t original, unblocked, current;
+  CHECK(e, pthread_sigmask(SIG_SETMASK, NULL, &original) == 0);
+  unblocked = original;
+  sigdelset(&unblocked, SIGUSR1);
+  CHECK(e, pthread_sigmask(SIG_SETMASK, &unblocked, NULL) == 0);
+  for (probe.mode = 0; probe.mode < 2; ++probe.mode) {
+    int result = sigsetjmp(probe.jump, probe.mode == 0);
+    if (!result) {
+      recovery_transfer(&probe);
+    }
+    CHECK(e, result == 7 && guest_tls == 41);
+    CHECK(e, pthread_sigmask(SIG_SETMASK, NULL, &current) == 0);
+    CHECK(e, sigismember(&current, SIGUSR1) == (probe.mode == 1));
+    ++c->recovery_completions;
+    CHECK(e, pthread_sigmask(SIG_SETMASK, &unblocked, NULL) == 0);
+  }
+  probe.mode = 2;
+  volatile int resumes = 0;
+  CHECK(e, getcontext(&probe.context) == 0);
+  if (resumes < 2) {
+    if (resumes) {
+      CHECK(e, pthread_sigmask(SIG_SETMASK, NULL, &current) == 0);
+      CHECK(e, !sigismember(&current, SIGUSR1) && guest_tls == 41);
+      ++c->recovery_completions;
+    }
+    ++resumes;
+    recovery_transfer(&probe);
+  }
+  CHECK(e, pthread_sigmask(SIG_SETMASK, NULL, &current) == 0);
+  CHECK(e, !sigismember(&current, SIGUSR1) && guest_tls == 41);
+  ++c->recovery_completions;
+  CHECK(e, pthread_sigmask(SIG_SETMASK, &original, NULL) == 0);
+  CHECK(e, munmap(stack, stack_size + 2 * page) == 0);
+  c->recovery_stack = NULL;
+  c->recovery_entry = NULL;
+  c->recovery_argument = NULL;
+}
 
 static void tls_destruct(void *value) {
   struct carrier *c = value;
@@ -128,6 +213,7 @@ static void serve(void *argument) {
     }
     CHECK(e, errno == EBADF && guest_tls == 41);
   }
+  recovery_probe(c);
 #ifdef GW_DOMAIN_SIGNALS
   CHECK(e, raise(DOMAIN_NOTIFY_SIGNAL) == 0);
   e->fault(e->fault_page);

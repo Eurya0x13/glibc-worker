@@ -11,6 +11,7 @@ from pathlib import Path
 
 source = Path(__file__).resolve().parent
 core = source.parents[1]
+domain = core / "src/domain"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], default="x86_64")
 parser.add_argument("--runtime", type=Path)
@@ -104,8 +105,10 @@ def build(cc, name, sources, flags=()):
         "-Wextra",
         "-Werror",
         "-fstack-protector-strong",
+        "-DGW_DOMAIN_TEST_SIGNALS",
         "-I" + str(core / "src/bootstrap"),
         "-I" + str(core / "include"),
+        "-I" + str(domain),
         *map(str, sources),
         *flags,
         "-lm",
@@ -118,11 +121,11 @@ def build(cc, name, sources, flags=()):
 
 host_sources = [
     source / ("adopt-host.c" if args.adopt else "host.c"),
-    source / "switch.S",
+    domain / "switch.S",
     core / "src/bootstrap/loader_image.c",
 ]
 if args.adopt:
-    host_sources += [source / "start.S", core / "src/bootstrap/clone.S"]
+    host_sources += [domain / "start.S", core / "src/bootstrap/clone.S"]
 host_flags = ["-pthread"] if args.adopt else []
 host_sources += [p.resolve() for p in args.host_source]
 host_flags += ["-I" + str(source), *args.host_flag]
@@ -132,7 +135,12 @@ if args.credential_guard:
         parser.error("--credential-guard requires --adopt")
     guest_flags += ["-DGW_ADOPT_SETXID_GUARD"]
 if args.signals:
-    host_sources += [source / "signals.c", source / "signal-entry.S"]
+    host_sources += [
+        domain / "signals.c",
+        domain / "signal-entry.S",
+        domain / "signal-pending.c",
+        domain / "signal-deferred.c",
+    ]
     host_flags += ["-DGW_DOMAIN_SIGNALS"]
     guest_flags += ["-DGW_DOMAIN_SIGNALS"]
 if args.ndk:
@@ -158,13 +166,14 @@ files = [
     *[p.resolve() for p in args.host_source],
     source / "host-hooks.h",
     *source.glob("*.c"),
-    source / "switch.S",
-    source / "domain.h",
+    domain / "switch.S",
+    domain / "domain.h",
     Path(__file__).resolve(),
     core / "src/bootstrap/loader_image.c",
     core / "src/bootstrap/loader_image.h",
     core / "src/bootstrap/raw_syscall.h",
     core / "include/arch.h",
+    core / "include/domain_context.h",
     core / "config/targets.json",
     loader,
     runtime / "libc.so.6",
@@ -176,17 +185,17 @@ files = [
 if args.adopt:
     files += [
         source / "adopt.h",
-        source / "start.S",
-        source / "adopt-nptl.inc",
+        domain / "start.S",
+        core / "src/runtime/adopt-nptl.inc",
         core / "src/bootstrap/clone.S",
         runtime / "manifest.json",
         output / "libgcc_s.so.1",
     ]
 if args.signals:
     files += [
-        source / "signals.h",
-        source / "signal-entry.S",
-        source / "signal-registry.inc",
+        domain / "signals.h",
+        domain / "signal-entry.S",
+        domain / "signal-registry.inc",
     ]
 manifest = {
     "abi": args.abi,
@@ -294,6 +303,8 @@ expected = (
         "host_join_completed": True,
         "tls_destructors": 24,
         "guest_pthread_exits": 12,
+        "guest_recovery_transfers": 96,
+        "guest_recovery_completions": 96,
     }
     if args.adopt
     else {

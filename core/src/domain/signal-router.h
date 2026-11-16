@@ -1,0 +1,83 @@
+#ifndef GW_DOMAIN_SIGNAL_ROUTER_H
+#define GW_DOMAIN_SIGNAL_ROUTER_H
+#include <signal.h>
+#include <stdint.h>
+
+/* Host registration layer. Initialize before creating the VM or Guest owner.
+ * This does not virtualize Guest libc's independently resolved sigaction. */
+int signal_router_init(void);
+int signal_router_enabled(void);
+typedef int (*signal_router_backend)(int, const struct sigaction *,
+                                     struct sigaction *);
+/* Explicit backend must be the bottom Host libc registration API. Late
+ * integration owns registration quiescence and future import routing. */
+int signal_router_init_with_backend(signal_router_backend);
+int signal_router_adopt(void);
+/* Only after a reviewed outer chain's bottom registration/query pointers
+ * have been routed. NULL keeps the conservative standalone policy. */
+int signal_router_adopt_chain(void *reviewed_chain_base);
+#ifdef __ANDROID__
+int signal_router_action64(int, const struct sigaction64 *,
+                           struct sigaction64 *);
+#endif
+int signal_router_action(int, const struct sigaction *, struct sigaction *);
+/* Enable independent synchronous Guest dispositions before any carrier runs.
+ * Kernel routing remains installed even while Host selects SIG_DFL/SIG_IGN.
+ * The caller serializes registration and retains this layer until shutdown. */
+int signal_router_guest_faults(void);
+/* Internal, explicit integration trial. Reserve six otherwise unused RT
+ * signals before starting the VM. General consuming-wait/lifetime integration
+ * is not yet supplied by this opt-in fault channel. */
+int signal_router_defer_faults(const int *notifications);
+const int *signal_router_fault_notifications(void);
+void *signal_router_current_token(int);
+uint64_t signal_router_token_ignore_generation(void *);
+/* Select deferred logical delivery under the same writer transaction as Host
+ * registrations. No application handler runs while the transaction is held.
+ * Selection returns 0 (ignore), 1 (handler) or 2 (default). It consumes the
+ * selected generation's one-shot before exposing a handler's logical mask. */
+uint64_t signal_router_selection_begin(void);
+void signal_router_selection_end(uint64_t);
+int signal_router_select(int, const siginfo_t *, void *);
+/* A successful SIG_IGN registration invalidates older logical pending work,
+ * even if another registration replaces it before the recipient next runs. */
+uint64_t signal_router_ignore_generation(int, int *ignored);
+/* Join recipients and destroy the VM first. With a deferred channel, restore
+ * runs on the enabling thread and restores its original private mask bits. */
+int signal_router_restore(void);
+void signal_router_forward(int, siginfo_t *, void *, void *);
+void signal_router_forward_domain(int, siginfo_t *, void *, void *, uint64_t,
+                                  const stack_t *, uintptr_t, int);
+void signal_router_forward_selected_domain(int, siginfo_t *, void *, void *,
+                                           uint64_t, const stack_t *, uintptr_t,
+                                           int, int);
+_Noreturn void signal_router_default(int);
+int signal_router_verify(void);
+/* Admission guard: every pre-existing custom Host action must have been
+ * explicitly adopted before any recipient can execute Guest code. */
+int signal_router_guest_ready(void);
+unsigned signal_router_registrations(void);
+unsigned signal_router_retained(void);
+
+/* Optional, explicit reclamation boundary; never inferred from reader counts.
+ * enter must freeze new recipients/registrations and establish that every
+ * possible recipient has left all routing entries, handlers and saved signal
+ * frames. It must also prevent later setcontext/sigreturn into such a frame.
+ * The calling thread must not itself be in a handler. enter runs with the
+ * router writer lock held and catchable signals blocked. It may fail without
+ * changing the router; on success leave releases the gate without waiting on
+ * code needing the router lock. Neither callback may call this router.
+ * A general JVM safepoint alone does not establish this signal quiescence.
+ * Without such a provider, records remain pinned and reclaim is not called. */
+struct signal_router_quiescence {
+  uint32_t version, size;
+  void *context;
+  int (*enter)(void *);
+  void (*leave)(void *);
+};
+
+#define GW_SIGNAL_ROUTER_QUIESCENCE_V1 1u
+int signal_router_reclaim(const struct signal_router_quiescence *,
+                          unsigned *reclaimed);
+uint64_t signal_router_reserved(void);
+#endif

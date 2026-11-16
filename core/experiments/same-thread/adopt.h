@@ -10,6 +10,8 @@ enum { ADOPT_ALLOC = 1, ADOPT_FREE, ADOPT_STOP = 100, ADOPT_STOPPED };
 
 enum { ADOPT_THREADS = 8, ADOPT_BATCHES = 3, ADOPT_ROUNDS = 100 };
 
+enum { ADOPT_RECOVERY = 200 };
+
 struct carrier {
   struct exchange exchange;
   void *token;
@@ -20,6 +22,11 @@ struct carrier {
   int run_status;
   int index;
   int exit_mode;
+  void *recovery_stack;
+  void (*recovery_entry)(void *);
+  void *recovery_argument;
+  int recovery_transfers;
+  int recovery_completions;
 };
 
 struct adoption {

@@ -1,9 +1,13 @@
 #define _GNU_SOURCE
 #include "signal-router.h"
+#include "signal-stack.h"
 #include <errno.h>
+#include <dirent.h>
+#include <setjmp.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -11,6 +15,7 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t hits, depth, deepest, masked, on_alternate;
+static volatile sig_atomic_t handler_disabled;
 static int recurse;
 static uintptr_t alternate_low, alternate_high;
 static int pipe_fd[2];
@@ -34,7 +39,12 @@ void domain_signal_entry(int number, siginfo_t *info, void *context,
     while (atomic_load(&pause_entry)) {
     }
   }
-  signal_router_forward(number, info, context, token);
+  ucontext_t *frame = context;
+  uint64_t mask;
+  memcpy(&mask, &frame->uc_sigmask, sizeof mask);
+  signal_router_forward_domain(number, info, context, token, mask,
+                               &frame->uc_stack,
+                               gw_signal_interrupted_sp(frame), 0);
 }
 
 static void handler(int number) {
@@ -50,6 +60,9 @@ static void handler(int number) {
   masked = sigismember(&mask, 53);
   on_alternate =
       (uintptr_t)&local >= alternate_low && (uintptr_t)&local < alternate_high;
+  stack_t alternate;
+  REQUIRE(!sigaltstack(NULL, &alternate));
+  handler_disabled = !!(alternate.ss_flags & SS_DISABLE);
   if (recurse && hits == 1) {
     raise(52);
   }
@@ -148,6 +161,67 @@ static void *one_shot_deliver(void *unused) {
   return NULL;
 }
 
+/* This fixture owns every thread and stores no resumable signal contexts.
+ * After its workers join, the sole main thread is a real quiescent recipient.
+ * This is deliberately not advertised as a JVM safepoint implementation. */
+static int enter_single_thread(void *context) {
+  (void)context;
+  DIR *directory = opendir("/proc/self/task");
+  if (!directory) {
+    return errno;
+  }
+  unsigned threads = 0;
+  struct dirent *entry;
+  while ((entry = readdir(directory))) {
+    if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9') {
+      ++threads;
+    }
+  }
+  closedir(directory);
+  return threads == 1 ? 0 : EBUSY;
+}
+
+static void leave_single_thread(void *context) {
+  (void)context;
+}
+
+static const struct signal_router_quiescence quiescence = {
+    .version = GW_SIGNAL_ROUTER_QUIESCENCE_V1,
+    .size = sizeof quiescence,
+    .enter = enter_single_thread,
+    .leave = leave_single_thread};
+
+static void reclamation_test(void) {
+  unsigned before = signal_router_retained(), reclaimed = 0;
+  REQUIRE(before > 1000);
+  REQUIRE(signal_router_reclaim(NULL, &reclaimed) == EINVAL);
+  REQUIRE(signal_router_retained() == before && reclaimed == 0);
+  REQUIRE(!signal_router_reclaim(&quiescence, &reclaimed));
+  REQUIRE(reclaimed > 1000 && signal_router_retained() == before - reclaimed);
+  REQUIRE(signal_router_retained() > 0);
+  struct sigaction action;
+  REQUIRE(!sigaction(52, NULL, &action) && action.sa_handler == race_a);
+  int hits = atomic_load(&race_hits);
+  REQUIRE(!raise(52) && atomic_load(&race_hits) == hits + 1);
+  REQUIRE(signal_router_verify() == 0);
+}
+
+static sigjmp_buf signal_jump;
+
+static void jump_handler(int number) {
+  (void)number;
+  siglongjmp(signal_jump, 1);
+}
+
+static void nonlocal_exit_test(void) {
+  REQUIRE(signal(52, jump_handler) != SIG_ERR);
+  if (!sigsetjmp(signal_jump, 1)) {
+    raise(52);
+    REQUIRE(0);
+  }
+  REQUIRE(signal_router_verify() == 0);
+}
+
 static void reset_publication_test(void) {
   install(SA_RESETHAND);
   atomic_store(&pause_entry, 1);
@@ -161,9 +235,57 @@ static void reset_publication_test(void) {
   sigaddset(&replacement.sa_mask, 53);
   REQUIRE(!sigaction(52, &replacement, &previous) &&
           previous.sa_handler == SIG_DFL);
+  unsigned retained = signal_router_retained(), reclaimed = 7;
+  REQUIRE(signal_router_reclaim(&quiescence, &reclaimed) == EBUSY);
+  REQUIRE(signal_router_retained() == retained && reclaimed == 7);
   atomic_store(&pause_entry, 0);
   REQUIRE(!pthread_join(thread, NULL));
   REQUIRE(!sigaction(52, NULL, &previous) && previous.sa_handler == race_a);
+}
+
+static void fault_routing_test(void) {
+  REQUIRE(!signal_router_guest_faults());
+  REQUIRE(signal_router_guest_faults() == EALREADY);
+  struct sigaction previous,
+      action = {.sa_handler = handler, .sa_flags = SA_RESETHAND};
+  sigemptyset(&action.sa_mask);
+  REQUIRE(!sigaction(SIGTRAP, &action, &previous));
+  sig_atomic_t before = hits;
+  REQUIRE(!raise(SIGTRAP) && hits == before + 1 && !on_alternate);
+  struct sigaction observed;
+  REQUIRE(!sigaction(SIGTRAP, NULL, &observed));
+  REQUIRE(observed.sa_handler == SIG_DFL);
+  REQUIRE(!signal_router_verify());
+  pid_t child = fork();
+  REQUIRE(child >= 0);
+  if (!child) {
+    raise(SIGTRAP);
+    _exit(109);
+  }
+  int status;
+  REQUIRE(waitpid(child, &status, 0) == child);
+  REQUIRE(WIFSIGNALED(status) && WTERMSIG(status) == SIGTRAP);
+  action.sa_handler = SIG_IGN;
+  action.sa_flags = 0;
+  REQUIRE(!sigaction(SIGTRAP, &action, NULL));
+  REQUIRE(!raise(SIGTRAP) && hits == before + 1);
+  REQUIRE(!sigaction(SIGTRAP, NULL, &observed));
+  REQUIRE(observed.sa_handler == SIG_IGN);
+  REQUIRE(!sigaction(SIGTRAP, &previous, NULL));
+  stack_t normal, disarming;
+  REQUIRE(!sigaltstack(NULL, &normal));
+  disarming = normal;
+  disarming.ss_flags = GW_SS_AUTODISARM;
+  REQUIRE(!sigaltstack(&disarming, NULL));
+  action.sa_handler = handler;
+  action.sa_flags = 0;
+  REQUIRE(!sigaction(SIGTRAP, &action, NULL));
+  REQUIRE(!raise(SIGTRAP) && !on_alternate && !handler_disabled);
+  action.sa_flags = SA_ONSTACK;
+  REQUIRE(!sigaction(SIGTRAP, &action, NULL));
+  REQUIRE(!raise(SIGTRAP) && on_alternate && handler_disabled);
+  REQUIRE(!sigaction(SIGTRAP, &previous, NULL));
+  REQUIRE(!sigaltstack(&normal, NULL));
 }
 
 int main(void) {
@@ -227,14 +349,21 @@ int main(void) {
   restart_test(SA_RESTART);
   replacement_test();
   reset_publication_test();
+  reclamation_test();
+  nonlocal_exit_test();
+  fault_routing_test();
   REQUIRE(signal_router_verify() == 0);
   REQUIRE(signal_router_restore() == 0);
+  unsigned reclaimed = 0;
+  REQUIRE(!signal_router_reclaim(&quiescence, &reclaimed));
+  REQUIRE(reclaimed > 0 && signal_router_retained() == 0);
   REQUIRE(sigaltstack(&original, NULL) == 0);
   REQUIRE(munmap(memory, 65536) == 0);
   printf(
       "{\"result\":\"%s\",\"failures\":%d,\"checks\":[\"query\",\"mask\","
       "\"errno\",\"onstack\",\"nodefer\",\"reset_default\",\"ignore\","
       "\"restart\",\"eintr\",\"concurrent_replacement\",\"reset_publication\","
+      "\"quiescent_reclamation\",\"nonlocal_exit\",\"fault_routing\","
       "\"restore\"]}\n",
       failures ? "FAIL" : "PASS", failures);
   return !!failures;

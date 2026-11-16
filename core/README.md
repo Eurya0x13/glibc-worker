@@ -1,10 +1,14 @@
 # glibc-worker core
 
-不依赖 JNI、Java 或 libffi 的运行时基础组件。源码包含固定 GNU loader 的 PT_LOAD 映射与启动栈、raw clone 架构入口、futex 事件和 RPC 诊断原语。GNU DSO 重定位和 TLS 初始化继续由现有 GNU loader 完成。
+[English](docs/en/README.md) | [简体中文](docs/zh/README.md)
 
-`src/bootstrap/` 保存架构启动源码；`include/` 保存协议与运行时原语。
+Runtime foundations without JNI, Java or libffi dependencies: pinned GNU loader PT_LOAD mapping and startup stack construction, architecture-specific raw clone entrypoints, futex events and RPC diagnostics. The existing GNU loader still performs DSO relocation and TLS initialization.
 
-## 独立构建
+`src/bootstrap/` contains loader startup, `src/domain/` context switching and signal routing, `src/runtime/` GNU adoption patches, and `include/` protocol/runtime primitives.
+
+## Standalone build
+
+Run from the core project directory:
 
 ```sh
 ./build.sh -DCMAKE_INSTALL_PREFIX="$PWD/build/install"
@@ -12,22 +16,22 @@ cmake --install build
 ctest --test-dir build --output-on-failure
 ```
 
-默认输出只在本项目 `build/`。Android 构建通过 CMake 的 NDK toolchain、`ANDROID_ABI` 与 `ANDROID_PLATFORM` 选择目标；不需要 JDK、JNI 头或其他项目源码。安装包为 `GlibcWorkerCore`，目标为 `glibc_worker::core`。
+Outputs stay in this project's `build/`. Select Android through the CMake NDK toolchain, `ANDROID_ABI` and `ANDROID_PLATFORM`; no JDK, JNI headers or other project's source is required. The `GlibcWorkerCore` package exports `glibc_worker::core`, `glibc_worker::domains` and opt-in `glibc_worker::signal_interpose`. See [same-thread domains](docs/en/DOMAINS.md).
 
-匹配的 GNU loader/libc 由 `scripts/build-glibc.sh` 构建；Host/Guest libffi 由 `scripts/build-ffi.sh /path/to/ndk-clang` 构建。两项都是可选依赖工具，不进入基础 core 库的链接依赖。配置和 Termux 补丁都归本项目。下载在 `vendor/`、源码缓存在 `work/`、runtime 在 `build/glibc-runtime/<ABI>/`，libffi 在 `build/ffi-{android,linux}/<ABI>/`。runtime 发布匹配的 loader、libc、libpthread、libm、librt 和 libdl；调用者不读取 glibc 的内部构建树。
+`scripts/build-glibc.sh` builds matching GNU loader/libc artifacts; `scripts/build-ffi.sh /path/to/ndk-clang` builds Host/Guest libffi. These optional dependency tools do not add link dependencies to the base core library. Configuration and Termux patches belong to core. Downloads use `vendor/`, sources use `work/`, runtime artifacts use `build/glibc-runtime/<ABI>/`, and libffi uses `build/ffi-{android,linux}/<ABI>/`. Runtime packaging publishes matching loader, libc, libpthread, libm, librt and libdl; callers do not inspect glibc's internal build tree.
 
-## 测试与边界
+## Tests and boundaries
 
-`tests/` 自己维护真实 futex、通知竞态、配对交接、嵌套统计和受控时钟故障测试；需要 Clang ASan/UBSan 与 Python，输出在本项目 `build/test-work/`。CMake 配置 `-DBUILD_TESTING=OFF` 可只构建组件。
+`tests/` owns real futex, notification race, paired handoff, nested statistics and controlled clock-failure checks. They require Python and Clang ASan/UBSan; outputs use `build/test-work/`. Use `-DBUILD_TESTING=OFF` to build only components.
 
-`gw_bootstrap_stack` 只接受 1..16 个非空参数指针；在任何栈写入前检查地址溢出、参数/固定环境/auxv/随机字节与对齐预算，并保留至少 4 KiB 余量。无效输入仍按低层 bootstrap 契约终止进程，不提供恢复重试接口。`tests/audit_boundaries.py` 通过保护页、共享哨兵和子进程验证拒绝前未写栈，并验证有效 argv/env/auxv。
+`gw_bootstrap_stack` accepts 1..16 non-null argument pointers. Before writing, it checks address overflow, arguments, fixed environment, auxv, random bytes and alignment, retaining at least 4 KiB of headroom. Legacy low-level wrappers terminate on failure. `gw_bootstrap_map_checked` and `gw_bootstrap_stack_checked` return errno values, leave outputs unchanged on failure and reclaim temporary failed mappings. `tests/audit_boundaries.py` checks guard pages, shared sentinels, rejection before stack writes and valid argv/env/auxv.
 
-`rpc_sequence.h` 将有符号原子序号的下一值明确为 `INT_MAX → INT_MIN`，避免 C 有符号溢出；零同样是有效序号。它是每槽最多一个在途请求的等值令牌，不可用于大小排序或并发生产者分配。边界测试在四种通知/轮询配置下执行真实 pthread/futex 请求与响应，覆盖两处回绕。
+`rpc_sequence.h` explicitly wraps signed atomic sequences from `INT_MAX` to `INT_MIN`; zero is valid. These are equality tokens for at most one in-flight request per slot, not ordered counters or concurrent producer allocation. Boundary tests exercise real pthread/futex request/response exchanges across both wrap points under four notification/polling configurations.
 
-core 提供低层 bootstrap，不提供任意 runtime 的一键启动/销毁 API。宿主仍负责部署、栈与共享区生命周期、信号策略、启动参数和线程退出确认；GNU 映射当前保留到进程退出。超时或通知唤醒不等于对端已经停止访问共享区/借用地址；未确认线程退出前不得释放其栈和映像。若宿主选择丢弃执行进程，应由其监督路径处理，core 不取消任意函数或自动结束宿主。core 不管理 JavaVM，也不混用两套 libc 的 allocator、FILE 或 pthread 对象。
+Core supplies low-level bootstrap, not a universal runtime start/destroy API. Embedders own deployment, stacks, shared memory, signal policy, arguments and confirmation of thread exit. GNU mappings remain until process exit. A timeout or wake does not prove that a peer stopped accessing shared/borrowed addresses; never release its stack or image before exit is confirmed. Process disposal belongs to the embedder's supervisor. Core neither cancels arbitrary functions nor kills the embedder, manages JavaVM, or mixes allocator, FILE and pthread objects between libcs.
 
-等待与诊断设计见 [WAITING](docs/WAITING.md)，实验性通知过滤见 [WAKE_FILTER](docs/WAKE_FILTER.md)。JNI 上下文配对与对象协议属于上层 android-jni。
+See [waiting and diagnostics](docs/en/WAITING.md) and [experimental wake filtering](docs/en/WAKE_FILTER.md). JNI context pairing and object protocols belong to android-jni.
 
-GNU runtime 构建脚本会核对源码补丁；忽略目录或父级 Git checkout 不能使补丁被静默跳过。构建与缓存验证契约见 [RUNTIME_PATCHES](docs/RUNTIME_PATCHES.md)。
+The GNU build verifies patch application even inside ignored directories or a parent Git checkout; see [runtime patching](docs/en/RUNTIME_PATCHES.md).
 
-GNU robust mutex 初始化明确返回 ENOTSUP，避免关闭内核 robust-list 登记后仍报告创建成功。普通锁与条件变量保持原实现；边界、原因及 `tests/mutex_contract.py` 的主机正对照/指定 runtime 验证见 [mutex 契约](docs/MUTEXES.md)。
+GNU robust mutex initialization explicitly returns ENOTSUP because kernel robust-list registration is disabled. Ordinary mutexes and condition variables retain their implementation. See the [mutex contract](docs/en/MUTEXES.md) for limits and host-positive-control/selected-runtime tests.

@@ -31,7 +31,7 @@
 
 ## 复现
 
-先按 [core 构建说明](../../README.md) 准备匹配的 glibc runtime。脚本会检查实际文件与编译器，不下载或改写正常 runtime。以下从仓库根目录运行：
+先按 [core 构建说明](../../docs/zh/README.md) 准备匹配的 glibc runtime。脚本会检查实际文件与编译器，不下载或改写正常 runtime。以下从仓库根目录运行：
 
 ```sh
 # 本机 Linux x86_64，Host/Guest 为两套 glibc，不是 bionic 验证。
@@ -73,14 +73,14 @@ Android Host 以 API 29 构建并禁用 emulated TLS，直接测试 ELF TLS，�
 
 `--adopt` 使用另一套 Host/Guest，区别于上述初始 loader 夹具。一个专用 Guest owner 线程正常启动 GNU loader；随后借助实验性 glibc 内部入口，为每个 Host pthread 分配自己的 TCB、DTV 和带保护页的栈。载体执行 Guest 时保留原来的内核 TID，不接管 Host 的 clear-child-tid、robust-list 或 rseq 注册。
 
-`build-runtime.py` 从 core 已准备的匹配 glibc 源码复制出独立构建树，将 `adopt-nptl.inc` 注入 NPTL。它不修改正常 runtime 或安装目标。内部入口分为分配、绑定载体、运行服务、执行线程析构、owner 回收五个阶段。未完成析构的 TCB 回收返回 `EBUSY`。这是依赖 glibc 内部结构的实验接口，不是稳定 API。
+`core/scripts/build-domain-runtime.py` 从 core 已准备的匹配 glibc 源码复制出独立构建树，将 `adopt-nptl.inc` 注入 NPTL。它不修改正常 runtime 或安装目标。内部入口分为分配、绑定载体、运行服务、执行线程析构、owner 回收五个阶段。未完成析构的 TCB 回收返回 `EBUSY`。这是依赖 glibc 内部结构的实验接口，不是稳定 API。
 
 夹具使用 8 个并发载体、3 批线程生命周期，每个载体执行 100 次八层嵌套调用，总计 19,200 次 Guest 调用。覆盖独立 TLS、动态 DSO TLS、errno、浮点状态、指针传递、普通 Guest 后台 pthread 创建与 join、Host join，以及每载体各一次 pthread key 析构、TLS 析构和 cleanup handler。半数载体在最外层服务边界执行 Guest `pthread_exit`，只结束 Guest 服务，不退出 Host 内核线程。
 
 收养载体上的取消明确返回 `ENOTSUP`。`--credential-guard` 还验证存在收养载体时 Guest `setuid(getuid())` 被 NPTL 防护拒绝并返回 `ENOTSUP`，不尝试改变进程凭据。这是显式不支持的语义，不应计为完整 pthread/POSIX 兼容。嵌套 Host 回调期间的 Guest `pthread_exit`、分配后尚未绑定的失败清理、完整 runtime 卸载仍未覆盖。
 
 ```sh
-python3 core/experiments/same-thread/build-runtime.py --abi arm64-v8a
+python3 core/scripts/build-domain-runtime.py --abi arm64-v8a
 # 使用上一命令实际输出的目录，不猜测构建哈希。
 python3 core/experiments/same-thread/run.py \
   --abi arm64-v8a --adopt --signals --credential-guard \
