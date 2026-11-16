@@ -53,12 +53,14 @@ static struct relay_request *take_requests(void) {
   struct relay_request *batch =
       atomic_exchange_explicit(&requests, NULL, memory_order_acquire);
   struct relay_request *ordered = NULL;
+
   while (batch) {
     struct relay_request *next = batch->next;
     batch->next = ordered;
     ordered = batch;
     batch = next;
   }
+
   return ordered;
 }
 
@@ -71,6 +73,7 @@ static void deliver(struct relay_request *request) {
   signal_router_forward_domain(request->number, request->information,
                                request->context, request->token, request->mask,
                                &stack, 0, 0);
+
   _Atomic int *complete = &request->complete;
   atomic_store_explicit(complete, 1, memory_order_release);
   /* Nothing may dereference request after publication: its owner can return
@@ -83,6 +86,7 @@ static void *dispatch(void *unused) {
   (void)unused;
   atomic_store_explicit(&state, RUNNING, memory_order_release);
   wake(&state);
+
   for (;;) {
     int observed = atomic_load_explicit(&notification, memory_order_acquire);
     struct relay_request *batch = take_requests();
@@ -91,9 +95,11 @@ static void *dispatch(void *unused) {
       deliver(batch);
       batch = next;
     }
+
     if (atomic_load_explicit(&state, memory_order_acquire) == EXITING) {
       return NULL;
     }
+
     wait_value(&notification, observed);
   }
 }
@@ -111,10 +117,12 @@ int signal_host_relay_start(void) {
   if (!signal_router_enabled()) {
     return EINVAL;
   }
+
   int expected = STOPPED;
   if (!atomic_compare_exchange_strong(&state, &expected, STARTING)) {
     return EALREADY;
   }
+
   uint64_t mask = gw_nonlocal_mask_block();
   int error = pthread_create(&dispatcher, NULL, dispatch, NULL);
   gw_nonlocal_mask_restore(mask);
@@ -122,6 +130,7 @@ int signal_host_relay_start(void) {
     atomic_store_explicit(&state, STOPPED, memory_order_release);
     return error;
   }
+
   wait_value(&state, STARTING);
   atomic_store_explicit(&admission, 0, memory_order_release);
   return 0;
@@ -134,10 +143,12 @@ int signal_host_relay_stop(void) {
   if (pthread_equal(pthread_self(), dispatcher)) {
     return EDEADLK;
   }
+
   int expected = RUNNING;
   if (!atomic_compare_exchange_strong(&state, &expected, STOPPING)) {
     return EBUSY;
   }
+
   unsigned pending =
       atomic_fetch_or_explicit(&admission, RELAY_CLOSED, memory_order_acq_rel);
   if (pending & ~RELAY_CLOSED) {
@@ -145,13 +156,16 @@ int signal_host_relay_stop(void) {
     atomic_fetch_and_explicit(&admission, ~RELAY_CLOSED, memory_order_release);
     return EBUSY;
   }
+
   atomic_store_explicit(&state, EXITING, memory_order_release);
   atomic_fetch_add_explicit(&notification, 1, memory_order_release);
   wake(&notification);
+
   int error = pthread_join(dispatcher, NULL);
   if (error) {
     return error;
   }
+
   atomic_store_explicit(&state, STOPPED, memory_order_release);
   return 0;
 }
@@ -170,6 +184,7 @@ __attribute__((no_stack_protector)) int signal_host_relay(
   } while (!atomic_compare_exchange_weak_explicit(
       &admission, &observed, observed + 1, memory_order_acquire,
       memory_order_relaxed));
+
   struct relay_request request = {.number = number,
                                   .information = information,
                                   .context = context,
@@ -181,8 +196,10 @@ __attribute__((no_stack_protector)) int signal_host_relay(
     request.next = head;
   } while (!atomic_compare_exchange_weak_explicit(
       &requests, &head, &request, memory_order_release, memory_order_relaxed));
+
   atomic_fetch_add_explicit(&notification, 1, memory_order_release);
   wake(&notification);
+
   wait_value(&request.complete, 0);
   atomic_fetch_sub_explicit(&admission, 1, memory_order_release);
   return 0;

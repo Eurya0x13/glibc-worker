@@ -144,6 +144,7 @@ static void *thread_relay(void *unused) {
   if (pthread_sigmask(SIG_UNBLOCK, &mask, NULL)) {
     return (void *)(intptr_t)-88;
   }
+
   pthread_t self = pthread_self();
   for (int round = 0; round < 8; ++round) {
     int number = round % 2 ? SIGTRAP : SIGURG;
@@ -151,6 +152,7 @@ static void *thread_relay(void *unused) {
     information.si_pid = getpid();
     information.si_uid = getuid();
     information.si_value.sival_int = (int)syscall(SYS_gettid);
+
     errno = EDOM;
     if (syscall(SYS_rt_tgsigqueueinfo, getpid(), syscall(SYS_gettid), number,
                 &information) ||
@@ -158,11 +160,13 @@ static void *thread_relay(void *unused) {
         !pthread_equal(self, pthread_self())) {
       return (void *)(intptr_t)-89;
     }
+
     if (pthread_sigmask(SIG_SETMASK, NULL, &mask) ||
         !sigismember(&mask, SIGWINCH)) {
       return (void *)(intptr_t)-90;
     }
   }
+
   return (void *)(intptr_t)73;
 }
 
@@ -173,6 +177,7 @@ static int thread_relays(void) {
       _exit(174);
     }
   }
+
   int result = 73;
   for (int i = 0; i < 8; ++i) {
     void *value;
@@ -180,6 +185,7 @@ static int thread_relays(void) {
       result = -88;
     }
   }
+
   return result;
 }
 

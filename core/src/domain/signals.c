@@ -123,6 +123,7 @@ __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
     int number, siginfo_t *info, void *context, void *token, uint64_t mask) {
   uintptr_t entry =
       atomic_load_explicit(&guest_fault_entry, memory_order_acquire);
+
   if (info->si_code > 0 &&
       (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
        number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
@@ -133,6 +134,7 @@ __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
   } else if (!signal_host_relay(number, info, context, token, mask)) {
     return;
   }
+
   gw_raw3(SYS_exit_group, 96, 0, 0);
   __builtin_unreachable();
 }
