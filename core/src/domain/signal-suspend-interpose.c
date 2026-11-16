@@ -1,33 +1,90 @@
 #define _GNU_SOURCE
 #include "signal-router.h"
 #include "signals.h"
+#include "signal-select.h"
+#include "signal-libc-mask.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <pthread.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/select.h>
 
-/* Only explicit bootstrap consumers link this object. Keep the native libc's
- * atomic wait, cancellation entry, timeout handling and reserved-signal filter.
- * We change the temporary mask argument, never the calling thread's mask.
+/* Only explicit bootstrap consumers link this object. Inactive or NULL-mask
+ * calls retain their native libc backend. Active-channel LP64 calls publish
+ * a stable row around their atomic kernel mask-wait and preserve cancellation
+ * checks without exposing automatic cleanup records to user handlers.
  * Bionic LP64 aliases terminate in the 64-bit entry rather than calling back
  * through our public wrapper:
  * https://android.googlesource.com/platform/bionic/+/main/libc/bionic/poll.cpp
  * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/unix/sysv/linux/ppoll.c
  */
-static const sigset_t *physical_mask(const sigset_t *logical,
-                                     sigset_t *physical) {
-  if (!logical || !signal_router_fault_notifications()) {
-    return logical;
-  }
+/* A wide outer fault mask must not erase the execution mask of an atomic
+ * wait. Publish a stable row while delivery is blocked, then let the raw LP64
+ * syscall install its temporary mask atomically. Native GNU cancellation is
+ * checked under a bounded cleanup during masked setup and after retirement.
+ * Private/raw libc wait paths are outside the explicit bootstrap interposition
+ * contract.
+ * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/unix/sysv/linux/ppoll.c
+ * https://github.com/torvalds/linux/blob/v6.12/fs/select.c
+ */
+static int mask_wait_enabled(const sigset_t *mask) {
+  return mask && signal_router_fault_notifications();
+}
+
+static void cancellation_point(void) {
+#ifndef __ANDROID__
+  pthread_testcancel();
+#endif
+}
+
+static void *begin_wait(const sigset_t *mask, int filter) {
+  cancellation_point();
   uint64_t bits;
-  memcpy(&bits, logical, sizeof bits);
-  bits = signal_host_physical_mask(bits);
-  sigemptyset(physical);
-  memcpy(physical, &bits, sizeof bits);
-  return physical;
+  memcpy(&bits, mask, sizeof bits);
+#ifdef __ANDROID__
+  /* Bionic filters sigsuspend/poll/select, but its epoll wrappers pass masks
+   * unchanged. Keep that per-interface distinction, including timer bit 32.
+   * https://github.com/aosp-mirror/platform_bionic/blob/main/libc/bionic/sys_epoll.cpp
+   */
+  if (filter) {
+    bits = gw_signal_libc_mask(bits, SIG_SETMASK);
+  }
+#else
+  (void)filter;
+#endif
+  void *record = gw_signal_mask_wait_begin(bits);
+  if (record) {
+    extern void gw_signal_mask_wait_test_point(int) __attribute__((weak));
+    if (gw_signal_mask_wait_test_point) {
+      gw_signal_mask_wait_test_point(1);
+    }
+    gw_signal_mask_wait_cancel_check(record);
+    if (gw_signal_mask_wait_test_point) {
+      gw_signal_mask_wait_test_point(2);
+    }
+  }
+  return record;
+}
+
+static int end_wait(void *record, int result) {
+  int error = errno;
+  result = gw_signal_mask_wait_end(record, result, error);
+  cancellation_point();
+  return result;
+}
+
+static const struct timespec *copy_timeout(const struct timespec *timeout,
+                                           struct timespec *copy) {
+  if (timeout) {
+    *copy = *timeout;
+    return copy;
+  }
+  return NULL;
 }
 
 static char unavailable;
@@ -85,8 +142,18 @@ int sigsuspend(const sigset_t *mask) {
   if (!function) {
     return -1;
   }
-  sigset_t physical;
-  return function(physical_mask(mask, &physical));
+  if (!mask_wait_enabled(mask)) {
+    return function(mask);
+  }
+
+  void *record = begin_wait(mask, 1);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+  int result = gw_signal_wait_result(gw_signal_wait_syscall(
+      record, SYS_rt_sigsuspend, (long)&bits, sizeof bits, 0, 0, 0, 0));
+  return end_wait(record, result);
 }
 
 int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
@@ -97,9 +164,22 @@ int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
   if (!function) {
     return -1;
   }
-  sigset_t physical;
-  signal_host_prune_notifications();
-  return function(fds, count, timeout, physical_mask(mask, &physical));
+  if (!mask_wait_enabled(mask)) {
+    signal_host_prune_notifications();
+    return function(fds, count, timeout, mask);
+  }
+
+  struct timespec left;
+  timeout = copy_timeout(timeout, &left);
+  void *record = begin_wait(mask, 1);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+  int result = gw_signal_wait_result(
+      gw_signal_wait_syscall(record, SYS_ppoll, (long)fds, count, (long)timeout,
+                             (long)&bits, sizeof bits, 0));
+  return end_wait(record, result);
 }
 
 int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
@@ -110,10 +190,28 @@ int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
   if (!function) {
     return -1;
   }
-  sigset_t physical;
-  signal_host_prune_notifications();
-  return function(count, read, write, except, timeout,
-                  physical_mask(mask, &physical));
+  if (!mask_wait_enabled(mask)) {
+    signal_host_prune_notifications();
+    return function(count, read, write, except, timeout, mask);
+  }
+
+  struct timespec left;
+  timeout = copy_timeout(timeout, &left);
+  void *record = begin_wait(mask, 1);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+
+  struct {
+    const uint64_t *mask;
+    size_t size;
+  } data = {&bits, sizeof bits};
+
+  int result = gw_signal_wait_result(gw_signal_wait_syscall(
+      record, SYS_pselect6, count, (long)read, (long)write, (long)except,
+      (long)timeout, (long)&data));
+  return end_wait(record, result);
 }
 
 int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
@@ -125,9 +223,20 @@ int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
   if (!function) {
     return -1;
   }
-  sigset_t physical;
-  signal_host_prune_notifications();
-  return function(fd, events, count, timeout, physical_mask(mask, &physical));
+  if (!mask_wait_enabled(mask)) {
+    signal_host_prune_notifications();
+    return function(fd, events, count, timeout, mask);
+  }
+
+  void *record = begin_wait(mask, 0);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+  int result = gw_signal_wait_result(
+      gw_signal_wait_syscall(record, SYS_epoll_pwait, fd, (long)events, count,
+                             timeout, (long)&bits, sizeof bits));
+  return end_wait(record, result);
 }
 
 int epoll_pwait2(int fd, struct epoll_event *events, int count,
@@ -144,9 +253,27 @@ int epoll_pwait2(int fd, struct epoll_event *events, int count,
   if (!function) {
     return -1;
   }
-  sigset_t physical;
-  signal_host_prune_notifications();
-  return function(fd, events, count, timeout, physical_mask(mask, &physical));
+  if (!mask_wait_enabled(mask)) {
+    signal_host_prune_notifications();
+    return function(fd, events, count, timeout, mask);
+  }
+
+  struct timespec left;
+  timeout = copy_timeout(timeout, &left);
+  void *record = begin_wait(mask, 0);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+#ifdef SYS_epoll_pwait2
+  int result = gw_signal_wait_result(
+      gw_signal_wait_syscall(record, SYS_epoll_pwait2, fd, (long)events, count,
+                             (long)timeout, (long)&bits, sizeof bits));
+#else
+  errno = ENOSYS;
+  int result = -1;
+#endif
+  return end_wait(record, result);
 }
 
 int poll(struct pollfd *fds, nfds_t count, int timeout) {

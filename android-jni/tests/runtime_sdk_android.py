@@ -315,6 +315,8 @@ if args.nonlocal_test:
             ("guest-default-" + str(mode), False)
             for mode in (33, 34, 35, 82, 83)
         ]
+if args.host_fault_mask:
+    cases += [("router-quarantine", False)]
 for mode, reject in cases:
     fatal = (
         int(mode.rsplit("-", 1)[1])
@@ -378,7 +380,8 @@ for mode, reject in cases:
             mode,
             90,
             require_pending=args.signal_pending,
-            require_host_fault_mask=args.host_fault_mask,
+            require_host_fault_mask=args.host_fault_mask
+            and mode != "router-quarantine",
             require_guest_target=args.native_unwind and args.unwind_windows,
             fpe_optional=True,
             fatal=fatal,

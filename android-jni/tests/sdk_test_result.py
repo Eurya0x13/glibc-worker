@@ -322,6 +322,26 @@ def execute_case(
         )
     )
 
+    if mode == "router-quarantine":
+        failed = (
+            timed_out
+            or returncode != 0
+            or malformed
+            or warnings
+            or terminal
+            != [
+                {
+                    "result": "PASS",
+                    "case": mode,
+                    "warmup": True,
+                    "admission_rejected": True,
+                    "close_rejected": True,
+                    "shutdown_rejected": True,
+                    "resources_retained": True,
+                }
+            ]
+        )
+
     if fatal is not None:
         armed = [r for r in rows if r.get("stage") == "guest-default"]
         executed = [

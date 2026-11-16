@@ -26,6 +26,8 @@ int gw_signal_pending_put(struct gw_signal_pending *, const siginfo_t *,
                           uint64_t realtime_limit);
 int gw_signal_pending_take(struct gw_signal_pending *, uint64_t eligible,
                            siginfo_t *);
+int gw_signal_pending_peek(struct gw_signal_pending *, uint64_t eligible,
+                           siginfo_t *);
 uint64_t gw_signal_pending_bits(const struct gw_signal_pending *);
 void gw_signal_pending_discard(struct gw_signal_pending *, int);
 void gw_signal_pending_close(struct gw_signal_pending *);

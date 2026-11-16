@@ -52,8 +52,8 @@ Reviewed paths are LP64 time64 on x86_64/AArch64; time32 is not established.
 Link `glibc_worker::signal_interpose`, initialize/adopt the router, then call
 `gw_host_signal_channel_enable(notifications, GW_HOST_FAULT_SIGNAL_COUNT)` from
 `signal_channel.h` before starting the VM or creating Host signalfds/recipients.
-The integrator supplies six reviewed, unused public RT numbers. Existing custom
-registrations or signalfds prevent enabling with `EBUSY`; the runtime does not
+The integrator supplies six reviewed, unused public RT numbers. Occupied notification
+numbers or existing Host signalfds prevent enabling with `EBUSY`; the runtime does not
 choose numbers or silently replace handlers. The JNI SDK `--host-fault-mask`
 case consumes this installed public API with a matching native-unwind service.
 Ordinary SDK startup does not enable it automatically.
@@ -66,10 +66,19 @@ six numbers return `EBUSY`. This is not independent Guest asynchronous delivery.
 
 Host mask queries, consuming waits and descriptor APIs translate these private
 bits. Bionic resolves bottom LP64 entries to avoid alias recursion. Host
-`sigsuspend`, `ppoll`, `pselect`, `epoll_pwait` and `epoll_pwait2` retain native
-atomic mask installation. Assembly separately retains actual handler-entry
-masks and saved return masks. Host handlers see logical `uc_sigmask`; valid
+`sigsuspend`, `ppoll`, `pselect`, `epoll_pwait` and `epoll_pwait2` use atomic
+LP64 kernel mask installation when the channel is active. A stable row and an
+identifiable syscall PC/SP keep the temporary execution mask separate from
+the saved return mask, including nested frames selected before user entry.
+GNU cancellation is checked while setup remains delivery-blocked and after
+normal retirement; no automatic cleanup record survives into a user handler.
+Assembly separately retains actual handler-entry masks and saved return masks. Host handlers see logical `uc_sigmask`; valid
 mask edits survive return. NULL mask-wait arguments retain native behavior.
+Input filtering follows each owning-libc interface: Bionic's mask/poll/select
+paths filter its private signals, while epoll passes its temporary mask through.
+A mask query makes no temporary mask mutation, and BLOCK/UNBLOCK apply input
+filters before combining with existing bits; a native action mask can already
+have private libc bits blocked.
 
 ## Linux consuming order and atomic commit
 
@@ -96,8 +105,8 @@ The registration writer serializes selection with `SIG_IGN` and disposition
 changes. No user handler executes under that writer. `sigpending` also takes
 one coherent native/logical snapshot under it. An ignore generation discards
 older pending work even after a handler is restored, while committed output
-remains valid. This protects selection from concurrent registration; it does
-not impose native ordering on asynchronous handler dispatch below.
+remains valid. Kernel selection and logical commit share the registration
+transaction; asynchronous handler dispatch uses the original-number model below.
 
 Each deferred recipient owns one nonblocking native signalfd, initially with
 an empty mask. It is separate from application descriptors and closed when the
@@ -112,13 +121,40 @@ The owning libc's zero-length read/wait entry preserves cancellation policy
 without consuming data. GNU FILE no-cancel reads keep their native no-cancel
 entry. Blocking occurs outside the transaction through an atomic `ppoll` wait;
 `SA_RESTART`, `EINTR`, return masks, deadline and errno are preserved. Wait
-records have stable thread-owned storage, not pointers to automatic frames.
-A signal detaches a wait record before calling user code. Nested readers,
+records use a process-owned stable pool with O(1) normal recycling, not pointers
+to automatic frames. A signal detaches its matching wait row before user code. Nested readers,
 native `siglongjmp`, GNU `setcontext` and saved-stack resume therefore cannot
 leave a dangling consumer pointer or a half-decoded packet. Detached saved
-records remain pinned until normal resumption or thread exit; this is not a
-general continuation reclamation provider. No initialized jump interposer is
+records and referenced parents stay pinned with the process runtime; ordinary
+unreferenced returns recycle their rows. Pages remain process-owned, including
+after thread exit. This conservative policy is not a general continuation
+reclamation provider. No initialized jump interposer is
 required for this consumption boundary.
+
+## Linux asynchronous handler selection
+
+Before a Host mask exposes deferred fault numbers, the recipient moves their
+kernel level from a private notification to the original number. Shadow metadata
+remains until kernel selection binds it: a newer native same-number thread send
+coalesces with that earlier packet; a post-dequeue send remains a fresh instance.
+Both original fault numbers and ordinary native signals therefore participate
+in the kernel's own priority, thread/shared selection and restart decision.
+Guest return remaps the suspended Host mask before restoring delivery.
+
+The six original fault routes and private entries have a full outer kernel
+mask. They bind the selected immutable disposition and shadow packet before
+exposing the logical user action mask. Ordinary signal routes retain their
+native kernel masks. User masks, `SA_NODEFER`, saved return masks and valid
+ucontext edits remain observable through the public adapters. Installing
+`SIG_IGN` flushes a promoted original level in the kernel and invalidates its
+shadow metadata; a selected old frame keeps its old disposition/metadata, while
+fresh sends after restoration belong to the new generation. Retirement also
+synchronizes completed ignore generations before deciding `EBUSY`.
+
+This boundary requires configured bootstrap mask/wait interposition. Raw syscalls
+and private libc atomic mask-waits bypass its stable records and cannot be
+claimed to preserve temporary-mask reconstruction. It does not establish live
+VM/ART signal-protocol compatibility or independent asynchronous Guest queues.
 
 ## Descriptor and lifecycle ownership
 
@@ -145,7 +181,7 @@ Bootstrap/restore scans the actual tables of all live tasks, including private
 prevents router restoration. Empty masks do not retain notification ownership.
 
 Live recipient retirement refuses pending work with `EBUSY`. Thread exit drains
-only its own private notifications and discards its queue. The owner joins
+only its owned private/promoted kernel levels and discards its queue. The owner joins
 recipients, destroys the VM, closes/clears notification-bearing descriptors and
 quiesces saved continuations before restoring the router on the enabling thread.
 Other Host mask changes survive that restore.
@@ -175,9 +211,19 @@ independent read, blocking `setcontext` and close/context transfer. Bionic lacks
 public get/set/swapcontext and pthread cancellation APIs; unavailable cases are
 reported explicitly and do not count as Android coverage.
 
+The handler fixture compares actual native/routed handler entry order,
+execution/return masks and payloads for public atomic mask-waits, full/empty/
+asymmetric action masks, thread/shared queues, coalescing and selected action
+generations. Registration before channel bootstrap, same-number post-dequeue
+sends, ignore/restore windows and nested waits have separate comparisons.
+GNU-only cases cover cancellation before/after the final masked setup check,
+blocked cancellation and native saved-wait context abandonment/resumption on
+retained stacks, without linking the jump interposer.
+
 Separate fault-injection cases reject query/first-write failures, roll back
 partial action/helper restoration, retry successful rollback and verify that
-failed rollback pins the router without invoking its reclaim gate. GNU also
+failed rollback pins the router without invoking its reclaim gate. Bootstrap
+query/write/rollback failures also cover widening existing fault routes. GNU also
 denies writable mprotect during stdio restoration to check callback rollback;
 Bionic's verified native stdio path needs no table writes.
 
@@ -185,14 +231,16 @@ Other maintained fixtures cover fault recovery, metadata layouts, FD import and
 private tables, action generations, one-shots, native masks, pending discard,
 consumer cancellation and thread exit. Kernel/policy restrictions are reported
 as unavailable. Installed JNI validation additionally checks actual Guest calls,
-module close, runtime shutdown and JVM destruction. Android runs use the exact
+module close, runtime shutdown and JVM destruction. A separate installed JNI
+process injects terminal router damage after a successful call, then checks
+that subsequent calls, image close and shutdown refuse further execution and
+retain resources. The test owner disposes of that deliberately pinned process.
+Android runs use the exact
 selected JRE17 in a shell process, not an APK/ART compatibility claim.
 
-Asynchronous native/deferred **handler dispatch priority**, independent Guest
-queues/tagged sends, general saved-continuation lifetime and live VM/ART
-quiescence remain separate acceptance work. The consuming-order tests do not
-prove that the kernel's private RT helper delivery order equals the original
-signal handler order. Keep that distinction when enabling the explicit channel.
+Independent Guest queues/tagged sends, general saved-continuation lifetime and
+live VM/ART quiescence remain separate acceptance work. Native Host handler
+selection is covered only within the explicitly configured bootstrap contract.
 
 Upstream: [Linux signal selection](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c),
 [native signalfd copying](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c),

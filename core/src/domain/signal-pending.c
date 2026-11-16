@@ -108,6 +108,23 @@ int gw_signal_pending_put(struct gw_signal_pending *pending,
   }
 }
 
+int gw_signal_pending_peek(struct gw_signal_pending *pending, uint64_t eligible,
+                           siginfo_t *information) {
+  lock(pending);
+  uint64_t available =
+      atomic_load_explicit(&pending->present, memory_order_relaxed) & eligible;
+  if (!available || pending->closed) {
+    unlock(pending);
+    return 0;
+  }
+
+  int number = __builtin_ctzll(available) + 1;
+  *information = number < 32 ? pending->standard[number]
+                             : pending->first[number]->information;
+  unlock(pending);
+  return number;
+}
+
 int gw_signal_pending_take(struct gw_signal_pending *pending, uint64_t eligible,
                            siginfo_t *information) {
   lock(pending);

@@ -7,9 +7,10 @@ Normal JNI returns, Java exception propagation and surviving outer Java frames
 remain bridge compatibility obligations. See the
 [VM boundary and reproducer](jvm-jni/docs/en/NONLOCAL_VM.md).
 
-Current priority: remaining deferred Host dequeue ordering and native
-consumption/lifecycle windows. Independent Guest asynchronous delivery and
-general saved/resumable native contexts are deferred, not removed.
+Host deferred dequeue/handler ordering and native consumption/lifecycle windows
+are implemented and validated within the configured bootstrap contract. The
+remaining independent Guest asynchronous delivery and general saved/resumable
+native contexts are deferred, not removed.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
@@ -40,15 +41,6 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
 
 ## Implement independent Host and Guest signal delivery
 
-- Finish native-priority asynchronous Host handler dispatch across original
-  signals and private deferred notifications. The public Host channel now has
-  atomic Linux-ordered consuming waits/read/readv/stdio, native pointer/vector
-  error handling, jump-interposer-independent consumption windows, stable wait
-  records and transactional lifecycle rollback. Core and installed JNI tests
-  cover those boundaries. Kernel private RT **handler** delivery can still
-  differ from original-number priority; consuming-order coverage does not
-  establish handler-order equivalence. Keep this item until that routing model
-  and its concurrent selection are completed and verified.
 - Complete independent asynchronous dispositions/masks, pending queues, default
   actions and targets; keep overlapping registrations from replacing VM handlers.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,

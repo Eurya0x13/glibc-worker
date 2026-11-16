@@ -43,6 +43,7 @@ run(configure)
 targets = [
     "signal_deferred_test",
     "signal_ordering_test",
+    "signal_handler_order_test",
     "signal_restore_test",
     "carrier_lifecycle_test",
     "signal_relay_test",
@@ -60,6 +61,7 @@ inputs = [
     core / "CMakeLists.txt",
     core / "tests/signal_deferred.c",
     core / "tests/signal_ordering.c",
+    core / "tests/signal_handler_order.c",
     core / "tests/signal_restore.c",
     core / "tests/carrier_lifecycle.c",
     core / "tests/signal_relay.c",

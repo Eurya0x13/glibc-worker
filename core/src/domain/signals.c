@@ -63,8 +63,7 @@ struct signal_slot signal_slots[DOMAIN_FIXTURE_CARRIERS];
  * TLS-free registry, while Host mask/wait APIs avoid scanning that registry. */
 static _Thread_local struct signal_slot *host_recipient;
 static _Atomic unsigned deferred_recipients;
-extern int signal_select_recipient_prepare(void) __attribute__((weak));
-extern void *gw_signal_selection_interrupt(void *, void *)
+extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
     __attribute__((weak));
 
 unsigned signal_deferred_recipients(void) {
@@ -147,9 +146,11 @@ static void forward_host(int number, siginfo_t *info, void *context,
                          void *token, struct signal_slot *slot,
                          uintptr_t interrupted_tp, uint64_t entry_mask,
                          int selected) {
-  if (gw_signal_selection_interrupt) {
-    gw_signal_selection_interrupt(token, context);
-  }
+  uint64_t execution = entry_mask;
+  int mask_wait =
+      gw_signal_selection_interrupt
+          ? gw_signal_selection_interrupt(token, context, &execution)
+          : 0;
 
   if (number == SIGUSR2) {
     atomic_fetch_add_explicit(&domain_sr_deliveries, 1, memory_order_relaxed);
@@ -182,7 +183,10 @@ static void forward_host(int number, siginfo_t *info, void *context,
      * Assembly captured the actual kernel handler-entry mask before blocking.
      * https://github.com/torvalds/linux/blob/v6.12/include/linux/sched/signal.h
      * See sigmask_to_save(), including current->saved_sigmask. */
-    uint64_t effective = signal_host_logical_mask(entry_mask);
+    int wide = signal_router_fault_notifications() &&
+               (gw_signal_fault_bits() & (UINT64_C(1) << (number - 1)));
+    uint64_t effective = signal_host_logical_mask(
+        wide ? (mask_wait ? execution : mask) : entry_mask);
     signal_router_forward_selected_domain(
         number, info, context, token, effective, &frame->uc_stack,
         gw_signal_interrupted_sp(frame), 0, selected);
@@ -246,20 +250,28 @@ static uint64_t synchronize_deferred_at(struct signal_slot *slot,
           _exit(125);
         }
         inspected = 1;
-        consumed =
-            !(pending & (UINT64_C(1) << (slot->deferred->notification[i] - 1)));
-        if (delivering == slot->deferred->notification[i] &&
-            signal_router_token_ignore_generation(token) !=
-                slot->deferred_ignore_generation[i]) {
-          /* A helper selected after an ignore cannot revive the old queue.
-           * A helper already selected before ignore keeps its old immutable
-           * token, just as a native in-flight signal frame keeps its action. */
-          consumed = 0;
+        int level = gw_signal_deferred_level(slot->deferred, i);
+        /* SIG_IGN flushes promoted original numbers in the kernel. Their
+         * absence alone does not prove selection; only the matching immutable
+         * delivery token can retain an already selected original packet. */
+        consumed = !(slot->deferred->promoted & original) &&
+                   !(pending & (UINT64_C(1) << (level - 1)));
+        if (delivering == level) {
+          /* A matching immutable token owns the old selected packet, even if
+           * a fresh original arrived after its kernel dequeue. */
+          consumed = signal_router_token_ignore_generation(token) ==
+                     slot->deferred_ignore_generation[i];
         }
       }
       /* SIG_IGN discards pending signals, not data already dequeued by a
        * native reader. Its result can still be in the consumption window. */
       if (!consumed) {
+        /* Installing SIG_IGN already flushed the old native level. A fresh
+         * native packet after restoration must not be drained as its wake. */
+        if (slot->deferred->promoted & original) {
+          slot->deferred->promoted &= ~original;
+          slot->deferred->armed &= ~original;
+        }
         gw_signal_deferred_discard(slot->deferred, faults[i]);
       }
       slot->deferred_ignore_generation[i] = generation;
@@ -297,6 +309,16 @@ uint64_t signal_carrier_mask(struct signal_slot *slot, uint64_t logical,
   }
   if (guest) {
     logical &= ~gw_signal_fault_bits();
+  } else if (gw_signal_pending_bits(&slot->deferred->pending) & ~logical &
+             ~slot->deferred->promoted) {
+    uint64_t mask = signal_router_selection_begin();
+    synchronize_deferred(slot);
+    gw_signal_deferred_prune(slot->deferred);
+    int error = gw_signal_deferred_promote(slot->deferred, ~logical);
+    if (error) {
+      signal_router_quarantine();
+    }
+    signal_router_selection_end(mask);
   }
   return gw_signal_deferred_mask(slot->deferred, logical, guest);
 }
@@ -388,14 +410,75 @@ int signal_host_collect_notification(int number, siginfo_t *information) {
 
 int signal_host_retirement_busy(void) {
   struct signal_slot *slot = host_slot();
-  return slot && slot->deferred_active &&
-         (slot->deferred->armed ||
-          gw_signal_pending_bits(&slot->deferred->pending));
+  if (!slot || !slot->deferred_active) {
+    return 0;
+  }
+
+  uint64_t mask = signal_router_selection_begin();
+  synchronize_deferred(slot);
+  gw_signal_deferred_prune(slot->deferred);
+  int busy =
+      slot->deferred->armed || gw_signal_pending_bits(&slot->deferred->pending);
+  signal_router_selection_end(mask);
+  return busy;
+}
+
+/* Original-number entries have a full outer mask. Bind their logical packet
+ * before exposing any user mask; a post-dequeue native send remains a separate
+ * kernel pending instance. The kernel-selected action token is immutable. */
+static int dispatch_promoted(int number, siginfo_t *info, void *context,
+                             struct signal_slot *slot, uintptr_t interrupted_tp,
+                             uint64_t entry_mask, void *kernel_token) {
+  if (!slot || !slot->deferred_active || info->si_code > 0 ||
+      !(slot->deferred->promoted & (UINT64_C(1) << (number - 1)))) {
+    return 0;
+  }
+
+  extern void signal_router_pending_observe(int) __attribute__((weak));
+  if (signal_router_pending_observe) {
+    signal_router_pending_observe(number);
+  }
+  int saved_errno = errno;
+  uint64_t mask = signal_router_selection_begin();
+  int guest_blocked =
+      interrupted_tp != slot->host_tp &&
+      (slot->exchange->host_execution_mask & (UINT64_C(1) << (number - 1)));
+  int ignored = 0;
+  uint64_t generation = signal_router_ignore_generation(number, &ignored);
+  int discard = guest_blocked &&
+                (ignored || generation != signal_router_token_ignore_generation(
+                                              kernel_token));
+  synchronize_deferred_at(slot, number, kernel_token);
+  siginfo_t original;
+  int target =
+      gw_signal_deferred_take_original(slot->deferred, number, &original);
+  int selected = 0;
+  if (target > 0 && !discard) {
+    if (guest_blocked) {
+      if (signal_host_defer(slot, &original)) {
+        signal_router_quarantine();
+      }
+    } else {
+      selected = signal_router_select(target, &original, kernel_token);
+    }
+  }
+  signal_router_selection_end(mask);
+
+  if (target > 0 && !discard && !guest_blocked) {
+    forward_host(target, &original, context, kernel_token, slot, interrupted_tp,
+                 entry_mask, selected);
+  }
+  errno = saved_errno;
+  return target >= 0;
 }
 
 static int dispatch_deferred(int number, siginfo_t *info, void *context,
                              struct signal_slot *slot, uintptr_t interrupted_tp,
                              uint64_t entry_mask, void *kernel_token) {
+  if (dispatch_promoted(number, info, context, slot, interrupted_tp, entry_mask,
+                        kernel_token)) {
+    return 1;
+  }
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -439,9 +522,15 @@ static int dispatch_deferred(int number, siginfo_t *info, void *context,
       (gw_signal_fault_bits() & (UINT64_C(1) << (number - 1))) &&
       (slot->exchange->host_execution_mask & (UINT64_C(1) << (number - 1)))) {
     int saved_errno = errno;
-    if (signal_host_defer(slot, info)) {
-      _exit(96);
+    uint64_t mask = signal_router_selection_begin();
+    int ignored = 0;
+    uint64_t generation = signal_router_ignore_generation(number, &ignored);
+    if (!ignored &&
+        generation == signal_router_token_ignore_generation(kernel_token) &&
+        signal_host_defer(slot, info)) {
+      signal_router_quarantine();
     }
+    signal_router_selection_end(mask);
     errno = saved_errno;
     return 1;
   }
@@ -679,17 +768,6 @@ static int signal_try_register(struct signal_slot *slot, struct exchange *e) {
       return -1;
     }
 
-    int prepared =
-        signal_select_recipient_prepare ? signal_select_recipient_prepare() : 0;
-    if (prepared) {
-      munmap(slot->deferred, sizeof *slot->deferred);
-      slot->deferred = NULL;
-      sigaltstack(&slot->old_stack, NULL);
-      munmap(slot->signal_stack, 65536);
-      errno = prepared;
-      return -1;
-    }
-
     uint64_t empty = 0;
     slot->consume_fd = syscall(SYS_signalfd4, -1, &empty, sizeof empty,
                                SFD_NONBLOCK | SFD_CLOEXEC);
@@ -764,14 +842,17 @@ int signal_prepare_release(struct signal_slot *slot, int thread_exiting) {
     synchronize_deferred(slot);
     gw_signal_deferred_prune(slot->deferred);
     if (thread_exiting) {
-      uint64_t notifications = gw_signal_deferred_notifications(slot->deferred);
+      uint64_t notifications = gw_signal_deferred_levels(slot->deferred);
       struct timespec zero = {0};
       siginfo_t information, original;
       int saved_errno = errno, number;
       while ((number = (int)syscall(SYS_rt_sigtimedwait, &notifications,
                                     &information, &zero,
                                     sizeof notifications)) > 0) {
-        gw_signal_deferred_take(slot->deferred, number, &original);
+        if (gw_signal_deferred_take_original(slot->deferred, number,
+                                             &original) < 0) {
+          gw_signal_deferred_take(slot->deferred, number, &original);
+        }
       }
       int error = errno;
       errno = saved_errno;

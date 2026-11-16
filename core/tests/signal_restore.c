@@ -26,13 +26,15 @@ static volatile sig_atomic_t delivered;
 static int backend(int number, const struct sigaction *action,
                    struct sigaction *old) {
   if (armed) {
-    int trigger = mode == 0   ? !action && number == SIGUSR1
-                  : mode == 1 ? action && number == SIGHUP
-                  : mode == 3 ? action && number == SIGRTMIN
-                  : mode == 5 ? action && number == SIGBUS
-                  : mode == 7 ? action && number == SIGRTMIN + 1
-                  : mode == 8 ? action && number == SIGRTMIN + 4
-                              : action && number == SIGTERM;
+    int trigger = mode == 0    ? !action && number == SIGUSR1
+                  : mode == 1  ? action && number == SIGHUP
+                  : mode == 3  ? action && number == SIGRTMIN
+                  : mode == 5  ? action && number == SIGBUS
+                  : mode == 7  ? action && number == SIGRTMIN + 1
+                  : mode == 8  ? action && number == SIGRTMIN + 4
+                  : mode == 9  ? !action && number == SIGSEGV
+                  : mode >= 10 ? action && number == SIGBUS
+                               : action && number == SIGTERM;
     if (!failed && trigger) {
       failed = 1;
       errno = EPERM;
@@ -41,7 +43,8 @@ static int backend(int number, const struct sigaction *action,
     if (failed && action &&
         ((mode == 4 && number == SIGUSR1) ||
          (mode == 7 && number == SIGRTMIN) ||
-         (mode == 8 && number == SIGTRAP))) {
+         (mode == 8 && number == SIGTRAP) ||
+         (mode == 11 && number == SIGSEGV))) {
       errno = EACCES;
       return -1;
     }
@@ -90,12 +93,47 @@ static void equal_action(const struct sigaction *a, const struct sigaction *b) {
   }
 }
 
+static void enable_wide_routes(const int *notifications) {
+  struct sigaction action = {.sa_handler = receive, .sa_flags = SA_RESTART};
+  sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGALRM);
+  assert(!sigaction(SIGSEGV, &action, NULL));
+  assert(!sigaction(SIGBUS, &action, NULL));
+  struct sigaction before_segv, before_bus, actual;
+  assert(!native(SIGSEGV, NULL, &before_segv));
+  assert(!native(SIGBUS, NULL, &before_bus));
+
+  armed = 1;
+  assert(signal_router_defer_faults(notifications) ==
+         (mode == 11 ? EIO : EPERM));
+  armed = 0;
+  if (mode == 11) {
+    assert(signal_router_error() == EIO);
+    assert(signal_router_verify() == EIO && signal_router_restore() == EIO);
+    return;
+  }
+
+  assert(!signal_router_error());
+  assert(!signal_router_fault_notifications());
+  assert(!native(SIGSEGV, NULL, &actual));
+  equal_action(&before_segv, &actual);
+  assert(!native(SIGBUS, NULL, &actual));
+  equal_action(&before_bus, &actual);
+  assert(!signal_router_defer_faults(notifications));
+  assert(!signal_router_verify());
+  assert(!signal_router_restore());
+}
+
 static void run_case(int index) {
   mode = index;
   native = (signal_router_backend)dlsym(RTLD_NEXT, "sigaction");
   assert(native && !signal_router_init_with_backend(backend));
   const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
+  if (mode >= 9) {
+    enable_wide_routes(notifications);
+    return;
+  }
   if (mode == 7) {
     armed = 1;
     assert(signal_router_defer_faults(notifications) == EIO);
@@ -176,7 +214,7 @@ static void run_case(int index) {
 int main(void) {
   struct rlimit limit = {0};
   assert(!setrlimit(RLIMIT_CORE, &limit));
-  const int count = 9;
+  const int count = 12;
   for (int i = 0; i < count; ++i) {
 #ifdef __ANDROID__
     if (i == 6) {
@@ -203,6 +241,8 @@ int main(void) {
       "\"partial_guest_setup_pins\":true,\"native_masks_preserved\":true,"
       "\"recoverable_retry\":true,\"enable_failure_pins\":true,"
       "\"registration_rollback_pins\":true,"
+      "\"wide_route_query_rollback\":true,\"wide_route_write_rollback\":true,"
+      "\"wide_route_rollback_pins\":true,"
 #ifdef __ANDROID__
       "\"native_stdio_no_rewrite\":true}"
 #else

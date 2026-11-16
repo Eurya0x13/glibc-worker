@@ -372,10 +372,21 @@ static void cancellation_probe(gw_signal_fd_reader backend, void *cookie) {
   errno = error;
 }
 
+struct reader_probe {
+  gw_signal_fd_reader function;
+  void *cookie;
+};
+
+static void probe_reader(void *argument) {
+  struct reader_probe *probe = argument;
+  cancellation_probe(probe->function, probe->cookie);
+}
+
 static ssize_t consuming_read(int descriptor, const struct iovec *vectors,
                               int count, gw_signal_fd_reader backend,
                               void *cookie, int scalar) {
   int saved_errno = errno;
+  struct reader_probe probe = {backend, cookie};
   for (;;) {
     cancellation_probe(backend, cookie);
     struct gw_signal_selection state;
@@ -416,8 +427,9 @@ static ssize_t consuming_read(int descriptor, const struct iovec *vectors,
       return -1;
     }
 
-    int ready = gw_signal_selection_sleep(
-        consumer, signal_host_logical_mask(physical), NULL, 1);
+    int ready =
+        gw_signal_selection_sleep(consumer, signal_host_logical_mask(physical),
+                                  NULL, 1, probe_reader, &probe);
     error = errno;
     cancellation_probe(backend, cookie);
     if (ready < 0) {

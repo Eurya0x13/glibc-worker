@@ -71,13 +71,31 @@ static void lock_writer(uint64_t *);
 static void unlock_writer(uint64_t);
 static int make_entry(struct disposition *);
 static int fault_lane(int);
+static int fault_routed(int);
+static int widen_host_fault_routes(void);
+
+static void wide_fault_mask(struct sigaction *action) {
+  uint64_t all = UINT64_MAX;
+  sigemptyset(&action->sa_mask);
+  memcpy(&action->sa_mask, &all, sizeof all);
+}
+
+static int wide_fault_mask_matches(const struct sigaction *action) {
+  for (int number = 1; number < NSIG; ++number) {
+    if (number != SIGKILL && number != SIGSTOP &&
+        !sigismember(&action->sa_mask, number)) {
+      return 0;
+    }
+  }
+  return 1;
+}
 
 static struct sigaction notification_action(struct disposition *record) {
   struct sigaction action = {
       .sa_sigaction = record->entry,
       .sa_flags =
           SA_SIGINFO | SA_ONSTACK | (record->action.sa_flags & SA_RESTART)};
-  sigemptyset(&action.sa_mask);
+  wide_fault_mask(&action);
   return action;
 }
 
@@ -187,6 +205,10 @@ int signal_router_defer_faults(const int *notifications) {
     }
   }
 
+  if (!result) {
+    result = widen_host_fault_routes();
+  }
+
   if (result) {
     while (installed) {
       --installed;
@@ -231,6 +253,56 @@ static int fault_lane(int number) {
     }
   }
   return -1;
+}
+
+/* Bootstrap owns registration/recipient quiescence. Make the six original
+ * fault entries bind their selected metadata before another user handler can
+ * run. Preserve flags (including restart), entry identity and logical masks.
+ */
+static int widen_host_fault_routes(void) {
+  const int faults[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGSYS};
+  struct sigaction before[GW_SIGNAL_FAULT_LANES];
+  unsigned changed = 0;
+  int error = 0;
+  for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
+    struct disposition *record =
+        atomic_load_explicit(&current[faults[i]], memory_order_acquire);
+    if (!record || !record->entry ||
+        (!fault_routed(faults[i]) && (record->action.sa_handler == SIG_DFL ||
+                                      record->action.sa_handler == SIG_IGN))) {
+      continue;
+    }
+    if (system_action(faults[i], NULL, &before[i])) {
+      error = errno;
+      break;
+    }
+    if (before[i].sa_sigaction != record->entry) {
+      if ((record->action.sa_flags & SA_RESETHAND) &&
+          before[i].sa_handler == SIG_DFL) {
+        continue;
+      }
+      error = EBUSY;
+      break;
+    }
+
+    struct sigaction wide = before[i];
+    wide_fault_mask(&wide);
+    if (system_action(faults[i], &wide, NULL)) {
+      error = errno;
+      break;
+    }
+    changed |= 1u << i;
+  }
+  if (!error) {
+    return 0;
+  }
+
+  for (int i = GW_SIGNAL_FAULT_LANES - 1; i >= 0; --i) {
+    if ((changed & (1u << i)) && system_action(faults[i], &before[i], NULL)) {
+      error = signal_router_quarantine();
+    }
+  }
+  return error;
 }
 
 static int fault_routed(int number) {
@@ -562,6 +634,10 @@ int signal_router_action(int number, const struct sigaction *action,
       installed.sa_flags |= SA_ONSTACK;
     }
   }
+  if (lane >= 0 && next->entry && installed.sa_sigaction == next->entry) {
+    wide_fault_mask(&installed);
+  }
+
   struct sigaction replaced;
   int status = system_action(number, &installed, &replaced);
   int error = errno;
@@ -862,7 +938,8 @@ int signal_router_verify(void) {
       struct disposition *record = signal_router_current_token(faults[i]);
       if (action.sa_sigaction != record->entry ||
           !(action.sa_flags & SA_SIGINFO) || (action.sa_flags & SA_RESETHAND) ||
-          ((action.sa_flags ^ record->action.sa_flags) & SA_RESTART)) {
+          ((action.sa_flags ^ record->action.sa_flags) & SA_RESTART) ||
+          !wide_fault_mask_matches(&action)) {
         return EBUSY;
       }
     }
@@ -910,11 +987,17 @@ int signal_router_verify(void) {
       if (((unsigned)actual.sa_flags & flags) != (expected_flags & flags)) {
         return EBUSY;
       }
-      for (int blocked = 1; blocked < NSIG; ++blocked) {
-        if (blocked != SIGKILL && blocked != SIGSTOP &&
-            sigismember(&actual.sa_mask, blocked) !=
-                sigismember(&record->action.sa_mask, blocked)) {
-          return EBUSY;
+      int wide = notifications && fault_lane(number) >= 0 && custom;
+      if (wide && !wide_fault_mask_matches(&actual)) {
+        return EBUSY;
+      }
+      if (!wide) {
+        for (int blocked = 1; blocked < NSIG; ++blocked) {
+          if (blocked != SIGKILL && blocked != SIGSTOP &&
+              sigismember(&actual.sa_mask, blocked) !=
+                  sigismember(&record->action.sa_mask, blocked)) {
+            return EBUSY;
+          }
         }
       }
     }

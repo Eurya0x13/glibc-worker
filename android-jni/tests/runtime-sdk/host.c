@@ -36,6 +36,7 @@ struct application {
   JavaVM *vm;
   int worker;
   int nonlocal;
+  int router_quarantine;
   const struct gw_loader_api_v1 *loader;
   uint64_t module;
 };
@@ -1129,6 +1130,34 @@ static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
   assert(closed == GW_OK);
 }
 
+static void router_quarantine_case(struct application *app, JNIEnv *env,
+                                   jclass cls) {
+  struct gw_loader_error error = {0};
+  void *entry = NULL;
+  assert(app->loader->find(env, app->module, "sdk_nonlocal_probe", "(I)I",
+                           &entry, &error) == GW_OK);
+  jint (*call)(JNIEnv *, jclass, jint) = entry;
+  assert(call(env, cls, 0) == 73 && !(*env)->ExceptionCheck(env));
+  unsigned retained = signal_router_retained();
+  assert(signal_router_quarantine() == EIO);
+
+  assert(!call(env, cls, 0) && (*env)->ExceptionCheck(env));
+  (*env)->ExceptionClear(env);
+  assert(full_host_state() == GW_HOST_QUARANTINED);
+  assert(app->loader->close(env, app->module, &error) == GW_ERROR);
+  assert(error.code == GW_E_QUARANTINED);
+  assert(gw_host_runtime_shutdown() == EIO);
+  assert(signal_router_restore() == EIO);
+  assert(signal_host_relay_running());
+  assert(signal_router_retained() >= retained);
+  puts(
+      "{\"result\":\"PASS\",\"case\":\"router-quarantine\","
+      "\"warmup\":true,\"admission_rejected\":true,\"close_rejected\":true,"
+      "\"shutdown_rejected\":true,\"resources_retained\":true}");
+  fflush(NULL);
+  _exit(0); /* The test owner disposes of this intentionally pinned process. */
+}
+
 static void *application_run(void *argument) {
   struct application *app = argument;
   JavaVM *vm = app->vm;
@@ -1137,6 +1166,9 @@ static void *application_run(void *argument) {
   assert((*vm)->AttachCurrentThread(vm, &env, NULL) == JNI_OK);
   jclass cls = (*env)->FindClass(env, "SdkProbe");
   assert(cls);
+  if (app->router_quarantine) {
+    router_quarantine_case(app, env, cls);
+  }
   const char *fatal_mode = getenv("GW_TEST_FATAL_MODE");
   if (fatal_mode) {
     int selected = atoi(fatal_mode);
@@ -1309,11 +1341,13 @@ int main(int argc, char **argv) {
   assert(loader->open(env, argv[6], 0, &library, &error) == GW_OK);
   assert(!(*env)->ExceptionCheck(env));
   int nonlocal = !strcmp(argv[8], "nonlocal");
-  struct application app = {.vm = vm,
-                            .worker = worker,
-                            .nonlocal = nonlocal,
-                            .loader = loader,
-                            .module = library.handle};
+  struct application app = {
+      .vm = vm,
+      .worker = worker,
+      .nonlocal = nonlocal,
+      .router_quarantine = !strcmp(argv[8], "router-quarantine"),
+      .loader = loader,
+      .module = library.handle};
   pthread_t thread;
   assert(!pthread_create(&thread, NULL, application_run, &app));
   assert(!pthread_join(thread, NULL));

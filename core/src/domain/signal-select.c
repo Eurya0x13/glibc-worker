@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "signal-select.h"
 #include "signal_channel.h"
+#include "signal-stack.h"
 #include "signal-router.h"
 #include "signals.h"
 #include "nonlocal-mask.h"
@@ -104,13 +105,23 @@ static uint64_t candidates(struct gw_signal_selection *state, uint64_t wanted,
   }
 
   int number = __builtin_ctzll(shadow) + 1;
-  *helper = notification(state->deferred, number);
+  *helper = state->deferred->promoted & bit(number)
+                ? number
+                : notification(state->deferred, number);
   uint64_t higher = gw_signal_fault_bits() & (bit(number) | (bit(number) - 1));
   return (wanted & higher) | bit(*helper);
 }
 
 static int resolve_selection(struct gw_signal_selection *state, int helper,
                              int number, siginfo_t *information) {
+  if (state->deferred) {
+    int original =
+        gw_signal_deferred_take_original(state->deferred, number, information);
+    if (original >= 0) {
+      return original;
+    }
+  }
+
   if (helper && number != helper && state->deferred &&
       gw_signal_selection_pending(state, bit(number))) {
     /* Native same-number thread input coalesces with the older deferred
@@ -221,7 +232,9 @@ ssize_t gw_signal_selection_copy(struct gw_signal_selection *state,
   while (syscall(SYS_rt_sigtimedwait, &wake, &unused, &zero, 8) > 0) {
   }
 
-  queue->armed &= ~bit(SIGSEGV);
+  if (!(queue->promoted & bit(SIGSEGV))) {
+    queue->armed &= ~bit(SIGSEGV);
+  }
   int rearmed = gw_signal_deferred_arm(queue);
   if (rearmed) {
     errno = rearmed;
@@ -251,7 +264,9 @@ int gw_signal_selection_wait_copy(struct gw_signal_selection *state,
   siginfo_t unused;
   while (syscall(SYS_rt_sigtimedwait, &wake, &unused, &zero, 8) > 0) {
   }
-  queue->armed &= ~bit(SIGSEGV);
+  if (!(queue->promoted & bit(SIGSEGV))) {
+    queue->armed &= ~bit(SIGSEGV);
+  }
   int rearmed = gw_signal_deferred_arm(queue);
   if (rearmed) {
     errno = rearmed;
@@ -267,105 +282,212 @@ int gw_signal_selection_wait_copy(struct gw_signal_selection *state,
 }
 
 struct sleep_record {
-  struct sleep_record *next;
-  uint64_t return_mask;
-  volatile sig_atomic_t interrupted, restart;
+  uintptr_t syscall_stack;
+  struct sleep_record *next, *previous;
+  uint64_t return_mask, execution_mask;
+  volatile sig_atomic_t interrupted, restart, retired, pinned;
 };
+
+_Static_assert(offsetof(struct sleep_record, syscall_stack) == 0,
+               "atomic wait assembly ABI");
+extern char gw_signal_wait_resume[];
+
+int gw_signal_wait_result(long result) {
+  if (result < 0 && result >= -4095) {
+    errno = -result;
+    return -1;
+  }
+  return result;
+}
 
 struct sleep_page {
   struct sleep_page *next;
   struct sleep_record records[32];
 };
 
-static _Thread_local struct sleep_page *pages;
-static _Thread_local struct sleep_record *available;
+/* Pages and abandoned/saved rows stay pinned with the process runtime. Normal
+ * returns recycle rows in O(1), including across Host threads without Guest
+ * recipients. Raw mmap under a short masked lock avoids first-use pthread TLS
+ * allocation from a signal handler. No automatic stack pointer is published.
+ */
+static struct sleep_page *sleep_pages;
+static struct sleep_record *sleep_available;
+static atomic_flag sleep_lock = ATOMIC_FLAG_INIT;
 static _Thread_local _Atomic(struct sleep_record *) waiting;
 _Static_assert(ATOMIC_POINTER_LOCK_FREE == 2, "signal wait publication");
-static pthread_key_t sleep_key;
-static int sleep_key_error;
-static pthread_once_t sleep_once = PTHREAD_ONCE_INIT;
 
-static void destroy_sleep_records(void *argument) {
-  (void)argument;
-  uint64_t mask = gw_nonlocal_mask_block();
-  int saved_errno = errno;
-  waiting = NULL;
-  available = NULL;
-  while (pages) {
-    struct sleep_page *next = pages->next;
-    munmap(pages, sizeof *pages);
-    pages = next;
+static void lock_sleep_records(void) {
+  while (atomic_flag_test_and_set_explicit(&sleep_lock, memory_order_acquire)) {
   }
-  gw_nonlocal_mask_restore(mask);
-  errno = saved_errno;
 }
 
-static void prepare_key(void) {
-  sleep_key_error = pthread_key_create(&sleep_key, destroy_sleep_records);
+static void unlock_sleep_records(void) {
+  atomic_flag_clear_explicit(&sleep_lock, memory_order_release);
 }
 
 int signal_select_prepare(void) {
-  pthread_once(&sleep_once, prepare_key);
-  return sleep_key_error;
+  return 0;
 }
 
 static struct sleep_record *sleep_record(void) {
-  if (!available) {
-    struct sleep_page *page = mmap(NULL, sizeof *page, PROT_READ | PROT_WRITE,
-                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  lock_sleep_records();
+  if (!sleep_available) {
+    struct sleep_page *page =
+        (void *)syscall(SYS_mmap, NULL, sizeof *page, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED) {
+      unlock_sleep_records();
       return NULL;
     }
 
-    page->next = pages;
-    pages = page;
+    page->next = sleep_pages;
+    sleep_pages = page;
     for (unsigned i = 0; i < 32; ++i) {
-      page->records[i].next = available;
-      available = &page->records[i];
+      page->records[i].next = sleep_available;
+      sleep_available = &page->records[i];
     }
   }
 
-  struct sleep_record *record = available;
-  available = record->next;
-  record->interrupted = record->restart = 0;
+  struct sleep_record *record = sleep_available;
+  sleep_available = record->next;
+  unlock_sleep_records();
+  struct sleep_record *previous =
+      atomic_load_explicit(&waiting, memory_order_acquire);
+  while (previous && previous->retired) {
+    previous = previous->previous;
+  }
+  if (previous) {
+    previous->pinned = 1;
+  }
+  record->previous = previous;
+  record->syscall_stack = 0;
+  record->interrupted = record->restart = record->retired = record->pinned = 0;
   return record;
 }
 
-int signal_select_recipient_prepare(void) {
-  uint64_t mask = gw_nonlocal_mask_block();
-  int error = pthread_setspecific(sleep_key, (void *)1);
-  if (!error) {
-    struct sleep_record *record = sleep_record();
-    if (record) {
-      record->next = available;
-      available = record;
-    } else {
-      error = errno;
-    }
+static void release_sleep_record(struct sleep_record *record) {
+  record->retired = 1;
+  if (record->pinned) {
+    return;
   }
-  gw_nonlocal_mask_restore(mask);
-  return error;
+  lock_sleep_records();
+  record->next = sleep_available;
+  sleep_available = record;
+  unlock_sleep_records();
 }
 
-void *gw_signal_selection_interrupt(void *token, void *context) {
-  struct sleep_record *record =
-      atomic_exchange_explicit(&waiting, NULL, memory_order_acq_rel);
+void *gw_signal_mask_wait_begin(uint64_t execution) {
+  uint64_t mask = gw_nonlocal_mask_block();
+  execution = signal_host_physical_mask(execution);
+  int error = signal_router_error();
+  struct sleep_record *record = error ? NULL : sleep_record();
   if (!record) {
+    error = error ? error : errno;
+    gw_nonlocal_mask_restore(mask);
+    errno = error;
     return NULL;
   }
 
-  /* Detach before the user handler can enter another consumer or abandon the
-   * interrupted native stack. Keep detached records until normal ppoll return
-   * or thread exit, including saved signal-frame setcontext resumptions. */
-  record->interrupted = 1;
-  record->restart = signal_router_token_restart(token);
-  ucontext_t *frame = context;
-  memcpy(&frame->uc_sigmask, &record->return_mask, sizeof record->return_mask);
+  record->return_mask = mask;
+  record->execution_mask = execution;
+  atomic_store_explicit(&waiting, record, memory_order_release);
   return record;
 }
 
+uint64_t gw_signal_mask_wait_execution(void *argument) {
+  return ((struct sleep_record *)argument)->execution_mask;
+}
+
+int gw_signal_mask_wait_end(void *argument, int result, int error) {
+  struct sleep_record *record = argument;
+  uint64_t returned = gw_nonlocal_mask_block();
+  struct sleep_record *expected = record;
+  atomic_compare_exchange_strong_explicit(&waiting, &expected, record->previous,
+                                          memory_order_acq_rel,
+                                          memory_order_acquire);
+  uint64_t mask = record->interrupted ? returned : record->return_mask;
+  release_sleep_record(record);
+  gw_nonlocal_mask_restore(mask);
+  errno = error;
+  return result;
+}
+
+#ifndef __ANDROID__
+static void cancelled_mask_wait(void *record) {
+  gw_signal_mask_wait_end(record, -1, ECANCELED);
+}
+#endif
+
+static void cancellation_check(void *record, void (*probe)(void *),
+                               void *argument) {
+#ifndef __ANDROID__
+  /* A cancellation before the mask-wait must not disappear between its last
+   * cancellation check and syscall entry. Delivery stays blocked throughout
+   * this short cleanup scope; a later SIGCANCEL stays kernel-pending until the
+   * atomic wait installs its execution mask. The supplied native probe keeps
+   * GNU FILE no-cancel reads non-cancellable. Interrupted raw waits return
+   * EINTR and their caller checks cancellation after ordinary mask retirement.
+   * No automatic cleanup pointer remains published while a user handler runs.
+   * https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_cancel.c
+   */
+  pthread_cleanup_push(cancelled_mask_wait, record);
+  probe(argument);
+  pthread_cleanup_pop(0);
+#else
+  (void)record;
+  probe(argument);
+#endif
+}
+
+static void test_cancel(void *unused) {
+  (void)unused;
+#ifndef __ANDROID__
+  pthread_testcancel();
+#endif
+}
+
+void gw_signal_mask_wait_cancel_check(void *record) {
+  cancellation_check(record, test_cancel, NULL);
+}
+
+int gw_signal_selection_interrupt(void *token, void *context,
+                                  uint64_t *execution) {
+  ucontext_t *frame = context;
+#if defined(__x86_64__)
+  uintptr_t pc = frame->uc_mcontext.gregs[REG_RIP];
+#else
+  uintptr_t pc = frame->uc_mcontext.pc;
+#endif
+  if (pc != (uintptr_t)gw_signal_wait_resume) {
+    return 0;
+  }
+
+  uintptr_t stack = gw_signal_interrupted_sp(frame);
+  struct sleep_record *record =
+      atomic_load_explicit(&waiting, memory_order_acquire);
+  while (record && (record->retired || record->syscall_stack != stack)) {
+    record = record->previous;
+  }
+  if (!record) {
+    return 0;
+  }
+
+  /* A kernel may construct several frames before the first user instruction.
+   * Only the frame whose interrupted PC/SP belongs to this syscall owns its
+   * saved return mask. An inner frame keeps its own kernel-saved mask.
+   * Parent rows referenced by saved waits stay pinned, never recycled through
+   * a nonlocal exit or a later stack resume. */
+  atomic_store_explicit(&waiting, record->previous, memory_order_release);
+  record->interrupted = 1;
+  record->restart = signal_router_token_restart(token);
+  memcpy(&frame->uc_sigmask, &record->return_mask, sizeof record->return_mask);
+  *execution = record->execution_mask;
+  return 1;
+}
+
 int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
-                              const struct timespec *timeout, int restart) {
+                              const struct timespec *timeout, int restart,
+                              void (*probe)(void *), void *argument) {
   uint64_t mask = gw_nonlocal_mask_block();
   struct sleep_record *record = sleep_record();
   if (!record) {
@@ -376,26 +498,29 @@ int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
   uint64_t physical = signal_host_wait_mask(wanted);
   if (syscall(SYS_signalfd4, descriptor, &physical, sizeof physical, 0) < 0) {
     int error = errno;
-    record->next = available;
-    available = record;
+    release_sleep_record(record);
     gw_nonlocal_mask_restore(mask);
     errno = error;
     return -1;
   }
 
   record->return_mask = mask;
+  record->execution_mask = mask;
   waiting = record;
+  cancellation_check(record, probe, argument);
   struct pollfd poll = {.fd = descriptor, .events = POLLIN};
   int saved_errno = errno;
   struct timespec left;
   if (timeout) {
     left = *timeout;
   }
-  int result = syscall(SYS_ppoll, &poll, 1, timeout ? &left : NULL, &mask, 8);
+  int result = gw_signal_wait_result(gw_signal_wait_syscall(
+      record, SYS_ppoll, (long)&poll, 1, (long)(timeout ? &left : NULL),
+      (long)&mask, sizeof mask, 0));
   int error = errno;
   uint64_t returned_mask = gw_nonlocal_mask_block();
   if (waiting == record) {
-    waiting = NULL;
+    waiting = record->previous;
   }
 
   uint64_t empty = 0;
@@ -408,8 +533,7 @@ int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
 
   int interrupted = record->interrupted;
   int retry = restart && (!interrupted || record->restart);
-  record->next = available;
-  available = record;
+  release_sleep_record(record);
   gw_nonlocal_mask_restore(interrupted ? returned_mask : mask);
 
   if (result < 0 && error == EINTR && retry) {

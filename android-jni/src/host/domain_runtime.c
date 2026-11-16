@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "domain_runtime.h"
+#include "dlopen_backend.h"
 #include <time.h>
 #include <errno.h>
 #ifdef GW_DOMAIN_NONLOCAL
@@ -113,9 +114,29 @@ int gw_domain_host_active(void) {
   return current && current->domain;
 }
 
+static int reject_damaged_router(struct fb_call *call, int sequence) {
+  if (!signal_router_error()) {
+    return 0;
+  }
+
+  /* This is an ordinary Host boundary, never the asynchronous signal route.
+   * Quarantine may lock the loader. Do not resume a partially active Guest or
+   * reclaim its image/resources after an uncertain signal-state transition. */
+  gw_dlopen_quarantine();
+  call->error = GW_E_QUARANTINED;
+  call->result = (jvalue){0};
+  snprintf(call->diagnostic, sizeof call->diagnostic,
+           "Host signal router quarantined; discard process");
+  atomic_store_explicit(&call->response, sequence, memory_order_release);
+  return 1;
+}
+
 int gw_domain_command(struct host_context *host, struct fb_call *call,
                       int sequence) {
   (void)host;
+  if (reject_damaged_router(call, sequence)) {
+    return 1;
+  }
   if (!gw_domain_host_active()) {
     return 0;
   }
@@ -143,7 +164,11 @@ int gw_domain_command(struct host_context *host, struct fb_call *call,
     /* Guest RPCs may update guest_mask before yielding. The Host mask
      * belongs to this particular suspended Host frame, including when the
      * callback re-enters another native command. */
+    host_mask = signal_host_physical_mask(signal_host_logical_mask(host_mask));
     gw_nonlocal_mask_restore(host_mask);
+    if (reject_damaged_router(call, sequence)) {
+      return 1;
+    }
     if (current->jump_record) {
       route_guest_jump();
     }

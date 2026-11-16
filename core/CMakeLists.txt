@@ -28,7 +28,8 @@ add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-mask-interpose.c src/domain/signal-wait-interpose.c
   src/domain/signal-suspend-interpose.c src/domain/signal-fd-interpose.c
   src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S
-  src/domain/signal-stdio.c src/domain/signal-select.c)
+  src/domain/signal-stdio.c src/domain/signal-select.c
+  src/domain/signal-mask-wait.S)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 target_link_libraries(signal_interpose PUBLIC domains)
 target_link_options(signal_interpose INTERFACE -Wl,-u,sigaction -Wl,-u,signal
@@ -76,6 +77,12 @@ if(BUILD_TESTING)
   target_compile_options(signal_ordering_test PRIVATE -UNDEBUG)
   add_test(NAME signal_ordering COMMAND signal_ordering_test)
   set_tests_properties(signal_ordering PROPERTIES TIMEOUT 20)
+  add_executable(signal_handler_order_test tests/signal_handler_order.c)
+  target_link_libraries(signal_handler_order_test PRIVATE signal_interpose)
+  target_link_options(signal_handler_order_test PRIVATE -Wl,--export-dynamic)
+  target_compile_options(signal_handler_order_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_handler_order COMMAND signal_handler_order_test)
+  set_tests_properties(signal_handler_order PROPERTIES TIMEOUT 30)
   add_executable(signal_restore_test tests/signal_restore.c)
   target_link_libraries(signal_restore_test PRIVATE signal_interpose)
   target_compile_options(signal_restore_test PRIVATE -UNDEBUG)

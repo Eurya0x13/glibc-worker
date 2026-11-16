@@ -55,7 +55,8 @@ static struct timespec remaining(struct timespec deadline) {
 
 extern void gw_signal_consume_test_point(void) __attribute__((weak));
 
-static void cancellation_probe(wait_backend function) {
+static void cancellation_probe(void *argument) {
+  wait_backend function = *(wait_backend *)argument;
   int error = errno;
   sigset_t empty;
   sigemptyset(&empty);
@@ -110,7 +111,7 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
     if (timeout) {
       left = remaining(deadline);
     }
-    cancellation_probe(function);
+    cancellation_probe(&function);
     struct gw_signal_selection state;
     gw_signal_selection_begin(&state);
     siginfo_t selected;
@@ -132,7 +133,7 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
       if (gw_signal_consume_test_point) {
         gw_signal_consume_test_point();
       }
-      cancellation_probe(function);
+      cancellation_probe(&function);
       return result;
     }
     if (!result) {
@@ -146,10 +147,11 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
     if (timeout) {
       left = remaining(deadline);
     }
-    result = gw_signal_selection_sleep(descriptor, wanted,
-                                       timeout ? &left : NULL, 0);
+    result =
+        gw_signal_selection_sleep(descriptor, wanted, timeout ? &left : NULL, 0,
+                                  cancellation_probe, &function);
     error = errno;
-    cancellation_probe(function);
+    cancellation_probe(&function);
     if (result <= 0) {
       errno = result ? error : EAGAIN;
       return -1;

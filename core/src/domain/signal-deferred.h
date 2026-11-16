@@ -14,7 +14,7 @@ struct gw_signal_deferred {
   struct gw_signal_pending pending;
   pid_t process, recipient;
   int notification[GW_SIGNAL_FAULT_LANES];
-  uint64_t armed;
+  uint64_t armed, promoted;
   int closed;
 };
 
@@ -28,6 +28,14 @@ int gw_signal_deferred_arm(struct gw_signal_deferred *);
 int gw_signal_deferred_take(struct gw_signal_deferred *, int, siginfo_t *);
 /* For a notification already absent from kernel pending: -1 if unarmed. */
 int gw_signal_deferred_collect(struct gw_signal_deferred *, int, siginfo_t *);
+/* Host unblocking materializes original kernel numbers before delivery. Keep
+ * shadow siginfo until selection, including a native same-number coalescence.
+ * The caller holds the registration writer and blocks catchable signals. */
+int gw_signal_deferred_promote(struct gw_signal_deferred *, uint64_t eligible);
+int gw_signal_deferred_take_original(struct gw_signal_deferred *, int,
+                                     siginfo_t *);
+int gw_signal_deferred_level(const struct gw_signal_deferred *, int lane);
+uint64_t gw_signal_deferred_levels(const struct gw_signal_deferred *);
 void gw_signal_deferred_discard(struct gw_signal_deferred *, int);
 /* Host notification masks follow the corresponding original logical mask.
  * Guest execution blocks all notifications; original fault bits are unchanged.

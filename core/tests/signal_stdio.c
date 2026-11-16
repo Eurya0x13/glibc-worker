@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
+#include <sched.h>
 #include <sys/signalfd.h>
 #include <wchar.h>
 #ifdef __GLIBC__
@@ -168,6 +170,109 @@ static void *thread_reader(void *unused) {
 }
 
 #ifdef __GLIBC__
+static _Atomic long nocancel_tid;
+static _Atomic int nocancel_completed;
+static int nocancel_virtual;
+
+static void *nocancel_reader(void *unused) {
+  (void)unused;
+  struct exchange exchange = {.host_tid = syscall(SYS_gettid)};
+  if (nocancel_virtual) {
+    recipient = signal_acquire(&exchange);
+    assert(recipient);
+  }
+  FILE *stream = open_stream(nocancel_virtual, "r");
+  assert(!fcntl(fileno(stream), F_SETFL, 0));
+  /* GNU FILE's reviewed no-cancel flag selects __read_nocancel. Keep the
+   * native FILE and that policy across the translated blocking wait.
+   * https://github.com/bminor/glibc/blob/glibc-2.41/libio/libio.h
+   * https://github.com/bminor/glibc/blob/glibc-2.41/libio/fileops.c
+   */
+  stream->_flags2 |= 2;
+  assert(!pthread_cancel(pthread_self()));
+  atomic_store_explicit(&nocancel_tid, exchange.host_tid, memory_order_release);
+
+  struct signalfd_siginfo record;
+  assert(fread(&record, sizeof record, 1, stream) == 1);
+  atomic_store_explicit(&nocancel_completed, 1, memory_order_release);
+  check_metadata(&record);
+  assert(!fclose(stream));
+  if (nocancel_virtual) {
+    assert(!signal_prepare_release(recipient, 0));
+    signal_release(recipient);
+  }
+  pthread_testcancel();
+  assert(0);
+  return NULL;
+}
+
+static void nocancel_case(int virtual) {
+  nocancel_virtual = virtual;
+  if (virtual) {
+    assert(!signal_router_init());
+    const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
+                                 SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
+    assert(!signal_router_defer_faults(notifications));
+  }
+  native_signalfd = (void *)dlsym(RTLD_NEXT, "signalfd");
+  assert(native_signalfd);
+  sigset_t wanted;
+  sigemptyset(&wanted);
+  sigaddset(&wanted, SIGTRAP);
+  assert(!pthread_sigmask(SIG_BLOCK, &wanted, NULL));
+  pthread_t thread;
+  assert(!pthread_create(&thread, NULL, nocancel_reader, NULL));
+  long tid;
+  while (!(tid = atomic_load_explicit(&nocancel_tid, memory_order_acquire))) {
+    sched_yield();
+  }
+
+  char path[128];
+  snprintf(path, sizeof path, "/proc/self/task/%ld/syscall", tid);
+  int descriptor = open(path, O_RDONLY | O_CLOEXEC);
+  assert(descriptor >= 0);
+  for (;;) {
+    char state[256] = {0};
+    assert(pread(descriptor, state, sizeof state - 1, 0) > 0);
+    long call;
+    unsigned long fd, buffer, count;
+    if (sscanf(state, "%ld %lx %lx %lx", &call, &fd, &buffer, &count) == 4 &&
+        call == (virtual ? SYS_ppoll : SYS_read) && (virtual || count)) {
+      break;
+    }
+    void *result;
+    assert(pthread_tryjoin_np(thread, &result) == EBUSY);
+    sched_yield();
+  }
+  close(descriptor);
+  siginfo_t info = {.si_signo = SIGTRAP, .si_code = SI_QUEUE};
+  info.si_pid = getpid();
+  info.si_uid = getuid();
+  info.si_value.sival_int = 7193;
+  assert(!syscall(SYS_rt_tgsigqueueinfo, getpid(), tid, SIGTRAP, &info));
+  void *result;
+  assert(!pthread_join(thread, &result) && result == PTHREAD_CANCELED);
+  if (!atomic_load_explicit(&nocancel_completed, memory_order_acquire)) {
+    fprintf(stderr, "nocancel read cancelled early: virtual=%d\n", virtual);
+    assert(0);
+  }
+}
+
+static void nocancel_reads(void) {
+  for (int virtual = 0; virtual <= 1; ++virtual) {
+    pid_t child = fork();
+    assert(child >= 0);
+    if (!child) {
+      alarm(3);
+      nocancel_case(virtual);
+      _exit(0);
+    }
+    int status;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && !WEXITSTATUS(status));
+  }
+}
+
 static void denied_write_permission(void) {
   pid_t child = fork();
   assert(child >= 0);
@@ -204,6 +309,9 @@ static void denied_write_permission(void) {
 #endif
 
 int main(void) {
+#ifdef __GLIBC__
+  nocancel_reads();
+#endif
   assert(!signal_router_init());
   const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
@@ -270,7 +378,7 @@ int main(void) {
       "\"ordinary_files\":true,\"native_profile_restore\":true,"
       "\"per_reader_recipient\":true"
 #ifdef __GLIBC__
-      ",\"denied_write_permission\":true"
+      ",\"denied_write_permission\":true,\"native_nocancel_reads\":true"
 #endif
       "}");
 }

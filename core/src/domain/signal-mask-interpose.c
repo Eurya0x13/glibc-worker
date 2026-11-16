@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include "signal-router.h"
 #include "signals.h"
+#include "nonlocal-mask.h"
+#include "signal-libc-mask.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
@@ -61,29 +63,35 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
     errno = saved_errno;
     return EINVAL;
   }
-  uint64_t input = 0;
-  if (set) {
-    memcpy(&input, set, sizeof input);
-  }
-  sigset_t all, previous;
-  sigfillset(&all);
-  int result = apply(function, SIG_SETMASK, &all, &previous);
-  if (result) {
+  if (!set) {
+    sigset_t observed;
+    int result = apply(function, how, NULL, oldset ? &observed : NULL);
+    if (!result && oldset) {
+      uint64_t logical;
+      memcpy(&logical, &observed, sizeof logical);
+      logical = signal_host_logical_mask(logical);
+      sigemptyset(oldset);
+      memcpy(oldset, &logical, sizeof logical);
+    }
     errno = saved_errno;
     return result;
   }
-  uint64_t physical;
-  memcpy(&physical, &previous, sizeof physical);
-  uint64_t logical = signal_host_logical_mask(physical), next = logical;
-  if (set) {
-    next = how == SIG_BLOCK     ? logical | input
-           : how == SIG_UNBLOCK ? logical & ~input
-                                : input;
-  }
+
+  uint64_t input;
+  memcpy(&input, set, sizeof input);
+  input = gw_signal_libc_mask(input, how);
+  uint64_t physical = gw_nonlocal_mask_block();
+  uint64_t logical = signal_host_logical_mask(physical);
+  uint64_t next = how == SIG_BLOCK     ? logical | input
+                  : how == SIG_UNBLOCK ? logical & ~input
+                                       : input;
   next = signal_host_physical_mask(next);
-  sigset_t requested;
-  sigemptyset(&requested);
-  memcpy(&requested, &next, sizeof next);
+  if (signal_router_error()) {
+    gw_nonlocal_mask_restore(physical);
+    errno = saved_errno;
+    return EIO;
+  }
+
   if (oldset) {
     /* Publish before unmasking: a newly delivered handler may leave through
      * siglongjmp and must still observe the completed mask operation's output.
@@ -91,9 +99,10 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
     sigemptyset(oldset);
     memcpy(oldset, &logical, sizeof logical);
   }
-  result = apply(function, SIG_SETMASK, &requested, NULL);
+  int result =
+      syscall(SYS_rt_sigprocmask, SIG_SETMASK, &next, NULL, 8) ? errno : 0;
   if (result) {
-    apply(function, SIG_SETMASK, &previous, NULL);
+    gw_nonlocal_mask_restore(physical);
   }
   errno = saved_errno;
   return result;

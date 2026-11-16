@@ -26,7 +26,17 @@ int gw_signal_selection_wait_copy(struct gw_signal_selection *, siginfo_t *,
                                   const siginfo_t *);
 /* Wait without consuming anything. Its stable record can survive a Host
  * setcontext/longjmp; no pointer to the abandoned call stack is published. */
-int gw_signal_selection_sleep(int, uint64_t, const struct timespec *, int);
-void *gw_signal_selection_interrupt(void *, void *);
+int gw_signal_selection_sleep(int, uint64_t, const struct timespec *, int,
+                              void (*)(void *), void *);
+int gw_signal_selection_interrupt(void *, void *, uint64_t *);
+/* Begin leaves delivery blocked until the caller's raw atomic mask-wait.
+ * End restores the caller mask/valid handler edits and retires the stable row.
+ */
+long gw_signal_wait_syscall(void *, long, long, long, long, long, long, long);
+int gw_signal_wait_result(long);
+void *gw_signal_mask_wait_begin(uint64_t);
+uint64_t gw_signal_mask_wait_execution(void *);
+int gw_signal_mask_wait_end(void *, int result, int error);
+void gw_signal_mask_wait_cancel_check(void *);
 int signal_select_prepare(void);
 #endif

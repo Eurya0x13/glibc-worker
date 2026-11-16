@@ -23,7 +23,6 @@ SUITES = [
     ),
 ]
 REMAINING = [
-    "Native/deferred asynchronous Host handler priority and routing windows",
     "Independent asynchronous Guest delivery and tagged sends",
     "General saved/resumable continuations and Guest targets beyond C-only GetVersion",
     "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",

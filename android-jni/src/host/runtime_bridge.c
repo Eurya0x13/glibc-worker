@@ -81,6 +81,10 @@ int gw_host_runtime_shutdown(void) {
   if (!owned_runtime) {
     return EINVAL;
   }
+  if (signal_router_error()) {
+    gw_dlopen_quarantine();
+    return EIO;
+  }
   if (signal_host_retirement_busy() || signal_host_relay_busy()) {
     return EBUSY;
   }

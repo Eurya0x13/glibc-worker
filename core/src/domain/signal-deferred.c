@@ -33,11 +33,77 @@ uint64_t gw_signal_notification_mask(const int *notifications,
   return logical;
 }
 
+int gw_signal_deferred_level(const struct gw_signal_deferred *deferred,
+                             int lane) {
+  return deferred->promoted & bit(faults[lane]) ? faults[lane]
+                                                : deferred->notification[lane];
+}
+
+uint64_t gw_signal_deferred_levels(const struct gw_signal_deferred *deferred) {
+  uint64_t levels = 0;
+  for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
+    if (deferred->armed & bit(faults[i])) {
+      levels |= bit(gw_signal_deferred_level(deferred, i));
+    }
+  }
+  return levels;
+}
+
+int gw_signal_deferred_take_original(struct gw_signal_deferred *deferred,
+                                     int number, siginfo_t *information) {
+  if (number < 1 || number > 64 || !(deferred->promoted & bit(number))) {
+    return -1;
+  }
+
+  deferred->promoted &= ~bit(number);
+  deferred->armed &= ~bit(number);
+  return gw_signal_pending_take(&deferred->pending, bit(number), information);
+}
+
+int gw_signal_deferred_promote(struct gw_signal_deferred *deferred,
+                               uint64_t eligible) {
+  struct timespec zero = {0};
+  for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
+    int original = faults[i];
+    uint64_t target = bit(original);
+    if (!(eligible & target) || (deferred->promoted & target)) {
+      continue;
+    }
+
+    siginfo_t information;
+    if (!gw_signal_pending_peek(&deferred->pending, target, &information)) {
+      continue;
+    }
+    if (deferred->armed & target) {
+      uint64_t wake = bit(deferred->notification[i]);
+      siginfo_t unused;
+      if (syscall(SYS_rt_sigtimedwait, &wake, &unused, &zero, 8) < 0) {
+        return errno == EAGAIN ? EBUSY : errno;
+      }
+      deferred->armed &= ~target;
+    }
+
+    /* Original numbers restore kernel selection and restart decisions. A
+     * concurrently queued newer standard packet may coalesce; the shadow
+     * keeps the earlier metadata until the selected frame/dequeue binds it.
+     * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
+     * See do_rt_tgsigqueueinfo(), legacy_queue() and dequeue_signal(). */
+    if (syscall(SYS_rt_tgsigqueueinfo, deferred->process, deferred->recipient,
+                original, &information)) {
+      int error = errno;
+      return gw_signal_deferred_arm(deferred) ? EIO : error;
+    }
+    deferred->armed |= target;
+    deferred->promoted |= target;
+  }
+  return 0;
+}
+
 void gw_signal_deferred_prune(struct gw_signal_deferred *deferred) {
   uint64_t pending = gw_signal_pending_bits(&deferred->pending), cancelled = 0;
   for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
     if ((deferred->armed & bit(faults[i])) && !(pending & bit(faults[i]))) {
-      cancelled |= bit(deferred->notification[i]);
+      cancelled |= bit(gw_signal_deferred_level(deferred, i));
     }
   }
   struct timespec zero = {0};
@@ -49,7 +115,9 @@ void gw_signal_deferred_prune(struct gw_signal_deferred *deferred) {
     if (number < 0) {
       break;
     }
-    gw_signal_deferred_take(deferred, number, &information);
+    if (gw_signal_deferred_take_original(deferred, number, &information) < 0) {
+      gw_signal_deferred_take(deferred, number, &information);
+    }
   }
   errno = saved_errno;
 }
@@ -89,7 +157,8 @@ int gw_signal_deferred_arm(struct gw_signal_deferred *deferred) {
   uint64_t pending = gw_signal_pending_bits(&deferred->pending);
   for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
     uint64_t original = bit(faults[i]);
-    if (!(pending & original) || (deferred->armed & original)) {
+    if (!(pending & original) ||
+        ((deferred->armed | deferred->promoted) & original)) {
       continue;
     }
     /* A level notification needs no sigqueue payload allocation guarantee.
@@ -166,7 +235,8 @@ uint64_t gw_signal_deferred_mask(const struct gw_signal_deferred *deferred,
                                  uint64_t logical, int guest) {
   uint64_t physical = logical & ~gw_signal_deferred_notifications(deferred);
   for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
-    if (guest || (logical & bit(faults[i]))) {
+    if (guest || (logical & bit(faults[i])) ||
+        (deferred->promoted & bit(faults[i]))) {
       physical |= bit(deferred->notification[i]);
     }
   }
