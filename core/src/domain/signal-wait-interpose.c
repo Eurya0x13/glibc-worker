@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #include "signal-router.h"
 #include "signals.h"
-#include "signal-consume.h"
+#include "signal-select.h"
 #include "nonlocal-mask.h"
 #include <dlfcn.h>
 #include <errno.h>
@@ -36,7 +36,7 @@ static wait_backend backend(void) {
 }
 
 int signal_wait_prepare(void) {
-  return backend() ? 0 : ENOSYS;
+  return backend() ? signal_select_prepare() : ENOSYS;
 }
 
 static struct timespec remaining(struct timespec deadline) {
@@ -53,25 +53,15 @@ static struct timespec remaining(struct timespec deadline) {
   return result.tv_sec < 0 ? (struct timespec){0} : result;
 }
 
-struct wait_arguments {
-  wait_backend function;
-  const sigset_t *set;
-  siginfo_t information;
-  const struct timespec *timeout;
-};
+extern void gw_signal_consume_test_point(void) __attribute__((weak));
 
-static long invoke_wait(void *argument) {
-  struct wait_arguments *args = argument;
-  return args->function(args->set, &args->information, args->timeout);
-}
-
-static long decode_wait(void *argument, long result) {
-  struct wait_arguments *args = argument;
-  if (result < 0) {
-    return result;
-  }
-  int original = gw_signal_consume_notification(result, &args->information);
-  return original < 0 ? result : original;
+static void cancellation_probe(wait_backend function) {
+  int error = errno;
+  sigset_t empty;
+  sigemptyset(&empty);
+  struct timespec zero = {0};
+  function(&empty, NULL, &zero);
+  errno = error;
 }
 
 int sigtimedwait(const sigset_t *set, siginfo_t *information,
@@ -86,12 +76,17 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
                    timeout->tv_nsec >= 1000000000))) {
     return function(set, information, timeout);
   }
+  if (signal_host_consumer_fd() < 0) {
+    return function(set, information, timeout);
+  }
+
   uint64_t wanted;
   memcpy(&wanted, set, sizeof wanted);
-  wanted = signal_host_wait_mask(wanted);
-  sigset_t physical;
-  sigemptyset(&physical);
-  memcpy(&physical, &wanted, sizeof wanted);
+  wanted = signal_host_logical_mask(wanted);
+  for (int number = 32; number < SIGRTMIN; ++number) {
+    wanted &= ~(UINT64_C(1) << (number - 1));
+  }
+  int saved_errno = errno;
   struct timespec deadline = {0}, left;
   if (timeout) {
     if (clock_gettime(CLOCK_MONOTONIC, &deadline)) {
@@ -115,21 +110,50 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
     if (timeout) {
       left = remaining(deadline);
     }
-    struct wait_arguments args = {.function = function,
-                                  .set = &physical,
-                                  .timeout = timeout ? &left : NULL};
-    int result = gw_signal_consume_call(invoke_wait, decode_wait, &args);
-    if (result < 0) {
+    cancellation_probe(function);
+    struct gw_signal_selection state;
+    gw_signal_selection_begin(&state);
+    siginfo_t selected;
+    int result = gw_signal_selection_take(&state, wanted, &selected);
+    int error = errno;
+    int descriptor = state.descriptor;
+    if (result > 0 &&
+        gw_signal_selection_wait_copy(&state, information, &selected) < 0) {
+      result = -1;
+      error = errno;
+    }
+    if (gw_signal_selection_end(&state)) {
+      errno = EIO;
+      return -1;
+    }
+
+    if (result > 0) {
+      errno = saved_errno;
+      if (gw_signal_consume_test_point) {
+        gw_signal_consume_test_point();
+      }
+      cancellation_probe(function);
       return result;
     }
-    if (result == 0) {
-      continue; /* Cancelled level notification; preserve the original deadline.
-                 */
+    if (!result) {
+      continue;
     }
-    if (information) {
-      *information = args.information;
+    if (error != EAGAIN) {
+      errno = error;
+      return -1;
     }
-    return result;
+
+    if (timeout) {
+      left = remaining(deadline);
+    }
+    result = gw_signal_selection_sleep(descriptor, wanted,
+                                       timeout ? &left : NULL, 0);
+    error = errno;
+    cancellation_probe(function);
+    if (result <= 0) {
+      errno = result ? error : EAGAIN;
+      return -1;
+    }
   }
 }
 

@@ -18,6 +18,10 @@ ctest --test-dir build --output-on-failure
 
 匹配的 GNU loader/libc 由 `scripts/build-glibc.sh` 构建；Host/Guest libffi 由 `scripts/build-ffi.sh /path/to/ndk-clang` 构建。两项都是可选依赖工具，不进入基础 core 库的链接依赖。配置和 Termux 补丁都归本项目。下载在 `vendor/`、源码缓存在 `work/`、runtime 在 `build/glibc-runtime/<ABI>/`，libffi 在 `build/ffi-{android,linux}/<ABI>/`。runtime 发布匹配的 loader、libc、libpthread、libm、librt 和 libdl；调用者不读取 glibc 的内部构建树。
 
+显式 Host 信道通过 `signal_channel.h` 在 VM 启动前配置，保留调用者指定的 RT 编号，
+适配 Host 待决查询、消费等待及 signalfd 后端，详见 [信号等待](SIGNAL_WAITING.md)。
+它不会自动启用 Guest 独立异步投递。
+
 ## 测试与边界
 
 `tests/` 自己维护真实 futex、通知竞态、配对交接、嵌套统计和受控时钟故障测试；需要 Clang ASan/UBSan 与 Python，输出在本项目 `build/test-work/`。CMake 配置 `-DBUILD_TESTING=OFF` 可只构建组件。

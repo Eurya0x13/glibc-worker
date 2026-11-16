@@ -64,7 +64,7 @@ static _Atomic int enabled;
 static _Atomic int guest_faults;
 static int fault_notifications[GW_SIGNAL_FAULT_LANES];
 static struct sigaction notification_original[GW_SIGNAL_FAULT_LANES];
-static _Atomic int deferred_faults;
+static _Atomic int deferred_faults, damaged;
 static uint64_t notification_initial_mask;
 static long notification_owner;
 static void lock_writer(uint64_t *);
@@ -85,6 +85,21 @@ uint64_t signal_router_token_ignore_generation(void *token) {
   return ((struct disposition *)token)->ignore_generation;
 }
 
+int signal_router_quarantine(void) {
+  atomic_store_explicit(&damaged, 1, memory_order_release);
+  return EIO;
+}
+
+int signal_router_error(void) {
+  return atomic_load_explicit(&damaged, memory_order_acquire) ? EIO : 0;
+}
+
+int signal_router_token_restart(void *token) {
+  struct disposition *record = token;
+  return record->action.sa_handler == SIG_IGN ||
+         !!(record->action.sa_flags & SA_RESTART);
+}
+
 const int *signal_router_fault_notifications(void) {
   return atomic_load_explicit(&deferred_faults, memory_order_acquire)
              ? fault_notifications
@@ -98,6 +113,10 @@ void *signal_router_current_token(int number) {
 }
 
 int signal_router_defer_faults(const int *notifications) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (!signal_router_enabled() || !signal_host_physical_mask) {
     return EINVAL;
   }
@@ -142,6 +161,9 @@ int signal_router_defer_faults(const int *notifications) {
   if (signal_stdio_enable) {
     int error = signal_stdio_enable();
     if (error) {
+      if (error == EIO) {
+        atomic_store_explicit(&damaged, 1, memory_order_release);
+      }
       unlock_writer(mask);
       return error;
     }
@@ -170,13 +192,15 @@ int signal_router_defer_faults(const int *notifications) {
       --installed;
       if (system_action(notifications[installed],
                         &notification_original[installed], NULL)) {
-        _exit(105);
+        atomic_store_explicit(&damaged, 1, memory_order_release);
+        result = EIO;
       }
     }
 
     if (signal_stdio_disable && signal_stdio_disable()) {
       /* Stdio callbacks remain mapped. A failed rollback is terminal for
        * this runtime; the owner disposes of the quarantined process. */
+      atomic_store_explicit(&damaged, 1, memory_order_release);
       result = EIO;
     }
   } else {
@@ -259,6 +283,10 @@ void signal_router_selection_end(uint64_t mask) {
 }
 
 int signal_router_init_with_backend(signal_router_backend backend) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (atomic_load(&enabled)) {
     return EALREADY;
   }
@@ -346,6 +374,10 @@ static int same_action(const struct sigaction *left,
  * Deliveries remain safe: immutable entries are complete before installation.
  * A layered backend cannot establish that its outer handler restores TLS. */
 int signal_router_adopt_chain(void *reviewed_chain_base) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (!atomic_load_explicit(&enabled, memory_order_acquire)) {
     return EINVAL;
   }
@@ -430,6 +462,11 @@ static int make_entry(struct disposition *record) {
  * Explicit dlsym(libc, ...) and raw syscalls are outside this interception. */
 int signal_router_action(int number, const struct sigaction *action,
                          struct sigaction *previous) {
+  if (signal_router_error()) {
+    errno = EIO;
+    return -1;
+  }
+
   if (!system_action) {
     errno = ENOSYS;
     return -1;
@@ -534,7 +571,8 @@ int signal_router_action(int number, const struct sigaction *action,
     if (system_action(notifications[lane], &helper, NULL)) {
       error = errno;
       if (system_action(number, &replaced, NULL)) {
-        _exit(106);
+        atomic_store_explicit(&damaged, 1, memory_order_release);
+        error = EIO;
       }
       status = -1;
     }
@@ -581,6 +619,10 @@ int signal_router_action(int number, const struct sigaction *action,
 }
 
 int signal_router_guest_faults(void) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (!signal_router_enabled()) {
     return EINVAL;
   }
@@ -594,7 +636,9 @@ int signal_router_guest_faults(void) {
     struct sigaction action;
     if (signal_router_action(number, NULL, &action) ||
         signal_router_action(number, &action, NULL)) {
-      return errno;
+      int error = errno;
+      atomic_store_explicit(&damaged, 1, memory_order_release);
+      return error;
     }
   }
   return 0;
@@ -796,6 +840,10 @@ _Noreturn void signal_router_default(int number) {
 }
 
 int signal_router_verify(void) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (signal_stdio_verify) {
     int error = signal_stdio_verify();
     if (error) {
@@ -893,7 +941,72 @@ int signal_router_guest_ready(void) {
   return 0;
 }
 
+struct restore_step {
+  int number, written;
+  struct sigaction before;
+  const struct sigaction *target;
+};
+
+static int snapshot_restore(struct restore_step *steps, unsigned *count,
+                            uint64_t *notification_bits) {
+  const int *notifications = signal_router_fault_notifications();
+  for (int number = 1; number < NSIG; ++number) {
+    const struct sigaction *target = managed[number] ? &original[number] : NULL;
+    if (notifications) {
+      for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
+        if (number == notifications[i]) {
+          target = &notification_original[i];
+          *notification_bits |= UINT64_C(1) << (number - 1);
+        }
+      }
+    }
+    if (!target) {
+      continue;
+    }
+
+    struct restore_step *step = &steps[*count];
+    step->number = number;
+    step->written = 0;
+    step->target = target;
+    if (system_action(number, NULL, &step->before)) {
+      return errno;
+    }
+    ++*count;
+  }
+  return 0;
+}
+
+static int apply_restore(struct restore_step *steps, unsigned count,
+                         unsigned *changed) {
+  for (; *changed < count; ++*changed) {
+    struct restore_step *step = &steps[*changed];
+    if (same_action(&step->before, step->target)) {
+      continue;
+    }
+    if (system_action(step->number, step->target, NULL)) {
+      return errno;
+    }
+    step->written = 1;
+  }
+  return 0;
+}
+
+static int rollback_restore(struct restore_step *steps, unsigned changed) {
+  int error = 0;
+  while (changed) {
+    struct restore_step *step = &steps[--changed];
+    if (step->written && system_action(step->number, &step->before, NULL)) {
+      error = EIO;
+    }
+  }
+  return error;
+}
+
 int signal_router_restore(void) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (signal_host_relay_running && signal_host_relay_running()) {
     return EBUSY;
   }
@@ -915,53 +1028,45 @@ int signal_router_restore(void) {
     return EBUSY;
   }
 
-  uint64_t previous = gw_nonlocal_mask_block(), notification_bits = 0;
+  uint64_t previous;
+  lock_writer(&previous);
   int error = signal_router_verify();
+  struct restore_step steps[NSIG];
+  unsigned count = 0, changed = 0;
+  uint64_t notification_bits = 0;
+  if (!error) {
+    error = snapshot_restore(steps, &count, &notification_bits);
+  }
+  if (!error) {
+    error = apply_restore(steps, count, &changed);
+  }
+  if (!error && notifications && signal_stdio_disable) {
+    error = signal_stdio_disable();
+    if (error == EIO) {
+      atomic_store_explicit(&damaged, 1, memory_order_release);
+    }
+  }
+
   if (error) {
-    gw_nonlocal_mask_restore(previous);
-    return error;  // Do not overwrite a handler installed outside this router.
+    int rollback = rollback_restore(steps, changed);
+    if (rollback) {
+      atomic_store_explicit(&damaged, 1, memory_order_release);
+      error = EIO;
+    }
+    unlock_writer(previous);
+    return error;
   }
 
-  for (int number = 1; number < NSIG; ++number) {
-    if (managed[number] && system_action(number, &original[number], NULL)) {
-      error = errno;
-      gw_nonlocal_mask_restore(previous);
-      return error;
-    }
-  }
-
-  if (notifications) {
-    for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
-      if (system_action(notifications[i], &notification_original[i], NULL)) {
-        error = errno;
-        gw_nonlocal_mask_restore(previous);
-        return error;
-      }
-      notification_bits |= UINT64_C(1) << (notifications[i] - 1);
-    }
-
-    if (signal_stdio_disable) {
-      error = signal_stdio_disable();
-      if (error) {
-        gw_nonlocal_mask_restore(previous);
-        return error;
-      }
-    }
-
-    atomic_store_explicit(&deferred_faults, 0, memory_order_release);
-  }
-
+  atomic_store_explicit(&deferred_faults, 0, memory_order_release);
   atomic_store(&enabled, 0);
   atomic_store(&guest_faults, 0);
 
-  /* Private mask bits must not leak into the Host mask after disabling the
-   * translator. Other Host mask changes made during runtime use are retained.
-   * The integration owner has joined the remaining recipients before restore.
-   */
+  /* Caller has joined recipients, destroyed the VM and frozen descriptor
+   * owners. Preserve all non-private mask changes across runtime shutdown. */
   if (notifications) {
     previous = (previous & ~notification_bits) | notification_initial_mask;
   }
-  gw_nonlocal_mask_restore(previous);
+  unlock_writer(previous);
   return 0;
 }
 
@@ -990,6 +1095,10 @@ unsigned signal_router_retained(void) {
 
 int signal_router_reclaim(const struct signal_router_quiescence *gate,
                           unsigned *reclaimed) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+
   if (!gate || gate->version != GW_SIGNAL_ROUTER_QUIESCENCE_V1 ||
       gate->size != sizeof *gate || !gate->enter || !gate->leave ||
       !reclaimed) {

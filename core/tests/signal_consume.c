@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "nonlocal.h"
 #include "signals.h"
-#include "signal-consume.h"
 #include "signal-router.h"
 #include <assert.h>
 #include <errno.h>
@@ -16,7 +15,7 @@
 static sigset_t wanted;
 static struct signal_slot *recipient;
 static int descriptor;
-static volatile sig_atomic_t action, inject, deliveries, helper_deliveries;
+static volatile sig_atomic_t action, inject, deliveries;
 static sigjmp_buf outside;
 static void drained(void);
 
@@ -43,8 +42,8 @@ static void receive(int number) {
   sigset_t pending;
   assert(!sigpending(&pending));
   assert(!sigismember(&pending, SIGTRAP));
-  assert(signal_host_retirement_busy());
-  assert(signal_prepare_release(recipient, 0) == EBUSY);
+  /* All kernel/helper ownership is committed before a handler can run. */
+  assert(!signal_host_retirement_busy());
   if (action == 1) {
     queue(8200);
     return;
@@ -100,70 +99,9 @@ void gw_signal_consume_test_point(void) {
   }
 }
 
-static long raw_read(void *argument) {
-  return syscall(SYS_read, descriptor, argument,
-                 sizeof(struct signalfd_siginfo));
-}
-
-static long cancelled_level_read(void *argument) {
-  uint64_t previous = gw_nonlocal_mask_block();
-  gw_signal_deferred_discard(recipient->deferred, SIGTRAP);
-  gw_nonlocal_mask_restore(previous);
-  return raw_read(argument);
-}
-
-static long decode_raw(void *argument, long result) {
-  if (result < 0) {
-    return result;
-  }
-  struct signalfd_siginfo *record = argument;
-  siginfo_t original;
-  return gw_signal_consume_notification(record->ssi_signo, &original);
-}
-
-static void helper_handler(int number, siginfo_t *information, void *context) {
-  (void)context;
-  assert(number == SIGTRAP && information->si_value.sival_int == 8100);
-  ++helper_deliveries;
-}
-
-static long delivered_level_read(void *argument) {
-  assert(!pthread_sigmask(SIG_UNBLOCK, &wanted, NULL));
-  assert(!pthread_sigmask(SIG_BLOCK, &wanted, NULL));
-  return raw_read(argument);
-}
-
-static void notification_ownership(void) {
-  /* Cancellation after a native invocation starts must not let its tombstone
-   * consume the fresh signal produced by the intervening Host handler. */
-  action = 1;
-  queue(8100);
-  inject = 1;
-  struct signalfd_siginfo record;
-  assert(gw_signal_consume_call(cancelled_level_read, decode_raw, &record) ==
-         0);
-  assert(read(descriptor, &record, sizeof record) == sizeof record);
-  verify(&record, 8200);
-  drained();
-  /* A kernel-selected notification handler owns that wake, not the paused
-   * read. Signal entry must exclude its own current number from collection. */
-  struct sigaction handler = {.sa_sigaction = helper_handler,
-                              .sa_flags = SA_SIGINFO},
-                   old;
-  sigemptyset(&handler.sa_mask);
-  assert(!sigaction(SIGTRAP, &handler, &old));
-  queue(8100);
-  assert(gw_signal_consume_call(delivered_level_read, decode_raw, &record) ==
-         -1);
-  assert(errno == EAGAIN && helper_deliveries == 1);
-  assert(!sigaction(SIGTRAP, &old, NULL));
-  drained();
-}
-
 #ifndef __ANDROID__
 static void cancelled_recipient(void *argument) {
   struct signal_slot *slot = argument;
-  assert(!gw_signal_consume_busy());
   assert(!signal_prepare_release(slot, 0));
   signal_release(slot);
 }
@@ -197,7 +135,7 @@ static void cancelled_copy(void) {
 #endif
 
 static void drained(void) {
-  assert(!gw_signal_consume_busy() && !signal_host_retirement_busy());
+  assert(!signal_host_retirement_busy());
   sigset_t pending;
   assert(!sigpending(&pending) && !sigismember(&pending, SIGTRAP));
   struct signalfd_siginfo information;
@@ -262,7 +200,7 @@ static void jumped_read(int vector) {
     }
     assert(!"native consumer returned after an outside jump");
   }
-  assert(value == 19 && !gw_nonlocal_pending() && !gw_signal_consume_busy());
+  assert(value == 19 && !gw_nonlocal_pending());
   struct signalfd_siginfo information;
   assert(read(descriptor, &information, sizeof information) ==
          sizeof information);
@@ -330,6 +268,8 @@ static void faulted_copy(void) {
   assert(readv(descriptor, &empty, 0) == 0);
   queue(8100);
   assert(readv(descriptor, &empty, 0) == 0);
+  unsigned char zero;
+  assert(read(descriptor, &zero, 0) == -1 && errno == EINVAL);
   struct signalfd_siginfo record;
   assert(read(descriptor, &record, 127) == -1 && errno == EINVAL);
   assert(read(descriptor, &record, sizeof record) == sizeof record);
@@ -361,12 +301,11 @@ int main(void) {
   jumped_read(0);
   jumped_read(1);
   consuming_waits();
-  notification_ownership();
   faulted_copy();
 #ifndef __ANDROID__
   cancelled_copy();
 #endif
-  assert(deliveries == 13);
+  assert(deliveries == 12);
   assert(!signal_prepare_release(recipient, 0));
   signal_release(recipient);
   assert(!close(descriptor));
@@ -377,8 +316,9 @@ int main(void) {
       "\"wait_unwind\":true,\"handler_fresh_signal\":true,"
       "\"nested_reader\":true,\"handler_local_jump\":true,"
       "\"native_efault_consumption\":true,\"zero_iovec\":true,"
-      "\"busy_retirement\":true,\"retirement_retry\":true,"
-      "\"cancelled_level_ownership\":true,\"selected_handler_ownership\":true,"
+      "\"scalar_zero_einval\":true,"
+      "\"committed_before_handler\":true,\"retirement_retry\":true,"
+      "\"no_stack_consumer\":true,"
       "\"ignore_after_consumption\":true,"
 #ifdef __ANDROID__
       "\"pthread_cancel_unavailable\":true}"

@@ -7,6 +7,10 @@
  * This does not virtualize Guest libc's independently resolved sigaction. */
 int signal_router_init(void);
 int signal_router_enabled(void);
+/* EIO pins a failed partial lifecycle until the owner disposes of the process.
+ * Do not reclaim entries, retry admission, or automatically terminate Host. */
+int signal_router_error(void);
+int signal_router_quarantine(void);
 typedef int (*signal_router_backend)(int, const struct sigaction *,
                                      struct sigaction *);
 /* Explicit backend must be the bottom Host libc registration API. Late
@@ -25,13 +29,13 @@ int signal_router_action(int, const struct sigaction *, struct sigaction *);
  * Kernel routing remains installed even while Host selects SIG_DFL/SIG_IGN.
  * The caller serializes registration and retains this layer until shutdown. */
 int signal_router_guest_faults(void);
-/* Internal, explicit integration trial. Reserve six otherwise unused RT
- * signals before starting the VM. General consuming-wait/lifetime integration
- * is not yet supplied by this opt-in fault channel. */
+/* Internal implementation of the public signal_channel.h bootstrap API.
+ * Reserve six otherwise unused RT numbers before starting the VM. */
 int signal_router_defer_faults(const int *notifications);
 const int *signal_router_fault_notifications(void);
 void *signal_router_current_token(int);
 uint64_t signal_router_token_ignore_generation(void *);
+int signal_router_token_restart(void *);
 /* Select deferred logical delivery under the same writer transaction as Host
  * registrations. No application handler runs while the transaction is held.
  * Selection returns 0 (ignore), 1 (handler) or 2 (default). It consumes the
@@ -44,6 +48,9 @@ int signal_router_select(int, const siginfo_t *, void *);
 uint64_t signal_router_ignore_generation(int, int *ignored);
 /* Join recipients and destroy the VM first. With a deferred channel, restore
  * runs on the enabling thread and restores its original private mask bits. */
+/* Recoverable native write failures roll back all changed actions and permit
+ * retry. Failed rollback returns EIO and pins the router in terminal failure.
+ */
 int signal_router_restore(void);
 void signal_router_forward(int, siginfo_t *, void *, void *);
 void signal_router_forward_domain(int, siginfo_t *, void *, void *, uint64_t,

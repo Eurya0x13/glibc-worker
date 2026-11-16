@@ -20,6 +20,11 @@ Outputs stay in this project's `build/`. Select Android through the CMake NDK to
 
 `scripts/build-glibc.sh` builds matching GNU loader/libc artifacts; `scripts/build-ffi.sh /path/to/ndk-clang` builds Host/Guest libffi. These optional dependency tools do not add link dependencies to the base core library. Configuration and Termux patches belong to core. Downloads use `vendor/`, sources use `work/`, runtime artifacts use `build/glibc-runtime/<ABI>/`, and libffi uses `build/ffi-{android,linux}/<ABI>/`. Runtime packaging publishes matching loader, libc, libpthread, libm, librt and libdl; callers do not inspect glibc's internal build tree.
 
+The explicit Host channel is configured through `signal_channel.h` before VM
+startup. It reserves caller-selected RT numbers and adapts Host pending queries,
+consuming waits and signalfd backends; see [signal waiting](SIGNAL_WAITING.md).
+It does not enable independent Guest asynchronous delivery automatically.
+
 ## Tests and boundaries
 
 `tests/` owns real futex, notification race, paired handoff, nested statistics and controlled clock-failure checks. They require Python and Clang ASan/UBSan; outputs use `build/test-work/`. Use `-DBUILD_TESTING=OFF` to build only components.

@@ -12,7 +12,7 @@ add_library(core STATIC src/bootstrap/loader_image.c src/bootstrap/clone.S
 add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/signals.c src/domain/signal-entry.S src/domain/signal-router.c
   src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-pending.c
-  src/domain/signal-deferred.c src/domain/signal-consume.c src/domain/signal-relay.c)
+  src/domain/signal-deferred.c src/domain/signal-relay.c)
 add_library(glibc_worker::domains ALIAS domains)
 target_compile_definitions(domains PRIVATE GW_DOMAIN_CHAIN)
 target_include_directories(domains PUBLIC
@@ -28,7 +28,7 @@ add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-mask-interpose.c src/domain/signal-wait-interpose.c
   src/domain/signal-suspend-interpose.c src/domain/signal-fd-interpose.c
   src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S
-  src/domain/signal-stdio.c)
+  src/domain/signal-stdio.c src/domain/signal-select.c)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 target_link_libraries(signal_interpose PUBLIC domains)
 target_link_options(signal_interpose INTERFACE -Wl,-u,sigaction -Wl,-u,signal
@@ -71,6 +71,16 @@ if(BUILD_TESTING)
   target_compile_options(signal_stdio_test PRIVATE -UNDEBUG)
   add_test(NAME signal_stdio COMMAND signal_stdio_test)
   set_tests_properties(signal_stdio PROPERTIES TIMEOUT 15)
+  add_executable(signal_ordering_test tests/signal_ordering.c)
+  target_link_libraries(signal_ordering_test PRIVATE signal_interpose)
+  target_compile_options(signal_ordering_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_ordering COMMAND signal_ordering_test)
+  set_tests_properties(signal_ordering PROPERTIES TIMEOUT 20)
+  add_executable(signal_restore_test tests/signal_restore.c)
+  target_link_libraries(signal_restore_test PRIVATE signal_interpose)
+  target_compile_options(signal_restore_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_restore COMMAND signal_restore_test)
+  set_tests_properties(signal_restore PROPERTIES TIMEOUT 20)
   add_executable(signal_pending_test tests/signal_pending.c)
   target_link_libraries(signal_pending_test PRIVATE domains)
   target_compile_options(signal_pending_test PRIVATE -UNDEBUG)

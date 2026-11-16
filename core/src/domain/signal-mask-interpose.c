@@ -109,16 +109,31 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
 }
 
 int sigpending(sigset_t *set) {
-  uint64_t pending;
-  if (syscall(SYS_rt_sigpending, &pending, sizeof pending)) {
+  if (!signal_router_fault_notifications()) {
+    return syscall(SYS_rt_sigpending, set, sizeof(uint64_t));
+  }
+  if (signal_router_error()) {
+    errno = EIO;
     return -1;
   }
-  if (signal_router_fault_notifications()) {
+
+  uint64_t mask = signal_router_selection_begin(), pending;
+  int result = syscall(SYS_rt_sigpending, &pending, sizeof pending);
+  if (!result) {
     pending = signal_host_pending(pending);
+    /* Validate/copy through the kernel before touching caller storage. Only
+     * the Linux kernel sigset bytes are output, as in native sigpending.
+     * Later arrivals need not appear in our earlier coherent snapshot. */
+    result = syscall(SYS_rt_sigpending, set, sizeof pending);
+    if (!result) {
+      memcpy(set, &pending, sizeof pending);
+    }
   }
-  sigemptyset(set);
-  memcpy(set, &pending, sizeof pending);
-  return 0;
+
+  int error = errno;
+  signal_router_selection_end(mask);
+  errno = error;
+  return result;
 }
 
 #ifdef __ANDROID__

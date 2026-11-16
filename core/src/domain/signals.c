@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "signals.h"
 #include "signal-stack.h"
-#include "signal-consume.h"
 #include "signal-relay.h"
 #include "raw_syscall.h"
 #include "nonlocal-mask.h"
@@ -11,6 +10,7 @@
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <string.h>
+#include <sys/signalfd.h>
 #if defined(__aarch64__)
 #include <asm/sigcontext.h>
 #endif
@@ -63,11 +63,8 @@ struct signal_slot signal_slots[DOMAIN_FIXTURE_CARRIERS];
  * TLS-free registry, while Host mask/wait APIs avoid scanning that registry. */
 static _Thread_local struct signal_slot *host_recipient;
 static _Atomic unsigned deferred_recipients;
-/* Standalone adoption fixtures have no consuming interposition target. */
-extern int gw_signal_consume_busy(void) __attribute__((weak));
-extern struct gw_signal_consumption *gw_signal_consume_interrupt(int)
-    __attribute__((weak));
-extern void gw_signal_consume_resume(struct gw_signal_consumption *)
+extern int signal_select_recipient_prepare(void) __attribute__((weak));
+extern void *gw_signal_selection_interrupt(void *, void *)
     __attribute__((weak));
 
 unsigned signal_deferred_recipients(void) {
@@ -150,6 +147,10 @@ static void forward_host(int number, siginfo_t *info, void *context,
                          void *token, struct signal_slot *slot,
                          uintptr_t interrupted_tp, uint64_t entry_mask,
                          int selected) {
+  if (gw_signal_selection_interrupt) {
+    gw_signal_selection_interrupt(token, context);
+  }
+
   if (number == SIGUSR2) {
     atomic_fetch_add_explicit(&domain_sr_deliveries, 1, memory_order_relaxed);
   }
@@ -193,8 +194,26 @@ static void forward_host(int number, siginfo_t *info, void *context,
   }
 }
 
+static uint64_t synchronize_deferred(struct signal_slot *);
+
 static struct signal_slot *host_slot(void) {
   return host_recipient;
+}
+
+struct gw_signal_deferred *signal_host_consumer(void) {
+  struct signal_slot *slot = host_slot();
+  if (!slot || !slot->deferred_active) {
+    return NULL;
+  }
+
+  synchronize_deferred(slot);
+  gw_signal_deferred_prune(slot->deferred);
+  return slot->deferred;
+}
+
+int signal_host_consumer_fd(void) {
+  struct signal_slot *slot = host_slot();
+  return slot && slot->deferred_active ? slot->consume_fd : -1;
 }
 
 /* Recipient-local maintenance, with catchable signals blocked. Registration
@@ -370,8 +389,7 @@ int signal_host_collect_notification(int number, siginfo_t *information) {
 int signal_host_retirement_busy(void) {
   struct signal_slot *slot = host_slot();
   return slot && slot->deferred_active &&
-         ((gw_signal_consume_busy && gw_signal_consume_busy()) ||
-          slot->deferred->armed ||
+         (slot->deferred->armed ||
           gw_signal_pending_bits(&slot->deferred->pending));
 }
 
@@ -588,12 +606,7 @@ static void dispatch_core(int number, siginfo_t *info, void *context,
 void domain_signal_dispatch(int number, siginfo_t *info, void *context,
                             struct signal_slot *slot, uintptr_t interrupted_tp,
                             void *token, uint64_t entry_mask) {
-  struct gw_signal_consumption *paused =
-      gw_signal_consume_interrupt ? gw_signal_consume_interrupt(number) : NULL;
   dispatch_core(number, info, context, slot, interrupted_tp, token, entry_mask);
-  if (paused) {
-    gw_signal_consume_resume(paused);
-  }
 }
 
 void signal_install(void) {
@@ -665,6 +678,31 @@ static int signal_try_register(struct signal_slot *slot, struct exchange *e) {
       munmap(slot->signal_stack, 65536);
       return -1;
     }
+
+    int prepared =
+        signal_select_recipient_prepare ? signal_select_recipient_prepare() : 0;
+    if (prepared) {
+      munmap(slot->deferred, sizeof *slot->deferred);
+      slot->deferred = NULL;
+      sigaltstack(&slot->old_stack, NULL);
+      munmap(slot->signal_stack, 65536);
+      errno = prepared;
+      return -1;
+    }
+
+    uint64_t empty = 0;
+    slot->consume_fd = syscall(SYS_signalfd4, -1, &empty, sizeof empty,
+                               SFD_NONBLOCK | SFD_CLOEXEC);
+    if (slot->consume_fd < 0) {
+      int error = errno;
+      munmap(slot->deferred, sizeof *slot->deferred);
+      slot->deferred = NULL;
+      sigaltstack(&slot->old_stack, NULL);
+      munmap(slot->signal_stack, 65536);
+      errno = error;
+      return -1;
+    }
+
     slot->deferred_active = 1;
     /* This empty queue starts in the current disposition generation. */
     memset(slot->deferred_ignore_generation, 0,
@@ -692,6 +730,7 @@ static int signal_try_register(struct signal_slot *slot, struct exchange *e) {
     sigaltstack(&slot->old_stack, NULL);
     munmap(slot->signal_stack, 65536);
     if (slot->deferred) {
+      syscall(SYS_close, slot->consume_fd);
       munmap(slot->deferred, sizeof *slot->deferred);
       slot->deferred = NULL;
       slot->deferred_active = 0;
@@ -721,10 +760,6 @@ void signal_register(struct signal_slot *slot, struct exchange *e) {
 int signal_prepare_release(struct signal_slot *slot, int thread_exiting) {
 #ifdef GW_DOMAIN_CHAIN
   if (slot && slot->deferred_active) {
-    if (!thread_exiting && slot == host_slot() && gw_signal_consume_busy &&
-        gw_signal_consume_busy()) {
-      return EBUSY;
-    }
     uint64_t mask = gw_nonlocal_mask_block();
     synchronize_deferred(slot);
     gw_signal_deferred_prune(slot->deferred);
@@ -778,6 +813,8 @@ void signal_unregister(struct signal_slot *slot) {
     if (gw_signal_deferred_close(slot->deferred)) {
       _exit(98);
     }
+    syscall(SYS_close, slot->consume_fd);
+    slot->consume_fd = -1;
     slot->deferred_active = 0;
     atomic_fetch_sub_explicit(&deferred_recipients, 1, memory_order_release);
     gw_nonlocal_mask_restore(mask);

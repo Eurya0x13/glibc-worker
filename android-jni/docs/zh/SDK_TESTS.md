@@ -16,6 +16,10 @@
 所有正向用例（包括原生恢复）均要求 `runtime-relay-lifecycle` 观测。
 拒绝不匹配 libc 则必须保留分发线程，并隔离已认领的桥。
 
+Host 延迟掩码用例在创建 VM 前调用安装后的公开接口
+`gw_host_signal_channel_enable`。core 的独立原生顺序、上下文和恢复失败用例负责覆盖
+消费事务，详见 [Host 信道契约](../../../core/docs/zh/SIGNAL_WAITING.md)。
+
 ## 原生展开验证
 
 使用 `-DGW_NATIVE_UNWIND_INTEGRATION=ON` 构建并安装 android-jni，然后给消费者 runner 传 `--native-unwind --nonlocal`，以链接 core 的显式拦截目标并构建匹配 Guest 服务。不传 --nonlocal 则检查普通同线程、worker 和缺少收养能力的普通 libc 拒绝路径。

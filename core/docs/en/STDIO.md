@@ -19,7 +19,7 @@ read and nonblocking `EAGAIN`, remain native results.
 | Host | Integration |
 | --- | --- |
 | Android bionic LP64 | Native stdio already reaches the public read adapter on the validated artifact. Before channel activation, a private pipe/fread probe temporarily observes our cached read backend and verifies that path. The cache is restored before admission. No private FILE fields, factory replacements, libc data writes or permanent probe branches are required. |
-| Linux GNU libc LP64 | Native FILE reads can bypass public read. Validate the exported byte/wide read-table sizes, original read callbacks, common libc ownership and fully protected GNU RELRO pages. Replace only those existing read callbacks at the serialized bootstrap boundary. The native read implementation still performs actual I/O and retains its cancellation and FILE bookkeeping. |
+| Linux GNU libc LP64 | Native FILE reads can bypass public read. Validate the exported byte/wide read-table sizes, original read callbacks, common libc ownership and fully protected GNU RELRO pages. Replace only those existing read callbacks at the serialized bootstrap boundary. Ordinary files keep native I/O. Virtual signalfd reads use the bounded dequeue transaction, retaining the native cancellation policy and FILE bookkeeping. |
 
 GNU vtable identity and validation remain intact; no foreign table is admitted
 and no instruction bytes change. Data pages temporarily become writable and
@@ -47,7 +47,7 @@ recipients to retire, then restores GNU native read callbacks. Bionic needs no
 callback/table restoration: the verified path is its ordinary native stdio path.
 The temporary probe adds no branch to normal reads after activation. Existing
 native consuming-operation rules still apply; this feature does not establish
-general saved/resumable context recovery or native/deferred dequeue priority.
+general saved/resumable context lifetime or native/deferred asynchronous handler priority. Consuming APIs follow the [Linux selection contract](SIGNAL_WAITING.md).
 
 ## Verification
 

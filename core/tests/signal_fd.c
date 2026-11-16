@@ -232,7 +232,8 @@ static void wait_until_blocked(void) {
         text[length] = 0;
         long number;
         if (sscanf(text, "%ld", &number) == 1 &&
-            (number == SYS_read || number == SYS_readv)) {
+            (number == SYS_read || number == SYS_readv ||
+             number == SYS_ppoll)) {
           return;
         }
       }

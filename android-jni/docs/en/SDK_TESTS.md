@@ -26,6 +26,11 @@ The `runtime-relay-lifecycle` observation is required for positive cases,
 including native recovery. Incompatible libc rejection must instead retain the
 dispatcher and quarantine the already claimed bridge.
 
+The deferred Host mask case uses the installed public
+`gw_host_signal_channel_enable` API before VM creation. Core's separate native
+ordering/context and failed-restore suites cover the consumer transaction;
+see [the Host channel contract](../../../core/docs/en/SIGNAL_WAITING.md).
+
 ## Native unwind validation
 
 Build and install android-jni with `-DGW_NATIVE_UNWIND_INTEGRATION=ON`. Run the

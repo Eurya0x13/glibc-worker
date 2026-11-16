@@ -40,34 +40,15 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
 
 ## Implement independent Host and Guest signal delivery
 
-- Complete production integration of the deferred fault channel. The opt-in
-  `--host-fault-mask` fixture recovers Guest traps with Host blocked and checks
-  deferred/coalesced siginfo, logical pending queries and three Host consuming
-  waits. Live context retirement refuses pending work; thread exit discards only
-  its own notifications. Host atomic mask-waits retain their native handler and
-  return masks, including Bionic LP64 aliases. Host registrations now route all
-  public signals without expanding VM ownership; unadopted pre-existing custom
-  actions fail Guest admission. Host signalfd read/readv, duplicate aliases,
-  metadata and six readiness interfaces are implemented. Kernel-authoritative
-  descriptor inspection now covers imported/duplicate aliases, range close and
-  private tables; lifecycle scans include every live task's table. Complete
-  Host `setcontext`/resumable read-decode and close windows and paths
-  without initialized native-jump interposition. Managed consuming operations
-  now retire consumed packets before outside native jumps or cancellation;
-  nested readers and fresh handler sends retain separate ownership. Complete
-  logical dequeue ordering across native/deferred queues, remaining
-  kernel/helper selection races and lifecycle
-  windows before
-  enabling this channel in ordinary integrations. Passing this fixture is not
-  general independent asynchronous delivery.
-  Successful `SIG_IGN` registrations now invalidate older pending originals even
-  after a handler is restored, while preserving already consumed packets; this
-  does not finish the remaining disposition-selection races. Deferred selection
-  now serializes against registration and consumes a one-shot before exposing
-  the handler mask; native/deferred replacement and nested-default tests cover
-  these boundaries. Helper entries now bind the kernel-selected Host generation
-  and `SA_RESTART`; controlled native/deferred blocked-read comparisons check
-  restart and `EINTR`. Initial recipient publication reconciles private masks.
+- Finish native-priority asynchronous Host handler dispatch across original
+  signals and private deferred notifications. The public Host channel now has
+  atomic Linux-ordered consuming waits/read/readv/stdio, native pointer/vector
+  error handling, jump-interposer-independent consumption windows, stable wait
+  records and transactional lifecycle rollback. Core and installed JNI tests
+  cover those boundaries. Kernel private RT **handler** delivery can still
+  differ from original-number priority; consuming-order coverage does not
+  establish handler-order equivalence. Keep this item until that routing model
+  and its concurrent selection are completed and verified.
 - Complete independent asynchronous dispositions/masks, pending queues, default
   actions and targets; keep overlapping registrations from replacing VM handlers.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,

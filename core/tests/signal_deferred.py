@@ -42,6 +42,8 @@ if args.ndk:
 run(configure)
 targets = [
     "signal_deferred_test",
+    "signal_ordering_test",
+    "signal_restore_test",
     "carrier_lifecycle_test",
     "signal_relay_test",
     "signal_stdio_test",
@@ -57,6 +59,8 @@ inputs = [
     Path(__file__),
     core / "CMakeLists.txt",
     core / "tests/signal_deferred.c",
+    core / "tests/signal_ordering.c",
+    core / "tests/signal_restore.c",
     core / "tests/carrier_lifecycle.c",
     core / "tests/signal_relay.c",
     core / "tests/signal_stdio.c",

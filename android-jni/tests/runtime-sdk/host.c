@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "runtime_bridge.h"
 #include "signal-router.h"
+#include "signal_channel.h"
 #include "signal-relay.h"
 #ifdef GW_TEST_NATIVE_UNWIND
 #include "nonlocal.h"
@@ -1222,7 +1223,7 @@ int main(int argc, char **argv) {
   if (getenv("GW_TEST_HOST_FAULT_MASK")) {
     const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                  SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
-    assert(!signal_router_defer_faults(notifications));
+    assert(!gw_host_signal_channel_enable(notifications, 6));
   }
 #endif
   if (!strcmp(argv[8], "nonlocal")) {
