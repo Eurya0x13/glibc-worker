@@ -103,6 +103,27 @@ Host 中断之后的余量。输入转换遵循载体的 LP64 libc：GNU 会规�
 libc 私有调用和原始系统调用尚未取得这项恢复保护。通用可保存/恢复的原生
 延续状态以及实际 Guest 异步入口仍需完成接入和生命周期工作。
 
+### 睡眠接口的原生对照
+
+`signal_sleep_control` 只链接原生线程库，输出 `CONTROL_ONLY`，用于建立睡眠
+适配的验收条件，没有启用不完整的实现。Linux 和 Android ARM64 均确认以下差异：
+
+- `nanosleep` 与相对形式的 `clock_nanosleep` 成功结束时不访问不可写的剩余
+  时间指针；中断后需要回写余量时则返回 `EFAULT`。提前校验输出，或用未经
+  内核检查的 C 赋值回写，都会改变此行为。
+- 相对 hrtimer 睡眠的截止时间在内核有符号纳秒上限处饱和。相同的
+  `INT64_MAX` 秒输入，在原始 `ppoll` 系统调用中会得到不同的剩余时间。
+  直接用其超时输出作为睡眠余量，会改变合法输入的语义。
+- `clock_nanosleep` 直接返回错误码并保留 errno；`nanosleep` 返回 `-1` 并设置
+  errno。对照中的两种接口都不会因设置 `SA_RESTART` 而隐藏中断。
+
+发送线程持续发送原生线程信号，直到等待返回，避免用固定延迟假定系统调用
+已经进入。不可写输出使用真实 `PROT_NONE` 映射。此对照不涉及 Host/Guest
+切换。参见 Linux 的
+[`do_nanosleep`、`nanosleep_copyout` 及定时器初始化](https://github.com/torvalds/linux/blob/v6.12/kernel/time/hrtimer.c)
+和 [`poll_select_finish`](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。
+睡眠恢复除了隐藏通知重试，还必须保留原生输出拷贝、饱和、取消和中断语义。
+
 ## Linux 消费顺序与原子提交
 
 Host 的 `sigtimedwait`、`sigwaitinfo`、`sigwait`、`read`、`readv` 和原生 FILE

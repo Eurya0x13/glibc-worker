@@ -50,6 +50,7 @@ targets = [
     "signal_relay_test",
     "signal_stdio_test",
     "signal_waiting_test",
+    "signal_sleep_control",
     "signal_fd_test",
     "signal_fd_lifecycle_test",
     "signal_delivery_test",
@@ -69,6 +70,7 @@ inputs = [
     core / "tests/signal_relay.c",
     core / "tests/signal_stdio.c",
     core / "tests/signal_waiting.c",
+    core / "tests/signal_sleep_control.c",
     core / "tests/signal_fd.c",
     core / "tests/signal_fd_lifecycle.c",
     core / "tests/signal_delivery.c",
@@ -139,6 +141,19 @@ try:
         case = target + (arguments[0][1:] if arguments else "")
         (out / (case + ".log")).write_text(result.stdout + result.stderr)
         result.check_returncode()
+        if target == "signal_sleep_control":
+            data = json.loads(result.stdout)
+            assert data == {
+                "result": "CONTROL_ONLY",
+                "native_only": True,
+                "sa_restart": True,
+                "success_ignores_remainder": True,
+                "interrupted_remainder_efault": True,
+                "clock_errno_preserved": True,
+                "different_timeout_saturation": True,
+            }, data
+            controls.append({"case": case, **data})
+            continue
         if target == "signal_inbox_test" and arguments:
             data = json.loads(result.stdout)
             assert data == {

@@ -38,6 +38,10 @@ Active bootstrap atomic mask-waits, nullable masks, `poll`, `select` and `epoll_
 have hidden-notification retry with one monotonic timeout budget. This is a
 Host-side prerequisite, not a production Guest entry pass. Sleep APIs, ordinary
 blocking I/O and private/raw paths still need review.
+The native-only sleep control now reproduces remainder-pointer `EFAULT`, errno
+conventions and differing hrtimer/ppoll saturation on both kernels. A sleep
+adapter must retain those semantics rather than simply reuse a ppoll remainder;
+see [sleep controls](core/docs/en/SIGNAL_WAITING.md#native-sleep-controls).
 
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,

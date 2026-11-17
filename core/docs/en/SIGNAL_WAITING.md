@@ -129,6 +129,32 @@ ordinary blocking I/O, private libc calls and raw syscalls do not acquire this
 recovery scope. General saved/resumable native continuations and actual Guest
 asynchronous entry still require the remaining integration/lifetime work.
 
+### Native sleep controls
+
+`signal_sleep_control` links only the native thread library and reports
+`CONTROL_ONLY`. It establishes sleep-adapter requirements without enabling a
+partial implementation. Both Linux and Android ARM64 show these differences:
+
+- `nanosleep` and relative `clock_nanosleep` ignore an inaccessible remainder
+  pointer on successful completion, but return `EFAULT` when interrupted and
+  required to copy the remainder. Pre-validating the output or writing it with
+  an unchecked C assignment changes this behavior.
+- Relative hrtimer sleeps saturate their expiration at the kernel's signed
+  nanosecond horizon. The raw `ppoll` syscall reports a different remainder for
+  the same `INT64_MAX`-second input. Reusing its timeout output for a sleep
+  remainder would therefore change valid-input semantics.
+- `clock_nanosleep` returns an error number while preserving errno;
+  `nanosleep` returns `-1` and sets errno. `SA_RESTART` does not suppress the
+  observed interruption in either interface.
+
+The sender repeats native thread signals until the wait returns, avoiding a
+fixed delay that assumes syscall entry. The inaccessible output is a real
+`PROT_NONE` mapping. No Host/Guest switching is involved. See Linux
+[`do_nanosleep`, `nanosleep_copyout` and timer initialization](https://github.com/torvalds/linux/blob/v6.12/kernel/time/hrtimer.c)
+and [`poll_select_finish`](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
+Sleep recovery still needs native copyout, saturation, cancellation and
+interruption semantics in addition to hidden-notification retry.
+
 ## Linux consuming order and atomic commit
 
 Host `sigtimedwait`, `sigwaitinfo`, `sigwait`, `read`, `readv` and native FILE
