@@ -60,6 +60,12 @@ _Static_assert(offsetof(struct domain_signal_call, number) == 40,
 _Static_assert(offsetof(struct domain_signal_call, context) == 56,
                "signal-call assembly ABI");
 int domain_guest_signal_call(const struct domain_signal_call *);
+/* Integration owns the guarded entry stack and valid Guest TCB/FP state.
+ * Catchable signals stay blocked across both transitions. A returning entry
+ * restores Host stack/TP/FP/x18; nonlocal exits require the owning continuation
+ * coordinator. This primitive alone supplies no signal/context lifetime ABI. */
+int domain_guest_signal_stack_call(const struct domain_signal_call *,
+                                   uintptr_t);
 
 /* Failures are counted in shared POD storage; no foreign libc is called. */
 #define CHECK(e, condition) ((e)->failures += !(condition))

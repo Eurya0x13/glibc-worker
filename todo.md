@@ -46,6 +46,12 @@ conventions and differing hrtimer/ppoll saturation on both kernels. A sleep
 adapter retains those semantics rather than reusing a ppoll remainder;
 see [sleep controls](core/docs/en/SIGNAL_WAITING.md#native-sleep-controls).
 
+The [native cross-libc entry](core/docs/en/GUEST_ASYNC_ENTRY.md) now connects a
+Guest-owned inbox to actual adopted TCBs and guarded stacks. It validates busy
+Host/Guest interruption and transparent Host sleep/ppoll with real Guest work.
+The normally returning fixture is not public Guest sigaction/send integration,
+asynchronous nonlocal recovery or a JNI/VM compatibility pass.
+
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,
 adopted-carrier logical masks, native get/set/swapcontext mask adaptation and

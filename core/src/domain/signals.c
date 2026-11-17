@@ -586,6 +586,9 @@ static void dispatch_core(int number, siginfo_t *info, void *context,
   (void)entry_mask;
 #endif
 #ifdef GW_DOMAIN_CHAIN
+  if (signal_router_dispatch_internal(number, info, context, token)) {
+    return;
+  }
   if (dispatch_deferred(number, info, context, slot, interrupted_tp, entry_mask,
                         token)) {
     return;

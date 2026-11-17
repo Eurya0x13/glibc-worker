@@ -25,6 +25,16 @@ int signal_router_action64(int, const struct sigaction64 *,
                            struct sigaction64 *);
 #endif
 int signal_router_action(int, const struct sigaction *, struct sigaction *);
+/* Integration-owned notification route, installed during serialized bootstrap
+ * before admitting senders. The RT number must be unused and unreserved.
+ * Entry has restored Host TLS and blocks every catchable signal. It runs before
+ * logical Host selection, so an integration can classify the wake as hidden.
+ * Targets must be registered Host carriers, never genuine GNU pthreads. The
+ * callback and any saved frames remain pinned under the router's lifetime.
+ * Normal callback return preserves Host errno.
+ * This does not virtualize masks or establish a Guest handler/context ABI. */
+int signal_router_internal_action(int, void (*)(int, siginfo_t *, void *));
+int signal_router_dispatch_internal(int, siginfo_t *, void *, void *);
 /* Enable independent synchronous Guest dispositions before any carrier runs.
  * Kernel routing remains installed even while Host selects SIG_DFL/SIG_IGN.
  * The caller serializes registration and retains this layer until shutdown. */

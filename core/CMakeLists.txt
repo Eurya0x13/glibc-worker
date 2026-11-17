@@ -11,7 +11,8 @@ add_library(core STATIC src/bootstrap/loader_image.c src/bootstrap/clone.S
   src/domain/signal-contract.c)
 add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/signals.c src/domain/signal-entry.S src/domain/signal-router.c
-  src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-pending.c
+  src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-call.c
+  src/domain/signal-pending.c
   src/domain/signal-deferred.c src/domain/signal-relay.c
   src/domain/signal-inbox.c)
 add_library(glibc_worker::domains ALIAS domains)

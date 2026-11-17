@@ -1,0 +1,302 @@
+"""Verify timely cross-libc Guest entry without claiming a public signal ABI."""
+
+import argparse
+import hashlib
+import json
+import platform
+import shlex
+import shutil
+import subprocess
+from pathlib import Path
+
+core = Path(__file__).resolve().parents[1]
+source = core / "tests/guest-async"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], default="x86_64")
+parser.add_argument("--runtime", required=True, type=Path)
+parser.add_argument("--notification", required=True, type=int)
+parser.add_argument("--ndk", type=Path)
+parser.add_argument("--serial")
+parser.add_argument("--output", type=Path)
+parser.add_argument(
+    "--ubsan",
+    action="store_true",
+    help="Instrument native Host/core only; Guest remains uninstrumented",
+)
+args = parser.parse_args()
+if bool(args.ndk) != bool(args.serial):
+    parser.error("Android requires both --ndk and --serial")
+if args.ndk and args.abi != "arm64-v8a":
+    parser.error("The current Android fixture requires --abi arm64-v8a")
+if args.ubsan and args.ndk:
+    parser.error("The UBSan fixture currently supports native Host/core only")
+if (
+    not args.ndk
+    and platform.machine()
+    != {
+        "x86_64": "x86_64",
+        "arm64-v8a": "aarch64",
+    }[args.abi]
+):
+    parser.error("Native execution requires a matching host architecture")
+if not 34 <= args.notification <= 64 or args.notification in [
+    56,
+    *range(50, 54),
+]:
+    parser.error(
+        "Choose an explicit public RT number outside the fixture lanes/reservations"
+    )
+
+runtime = args.runtime.resolve()
+configuration = json.loads((core / "config/targets.json").read_text())[args.abi]
+loader = runtime / configuration["loader"]
+for path in (
+    loader,
+    runtime / "libc.so.6",
+    runtime / "libm.so.6",
+    runtime / "manifest.json",
+):
+    if not path.is_file():
+        parser.error(f"Missing explicit matched runtime input: {path}")
+compiler = shutil.which(configuration["guest_cc"])
+if not compiler:
+    parser.error(f"Missing Guest compiler: {configuration['guest_cc']}")
+adb_tool = shutil.which("adb") if args.serial else None
+if args.serial and not adb_tool:
+    parser.error("Missing Android platform-tools adb on PATH")
+out = (
+    args.output
+    or core
+    / "build/tests"
+    / (
+        ("guest-async-android" if args.ndk else "guest-async")
+        + ("-ubsan" if args.ubsan else "")
+    )
+).resolve()
+out.mkdir(parents=True, exist_ok=True)
+for name in (
+    "summary.json",
+    "failure.json",
+    "manifest.json",
+    "stdout.log",
+    "stderr.log",
+):
+    (out / name).unlink(missing_ok=True)
+commands = []
+
+
+def run(command, **options):
+    command = list(map(str, command))
+    commands.append(command)
+    return subprocess.run(command, check=True, **options)
+
+
+toolchain = (
+    [
+        "-DCMAKE_TOOLCHAIN_FILE="
+        + str(args.ndk.resolve() / "build/cmake/android.toolchain.cmake"),
+        "-DANDROID_ABI=arm64-v8a",
+        "-DANDROID_PLATFORM=android-29",
+    ]
+    if args.ndk
+    else []
+)
+if args.ubsan:
+    clang = shutil.which("clang")
+    if not clang:
+        parser.error("Native Host UBSan requires clang on PATH")
+    toolchain += [
+        f"-DCMAKE_C_COMPILER={clang}",
+        "-DCMAKE_C_FLAGS=-O2 -g -fsanitize=undefined -fno-sanitize-recover=all",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=undefined",
+    ]
+prefix = out / "sdk/install"
+run(
+    [
+        "cmake",
+        "-S",
+        core,
+        "-B",
+        out / "sdk",
+        "-DBUILD_TESTING=OFF",
+        f"-DCMAKE_INSTALL_PREFIX={prefix}",
+        *toolchain,
+    ]
+)
+run(["cmake", "--build", out / "sdk", "--parallel", "2"])
+run(["cmake", "--install", out / "sdk"])
+run(
+    [
+        "cmake",
+        "-S",
+        source,
+        "-B",
+        out / "host",
+        f"-DCMAKE_PREFIX_PATH={prefix}",
+        "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH",
+        f"-DGW_DOMAIN_START={core / 'src/domain/start.S'}",
+        f"-DGW_GUEST_CLONE={core / 'src/bootstrap/clone.S'}",
+        *toolchain,
+    ]
+)
+run(["cmake", "--build", out / "host", "--parallel", "2"])
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        "-I" + str(core / "src/domain"),
+        "-I" + str(core / "include"),
+        source / "guest.c",
+        core / "src/domain/signal-pending.c",
+        core / "src/domain/signal-inbox.c",
+        "-ldl",
+        "-pthread",
+        "-lm",
+        "-o",
+        out / "guest",
+    ]
+)
+unwind = Path(
+    subprocess.check_output(
+        [compiler, "-print-file-name=libgcc_s.so.1"], text=True
+    ).strip()
+).resolve()
+if not unwind.is_file():
+    parser.error("Missing Guest unwind library")
+shutil.copyfile(unwind, out / "libgcc_s.so.1")
+sdk_inputs = [
+    Path(p) for p in (out / "host/sdk-inputs.txt").read_text().splitlines()
+]
+host_compiler = (out / "host/host-compiler.txt").read_text().strip()
+inputs = [
+    Path(__file__),
+    core / "CMakeLists.txt",
+    core / "config/targets.json",
+    *source.iterdir(),
+    *core.glob("src/domain/*.[chS]"),
+    *core.glob("src/domain/*.inc"),
+    *core.glob("include/*.h"),
+    *core.glob("src/bootstrap/*.[chS]"),
+    *core.glob("cmake/*"),
+    core / "src/bootstrap/clone.S",
+    core / "src/domain/start.S",
+    loader,
+    runtime / "libc.so.6",
+    runtime / "libm.so.6",
+    runtime / "manifest.json",
+    out / "guest",
+    out / "host/guest_async_host",
+    out / "libgcc_s.so.1",
+    *sdk_inputs,
+]
+manifest = {
+    "commands": commands,
+    "abi": args.abi,
+    "notification": args.notification,
+    "execution": "android-adb-shell" if args.serial else "native-linux",
+    "host_libc": "bionic" if args.serial else "glibc",
+    "guest_libc": "glibc",
+    "sanitizer": "Host/core UBSan; Guest uninstrumented"
+    if args.ubsan
+    else "none",
+    "compilers": {
+        name: subprocess.check_output(
+            [name, "--version"], text=True
+        ).splitlines()[0]
+        for name in {compiler, host_compiler}
+    },
+    "sha256": {
+        str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in inputs
+        if p.is_file()
+    },
+}
+command = [
+    out / "host/guest_async_host",
+    loader,
+    f"{runtime}:{out}",
+    out / "guest",
+    args.notification,
+]
+if args.serial:
+    adb = [adb_tool, "-s", args.serial]
+    digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    remote = "/data/local/tmp/gw-guest-async-" + digest
+    run([*adb, "shell", "mkdir", "-p", remote])
+    for path in [
+        out / "host/guest_async_host",
+        out / "guest",
+        out / "libgcc_s.so.1",
+        loader,
+        runtime / "libc.so.6",
+        runtime / "libm.so.6",
+    ]:
+        run([*adb, "push", path, remote + "/"])
+    manifest["device"] = {
+        "serial": args.serial,
+        "fingerprint": run(
+            [*adb, "shell", "getprop", "ro.build.fingerprint"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+        "identity": run(
+            [*adb, "shell", "id"], capture_output=True, text=True
+        ).stdout.strip(),
+    }
+    invocation = [
+        "/system/bin/timeout",
+        "-s",
+        "KILL",
+        "25",
+        "/system/bin/linker64",
+        remote + "/guest_async_host",
+        remote + "/" + loader.name,
+        remote,
+        remote + "/guest",
+        str(args.notification),
+    ]
+    command = [*adb, "shell", shlex.join(invocation)]
+command = list(map(str, command))
+commands.append(command)
+(out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+try:
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    (out / "stdout.log").write_text(result.stdout)
+    (out / "stderr.log").write_text(result.stderr)
+    result.check_returncode()
+    data = json.loads(result.stdout)
+    assert data.pop("result") == "PASS"
+    assert data.pop("packets") == 28
+    assert data.pop("host_entries") >= 8
+    assert data.pop("guest_entries") == 4
+    assert data.pop("production_ready") is False
+    assert data and all(value is True for value in data.values()), data
+except Exception as error:
+    if isinstance(error, subprocess.TimeoutExpired):
+        for name, partial in (
+            ("stdout", error.stdout),
+            ("stderr", error.stderr),
+        ):
+            (out / (name + ".log")).write_bytes(
+                partial.encode() if isinstance(partial, str) else partial or b""
+            )
+    (out / "failure.json").write_text(
+        json.dumps({"result": "FAIL", "error": str(error)}, indent=2) + "\n"
+    )
+    raise
+summary = json.loads(result.stdout)
+summary.update(
+    guest_public_signal_abi=False,
+    jni_vm_validated=False,
+    nonlocal_async_entry_validated=False,
+)
+(out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary))

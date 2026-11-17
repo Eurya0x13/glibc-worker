@@ -92,6 +92,11 @@ python3 core/tests/signal_deferred.py --ndk "$ANDROID_NDK_HOME" --serial "$ANDRO
 以及 Host 对同一逻辑编号的处理器不受影响。该测试只使用一套 libc，不证明
 Guest 入口/TLS 或 VM 兼容性。
 
+单独的[跨 libc 入口夹具](GUEST_ASYNC_ENTRY.md)现已将 Guest 编译的 inbox 接到
+真实收养 TCB 和保护页入口栈上，覆盖 Linux 与 Android ARM64 原生 Host/Guest
+代码的及时中断，以及实际 Host 睡眠/ppoll 恢复。这个正常返回的内部入口不是
+公开 Guest 信号 ABI，也没有接入已安装的 JNI 服务。
+
 生产接入仍需独立的动作表和默认行为、不可变的已选动作代次、带域目标的
 发送、原生线程生命周期、逻辑屏蔽/等待适配、具有正确 Guest 栈/TLS 的
 异步入口，以及合法的非局部退出。私有通知必须保留逻辑动作的

@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.22)
+project(GuestAsyncNativeEntry LANGUAGES C ASM)
+find_package(GlibcWorkerCore CONFIG REQUIRED)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/host-compiler.txt" "${CMAKE_C_COMPILER}\n")
+add_executable(guest_async_host host.c ${GW_DOMAIN_START} ${GW_GUEST_CLONE})
+target_compile_options(guest_async_host PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(guest_async_host PRIVATE glibc_worker::signal_interpose m)
+target_link_options(guest_async_host PRIVATE -Wl,--export-dynamic)
+if(ANDROID)
+  target_compile_options(guest_async_host PRIVATE -fno-emulated-tls)
+endif()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sdk-inputs.txt"
+  CONTENT "$<TARGET_FILE:glibc_worker::core>\n$<TARGET_FILE:glibc_worker::domains>\n$<TARGET_FILE:glibc_worker::signal_interpose>\n")

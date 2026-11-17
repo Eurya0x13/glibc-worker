@@ -36,6 +36,7 @@ struct disposition {
   struct sigaction action;
   uint64_t ignore_generation;
   _Atomic int fired;
+  int internal;
   void *entry;
   size_t entry_size;
   struct disposition *next;
@@ -543,8 +544,8 @@ static int make_entry(struct disposition *record) {
 /* Exported by the experiment executable so libjvm's public sigaction calls
  * enter here. Queries return the logical disposition, not the routing entry.
  * Explicit dlsym(libc, ...) and raw syscalls are outside this interception. */
-int signal_router_action(int number, const struct sigaction *action,
-                         struct sigaction *previous) {
+static int router_action(int number, const struct sigaction *action,
+                         struct sigaction *previous, int internal) {
   if (signal_router_error()) {
     errno = EIO;
     return -1;
@@ -571,6 +572,22 @@ int signal_router_action(int number, const struct sigaction *action,
   lock_writer(&mask);
   struct disposition *old =
       atomic_load_explicit(&current[number], memory_order_acquire);
+  if ((old && old->internal) ||
+      (internal && (old || original[number].sa_handler != SIG_DFL))) {
+    unlock_writer(mask);
+    errno = EBUSY;
+    return -1;
+  }
+  if (internal) {
+    struct sigaction actual;
+    int result = system_action(number, NULL, &actual);
+    if (result || !same_action(&actual, &original[number])) {
+      int error = result ? errno : EBUSY;
+      unlock_writer(mask);
+      errno = error;
+      return -1;
+    }
+  }
   if (!action) {
     struct sigaction actual;
     int status = system_action(number, NULL, &actual);
@@ -611,6 +628,7 @@ int signal_router_action(int number, const struct sigaction *action,
     return -1;
   }
   next->action = *action;
+  next->internal = internal;
   next->ignore_generation = old ? old->ignore_generation : 0;
   if (action->sa_handler == SIG_IGN) {
     if (next->ignore_generation == UINT64_MAX) {
@@ -703,6 +721,36 @@ int signal_router_action(int number, const struct sigaction *action,
   unlock_writer(mask);
   errno = error;
   return status;
+}
+
+int signal_router_action(int number, const struct sigaction *action,
+                         struct sigaction *previous) {
+  return router_action(number, action, previous, 0);
+}
+
+int signal_router_internal_action(int number,
+                                  void (*entry)(int, siginfo_t *, void *)) {
+  if (!signal_router_enabled() || !entry || number < SIGRTMIN ||
+      number > SIGRTMAX ||
+      (host_reservations & (UINT64_C(1) << (number - 1)))) {
+    return EINVAL;
+  }
+  struct sigaction action = {.sa_sigaction = entry,
+                             .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART};
+  wide_fault_mask(&action);
+  return router_action(number, &action, NULL, 1) ? errno : 0;
+}
+
+int signal_router_dispatch_internal(int number, siginfo_t *information,
+                                    void *context, void *token) {
+  struct disposition *record = token;
+  if (!record || !record->internal) {
+    return 0;
+  }
+  int saved_errno = errno;
+  record->action.sa_sigaction(number, information, context);
+  errno = saved_errno;
+  return 1;
 }
 
 int signal_router_guest_faults(void) {

@@ -109,6 +109,12 @@ work is retained, retries failed wakeup and preserves the Host's own handler for
 the logical signal number. That test uses one libc and does not establish Guest
 entry/TLS or VM compatibility.
 
+A separate [cross-libc entry fixture](GUEST_ASYNC_ENTRY.md) now connects the
+Guest-compiled inbox to real adopted TCBs and guarded entry stacks. It covers
+timely interruption of native Host/Guest code and actual Host sleep/ppoll
+recovery on Linux and Android ARM64. Its normally returning internal entry is
+not a public Guest signal ABI or installed JNI integration.
+
 Production integration still needs independent dispositions/default actions,
 immutable selected generations, tagged sends, native thread lifetime integration,
 logical mask/wait adaptation, asynchronous entry with the correct Guest stack/TLS,
