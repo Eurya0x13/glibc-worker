@@ -315,6 +315,97 @@ static void concurrent_discard(void) {
   assert(!gw_signal_targets_destroy(&registry));
 }
 
+struct activation {
+  struct gw_signal_target *target;
+  _Atomic int *start;
+};
+
+static void *activate(void *argument) {
+  struct activation *activation = argument;
+  while (!atomic_load_explicit(activation->start, memory_order_acquire)) {
+    sched_yield();
+  }
+  assert(!gw_signal_target_activate(activation->target, 71));
+  return NULL;
+}
+
+static void prepared_admission(void) {
+  struct gw_signal_targets registry;
+  gw_signal_targets_init(&registry, 0, 4, notify, &notified);
+  struct gw_signal_target *a, *b, *duplicate = NULL;
+  assert(gw_signal_target_prepare(&registry, 0, 0, NULL, &duplicate) == EINVAL);
+  assert(!duplicate);
+  assert(!gw_signal_target_prepare(&registry, 1, 0, NULL, &a));
+  assert(!a->tid && a->pins == 1);
+  assert(gw_signal_target_pin(a) == ESRCH);
+  assert(!gw_signal_target_retain(a));
+  assert(gw_signal_target_prepare(&registry, 1, 0, NULL, &duplicate) ==
+         EALREADY);
+  assert(!duplicate);
+  assert(!gw_signal_target_prepare(&registry, 2, 0, NULL, &b));
+
+  int before = atomic_load(&notified);
+  queue_packet(&registry, NULL, 56, 901);
+  set_mask(a, 0);
+  assert(!gw_signal_targets_retry(&registry));
+  assert(atomic_load(&notified) == before);
+  siginfo_t information;
+  enum gw_signal_queue_source source = GW_SIGNAL_PROCESS;
+  assert(!gw_signal_target_deliver(a, &information, &source));
+  assert(source == GW_SIGNAL_NONE);
+  source = GW_SIGNAL_PROCESS;
+  assert(!gw_signal_target_take(a, UINT64_MAX, &information, &source));
+  assert(source == GW_SIGNAL_NONE && registry.inbox.queued == 1);
+  assert(gw_signal_target_activate(a, 0) == EINVAL);
+
+  _Atomic int start = 0;
+  struct activation activation = {.target = a, .start = &start};
+  pthread_t threads[2];
+  assert(!pthread_create(&threads[0], NULL, activate, &activation));
+  assert(!pthread_create(&threads[1], NULL, activate, &activation));
+  atomic_store_explicit(&start, 1, memory_order_release);
+  assert(!pthread_join(threads[0], NULL));
+  assert(!pthread_join(threads[1], NULL));
+  assert(a->tid == 71 && a->pins == 2);
+  assert(atomic_load(&notified) == before + 1 && last_target == a);
+  assert(gw_signal_target_activate(a, 72) == EALREADY);
+  consume(a, 901, GW_SIGNAL_PROCESS);
+  assert(!gw_signal_target_pin(a));
+  assert(!gw_signal_target_unpin(a));
+
+  /* A failed clone discards its prepared identity. Reusing the descriptor
+   * must not let a delayed completion activate the replacement target. */
+  gw_signal_target_close(b);
+  assert(gw_signal_target_activate(b, 72) == ESRCH);
+  assert(gw_signal_target_release(b) == EBUSY);
+  assert(!gw_signal_target_prepare(&registry, 2, 0, NULL, &duplicate));
+  assert(duplicate != b && !duplicate->tid);
+  assert(gw_signal_target_activate(b, 72) == ESRCH);
+  assert(!gw_signal_target_unpin(b));
+  assert(!gw_signal_target_release(b));
+
+  queue_packet(&registry, NULL, 56, 902);
+  consume(a, 902, GW_SIGNAL_PROCESS);
+  set_mask(a, UINT64_MAX);
+  queue_packet(&registry, NULL, 56, 903);
+  before = atomic_load(&notified);
+  wake_failure = EAGAIN;
+  assert(!gw_signal_target_activate(duplicate, 73));
+  assert(atomic_load(&notified) == before + 1);
+  assert(gw_signal_targets_error(&registry) == EAGAIN);
+  wake_failure = 0;
+  assert(!gw_signal_targets_retry(&registry));
+  consume(duplicate, 903, GW_SIGNAL_PROCESS);
+
+  gw_signal_targets_close(&registry);
+  assert(gw_signal_target_activate(a, 71) == ESRCH);
+  assert(!gw_signal_target_unpin(a) && !gw_signal_target_unpin(a));
+  assert(!gw_signal_target_unpin(duplicate));
+  assert(!gw_signal_target_release(a));
+  assert(!gw_signal_target_release(duplicate));
+  assert(!gw_signal_targets_destroy(&registry));
+}
+
 int main(void) {
   uint64_t all = UINT64_MAX, previous;
   assert(
@@ -324,9 +415,11 @@ int main(void) {
   consuming_and_discard();
   concurrent_close();
   concurrent_discard();
+  prepared_admission();
   assert(
       !syscall(SYS_rt_sigprocmask, SIG_SETMASK, &previous, NULL, sizeof all));
   puts(
       "{\"result\":\"PASS\",\"targets\":2048,\"concurrent_senders\":4,"
-      "\"discard_quota\":true,\"blocked_consuming\":true}");
+      "\"discard_quota\":true,\"blocked_consuming\":true,"
+      "\"prepared_admission\":true}");
 }

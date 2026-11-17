@@ -2,6 +2,10 @@
 
 [English](../en/SIGNAL_TARGETS.md) | [简体中文](../zh/SIGNAL_TARGETS.md)
 
+clone 前的 `prepare` 预留身份，但不能通知或消费消息；不分配内存的 `activate`
+在创建返回前启用真实 TID。顺序、失败及创建者/子线程 pin 规则见
+[创建阶段和所有权](THREAD_LIFECYCLE.md)。向量中的预备成员尚不具备投递资格。
+
 `signal-targets.h` 将独立 inbox 接到真实接收者的准入、逻辑掩码、通知和退休。
 与[信号 inbox](GUEST_SIGNAL_INBOX.md)一样，必须用所属 libc 编译安装的 C 源码。
 不能在 Guest TLS 下调用 Host 编译的实现。

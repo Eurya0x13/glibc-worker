@@ -36,6 +36,15 @@ void gw_signal_targets_init(struct gw_signal_targets *, uint64_t, uint64_t,
                             gw_signal_target_notify, void *);
 int gw_signal_target_open(struct gw_signal_targets *, uintptr_t, int, uint64_t,
                           void *, struct gw_signal_target **);
+/* Reserve identity/storage before clone. The returned creator pin keeps the
+ * handle alive across child exit and descriptor reuse. A prepared target has
+ * tid == 0: no entry, consumption or notification until activation. */
+int gw_signal_target_prepare(struct gw_signal_targets *, uintptr_t, uint64_t,
+                             void *, struct gw_signal_target **);
+/* Allocation-free admission after successful native clone. Repeating the same
+ * TID is harmless; a different TID returns EALREADY. Initial notification
+ * failure stays in targets_error(), separate from committed admission. */
+int gw_signal_target_activate(struct gw_signal_target *, int);
 struct gw_signal_publication gw_signal_targets_send(struct gw_signal_targets *,
                                                     uintptr_t, int,
                                                     const siginfo_t *);

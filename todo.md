@@ -89,6 +89,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   The [core target registry](core/docs/en/SIGNAL_TARGETS.md) now supplies dynamic
   lookup, shared eligibility and pinned retirement in that cross-libc fixture;
   installed JNI service wiring and saved-frame integration remain required.
+  Optional [NPTL creation callbacks](core/docs/en/THREAD_LIFECYCLE.md) now
+  reserve identity before clone and complete admission before creation returns;
+  production recipient wiring must use them rather than child entry alone.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM

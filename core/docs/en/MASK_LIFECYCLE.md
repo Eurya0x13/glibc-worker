@@ -31,7 +31,8 @@ root and adopted descriptors have no such native-child record and return
 signals blocked, before NPTL restores its startup mask and enters user code.
 A binding there can prepare different physical bits for runtime-private wakes;
 NPTL applies them at its original unmask point. Receiver setup must precede that
-point. These snapshots alone do not implement pre-start recipient admission.
+point. These snapshots alone do not implement pre-start recipient admission;
+the [creation lifecycle](THREAD_LIFECYCLE.md) supplies its separate callbacks.
 
 ## Observing logical changes
 

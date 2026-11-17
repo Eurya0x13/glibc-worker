@@ -42,6 +42,8 @@ int __gw_domain_alloc(void *memory, size_t size, void **token,
   pd->flags = ATTR_FLAG_GW_DOMAIN | ATTR_FLAG_DETACHSTATE;
   pd->gw_mask_starting = false;
   pd->gw_inherited_mask_valid = false;
+  pd->gw_create_prepared = false;
+  pd->gw_create_cookie = NULL;
   pd->joinstate = THREAD_STATE_DETACHED;
   pd->cancelhandling = CANCELSTATE_BITMASK;
   pd->schedpolicy = THREAD_SELF->schedpolicy;
@@ -127,5 +129,5 @@ int __gw_domain_free(void *token) {
 /* Private ABI negotiated by the matching service before creating a domain.
  * Bump this whenever allocation, callback or lifecycle semantics change. */
 unsigned long __gw_domain_capabilities(void) {
-  return 0x4757440100000009UL;
+  return 0x475744010000000aUL;
 }

@@ -19,6 +19,7 @@ C_FRAGMENTS = {
     "core/src/runtime/context-mask.inc",
     "core/src/runtime/wait-mask.inc",
     "core/src/runtime/jump-hook.inc",
+    "core/src/runtime/thread-create.inc",
     "core/src/domain/signal-registry.inc",
 }
 TEXT_EXTENSIONS = EXTENSIONS | {".md", ".json", ".kts", ".properties"}

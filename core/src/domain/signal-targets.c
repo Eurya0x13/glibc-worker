@@ -124,13 +124,14 @@ static int notify(void *argument, struct gw_signal_receiver *receiver) {
   } else {
     uint64_t pending = gw_signal_pending_bits(&registry->inbox.shared);
     for (size_t i = 0; i < registry->count; ++i) {
-      if (pending & ~registry->active[i]->receiver.blocked) {
+      if (registry->active[i]->tid > 0 &&
+          (pending & ~registry->active[i]->receiver.blocked)) {
         target = registry->active[i];
         break;
       }
     }
   }
-  int error = target && registry->notify
+  int error = target && target->tid > 0 && registry->notify
                   ? registry->notify(registry->context, target)
                   : 0;
   if (error && !registry->wake_error) {
@@ -149,13 +150,12 @@ void gw_signal_targets_init(struct gw_signal_targets *registry,
   registry->context = context;
 }
 
-int gw_signal_target_open(struct gw_signal_targets *registry, uintptr_t key,
-                          int tid, uint64_t blocked, void *context,
-                          struct gw_signal_target **output) {
-  if (!key || tid <= 0 || !output) {
-    return EINVAL;
-  }
-  lock(registry);
+/* The outer writer spans allocation, publication and initial notification.
+ * Do not implement open as prepare + activate: it is one admission operation.
+ */
+static int create_target(struct gw_signal_targets *registry, uintptr_t key,
+                         int tid, uint64_t blocked, void *context,
+                         struct gw_signal_target **output) {
   struct gw_signal_target **slot = find(registry, key);
   int error = registry->closed                      ? ESRCH
               : slot && *slot && *slot != TOMBSTONE ? EALREADY
@@ -181,13 +181,13 @@ int gw_signal_target_open(struct gw_signal_targets *registry, uintptr_t key,
     if (target != MAP_FAILED) {
       munmap(target, sizeof *target);
     }
-    unlock(registry);
     return error;
   }
 
   target->registry = registry;
   target->key = key;
   target->tid = tid;
+  target->pins = tid ? 0 : 1;
   target->context = context;
   target->index = registry->count;
   slot = find(registry, key);
@@ -200,8 +200,52 @@ int gw_signal_target_open(struct gw_signal_targets *registry, uintptr_t key,
    * before notifying it. Notification failure does not undo registration;
    * error()/retry() expose and repair accepted-but-unnotified work. */
   gw_signal_receiver_mask(&target->receiver, blocked, notify, registry);
-  unlock(registry);
   return 0;
+}
+
+int gw_signal_target_open(struct gw_signal_targets *registry, uintptr_t key,
+                          int tid, uint64_t blocked, void *context,
+                          struct gw_signal_target **output) {
+  if (!key || tid <= 0 || !output) {
+    return EINVAL;
+  }
+
+  lock(registry);
+  int error = create_target(registry, key, tid, blocked, context, output);
+  unlock(registry);
+  return error;
+}
+
+int gw_signal_target_prepare(struct gw_signal_targets *registry, uintptr_t key,
+                             uint64_t blocked, void *context,
+                             struct gw_signal_target **output) {
+  if (!key || !output) {
+    return EINVAL;
+  }
+
+  lock(registry);
+  int error = create_target(registry, key, 0, blocked, context, output);
+  unlock(registry);
+  return error;
+}
+
+int gw_signal_target_activate(struct gw_signal_target *target, int tid) {
+  if (tid <= 0) {
+    return EINVAL;
+  }
+
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int error = registry->closed || target->receiver.closed ? ESRCH
+              : target->tid && target->tid != tid         ? EALREADY
+                                                          : 0;
+  if (!error && !target->tid) {
+    target->tid = tid;
+    gw_signal_receiver_mask(&target->receiver, target->receiver.blocked, notify,
+                            registry);
+  }
+  unlock(registry);
+  return error;
 }
 
 struct gw_signal_publication gw_signal_targets_send(
@@ -246,7 +290,11 @@ int gw_signal_target_deliver(struct gw_signal_target *target,
                              enum gw_signal_queue_source *source) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
-  int result = gw_signal_inbox_deliver(&target->receiver, information, source);
+  int result = 0;
+  *source = GW_SIGNAL_NONE;
+  if (target->tid || target->receiver.closed) {
+    result = gw_signal_inbox_deliver(&target->receiver, information, source);
+  }
   unlock(registry);
   return result;
 }
@@ -256,8 +304,12 @@ int gw_signal_target_take(struct gw_signal_target *target, uint64_t eligible,
                           enum gw_signal_queue_source *source) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
-  int result =
-      gw_signal_inbox_take(&target->receiver, eligible, information, source);
+  int result = 0;
+  *source = GW_SIGNAL_NONE;
+  if (target->tid || target->receiver.closed) {
+    result =
+        gw_signal_inbox_take(&target->receiver, eligible, information, source);
+  }
   unlock(registry);
   return result;
 }
@@ -291,9 +343,9 @@ uint64_t gw_signal_target_pending(struct gw_signal_target *target) {
 int gw_signal_target_pin(struct gw_signal_target *target) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
-  int error = target->receiver.closed    ? ESRCH
-              : target->pins == SIZE_MAX ? EOVERFLOW
-                                         : 0;
+  int error = target->receiver.closed || !target->tid ? ESRCH
+              : target->pins == SIZE_MAX              ? EOVERFLOW
+                                                      : 0;
   if (!error) {
     ++target->pins;
   }

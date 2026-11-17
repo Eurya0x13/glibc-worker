@@ -92,6 +92,12 @@ for name in (
     "masks-summary.json",
     "masks-stdout.log",
     "masks-stderr.log",
+    "creation-summary.json",
+    "creation-stdout.log",
+    "creation-stderr.log",
+    "creation-order-summary.json",
+    "creation-order-stdout.log",
+    "creation-order-stderr.log",
 ):
     (out / name).unlink(missing_ok=True)
 commands = []
@@ -204,6 +210,28 @@ run(
         "-Wextra",
         "-Werror",
         "-UNDEBUG",
+        "-I" + str(core / "src/domain"),
+        "-I" + str(core / "src/runtime"),
+        source / "create-control.c",
+        core / "src/domain/signal-pending.c",
+        core / "src/domain/signal-inbox.c",
+        core / "src/domain/signal-targets.c",
+        "-ldl",
+        "-pthread",
+        "-o",
+        out / "create-control",
+    ]
+)
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
         source / "mask-control.c",
         "-ldl",
         "-pthread",
@@ -265,6 +293,8 @@ inputs = [
     out / "guest",
     out / "send-control",
     out / "mask-control",
+    out / "create-control",
+    core / "src/runtime/thread-create.h",
     out / "target-control",
     control_loader,
     out / "host/guest_async_host",
@@ -314,6 +344,7 @@ if args.serial:
         out / "guest",
         out / "send-control",
         out / "mask-control",
+        out / "create-control",
         out / "target-control",
         control_loader,
         out / "libgcc_s.so.1",
@@ -349,7 +380,7 @@ if args.serial:
     command = [*adb, "shell", shlex.join(invocation)]
 
 
-def native_command(binary):
+def native_command(binary, *arguments):
     if args.serial:
         return [
             *adb,
@@ -364,11 +395,21 @@ def native_command(binary):
                     "--library-path",
                     remote,
                     remote + "/" + binary,
+                    *arguments,
                 ]
             ),
         ]
     return list(
-        map(str, [control_loader, "--library-path", runtime, out / binary])
+        map(
+            str,
+            [
+                control_loader,
+                "--library-path",
+                f"{runtime}:{out}",
+                out / binary,
+                *arguments,
+            ],
+        )
     )
 
 
@@ -404,7 +445,27 @@ controls = [
             "concurrent_senders": 4,
             "discard_quota": True,
             "blocked_consuming": True,
+            "prepared_admission": True,
         },
+    ),
+    (
+        "creation",
+        native_command("create-control"),
+        {
+            "result": "PASS",
+            "children": 130,
+            "early_exits": 64,
+            "prestart_send": True,
+            "cancel_cleanup": True,
+            "prepare_failure": True,
+            "clone_failure": True,
+            "setup_failure": True,
+        },
+    ),
+    (
+        "creation-order",
+        native_command("create-control", "--child-only"),
+        {"result": "PASS", "missing_parent_admission_detected": True},
     ),
     (
         "anchor",
@@ -480,6 +541,7 @@ summary.update(
     native_targets_control=True,
     missing_host_anchor_control=True,
     native_mask_lifecycle_control=True,
+    native_creation_lifecycle_control=True,
     guest_public_signal_abi=False,
     jni_vm_validated=False,
     nonlocal_async_entry_validated=False,

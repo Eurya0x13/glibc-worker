@@ -2,6 +2,9 @@
 
 [English](../en/MASK_LIFECYCLE.md) | [简体中文](../zh/MASK_LIFECYCLE.md)
 
+创建前的目标准入由独立的[线程创建生命周期](THREAD_LIFECYCLE.md)回调提供；
+继承快照本身不提供该保证。
+
 匹配的 libc 为所属运行时提供私有掩码绑定、继承与观测。这些接口编译在 GNU
 libc 内，只能在其有效 TCB 下调用，并通过精确的私有能力值协商。它们不是
 Bionic 线程状态适配器，也不是面向应用的 ABI。

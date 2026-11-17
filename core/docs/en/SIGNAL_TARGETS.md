@@ -16,6 +16,11 @@ arithmetic. Closing removes active membership without moving the stable target.
 A reused libc descriptor address creates a new target identity. Old pinned
 receivers cannot consume the new target's packets.
 
+Pre-clone `prepare` reserves identity without notification or consumption;
+allocation-free `activate` admits the real TID before creation returns. See
+[creation phases and ownership](THREAD_LIFECYCLE.md) for ordering, failure and
+creator/child pins. A prepared vector member is not yet delivery eligible.
+
 The registry writer encloses inbox transactions, including the nonblocking
 notification callback. Physically block catchable signals before every call;
 the owning-libc send hook already establishes that condition. Callbacks must
