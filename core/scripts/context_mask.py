@@ -51,3 +51,20 @@ def patch_context_masks(source: Path):
             if text.count(old) != 1:
                 raise SystemExit("Context-mask patch mismatch: " + str(path))
             path.write_text(text.replace(old, new))
+
+        path = linux / arch / "makecontext.c"
+        text = path.read_text()
+        include = "#include <ucontext.h>"
+        finish = "  va_end (ap);"
+        if text.count(include) != 1 or text.count(finish) != 1:
+            raise SystemExit(
+                "Context-construction patch mismatch: " + str(path)
+            )
+        text = text.replace(
+            include,
+            include
+            + "\n\nextern void __gw_context_constructed (ucontext_t *) attribute_hidden;",
+        )
+        path.write_text(
+            text.replace(finish, finish + "\n  __gw_context_constructed (ucp);")
+        )

@@ -50,11 +50,13 @@ records `getcontext` before tail entry and handles `setcontext` through the
 same Host scope chain. Native context restoration retains each libc's machine
 state and uses the target's logical mask.
 
-GNU Host `swapcontext` records the source and tail-calls native libc. It can
-enter a fresh context prepared on another stack while retaining its own scope.
-Guest `swapcontext` retains native same-scope resume behavior and returns
-`ENOTSUP` for a switch to an older bridge scope. Supporting resumption across
-bridge scopes requires lifetime accounting for both owning stacks.
+GNU Host `swapcontext` records the source and tail-calls native libc. Guest
+libc also reports when `makecontext` prepares a new stack entry, so that entry
+can run under the current scope even if it was constructed earlier. A return
+link can refer to the outgoing `swapcontext` capture or another live context
+in the current scope. A Guest switch to a suspended older bridge scope still
+returns `ENOTSUP`. Resuming such scopes requires lifetime accounting for both
+owning stacks.
 Android verification covers Guest glibc contexts and Bionic jump buffers.
 
 The native-call integration masks catchable signals while acquiring/releasing

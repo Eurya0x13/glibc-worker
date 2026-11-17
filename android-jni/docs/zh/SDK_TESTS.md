@@ -181,7 +181,8 @@ Guest 通知编号，并在启动时启用 Host 延迟信号通道。GNU pthread
 
 Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新的 Guest 信号
 调用，再恢复外层处理器。`setcontext` 用例从即将退出的栈传入上下文副本，检查目标
-掩码与浮点舍入模式，并在同一信号调用内通过 `swapcontext` 往返独立 Guest 栈。
+掩码与浮点舍入模式，并通过 `swapcontext` 往返信号调用前准备的独立 Guest 栈。
+原生返回链接恢复仍属于当前信号调用的处理器。
 
 正常返回的 Guest 处理器会修改暂停 GNU 上下文的浮点控制状态，下次原生入口必须
 观测到这项修改。绝对时间 `clock_nanosleep` 用例要求，内核睡眠期间处理 Guest 通知

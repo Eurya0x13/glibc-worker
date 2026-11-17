@@ -26,9 +26,10 @@ android-jni 的 `GW_NATIVE_UNWIND_INTEGRATION` 默认关闭。Host 库与 Guest 
 Host 在尾调用 `getcontext` 前记录目标，并通过同一套 Host 作用域处理 `setcontext`。
 原生恢复使用各 libc 的机器状态实现及目标逻辑掩码。
 
-GNU Host 的 `swapcontext` 记录来源并尾调用原生 libc。它可进入另一份栈上准备的新
-上下文，同时保留自身作用域。Guest `swapcontext` 保留同作用域原生恢复，切换到更早的
-桥接作用域时返回 `ENOTSUP`。跨桥接作用域恢复需要同时维护两侧所属栈的生命周期。
+GNU Host 的 `swapcontext` 记录来源并尾调用原生 libc。Guest libc 还上报
+`makecontext` 准备的新栈入口。提前构造的入口可以在当前作用域执行，返回链接可指向
+本次 `swapcontext` 的来源或当前作用域内其他仍存活的上下文。Guest 若切换到已暂停的
+更早桥接作用域，仍返回 `ENOTSUP`。恢复这些作用域需要同时维护两侧所属栈的生命周期。
 Android 验证覆盖 Guest glibc 上下文和 Bionic 跳转缓冲区。
 
 尚需完成 Guest 目标接入、可恢复原生上下文、状态发布窗口、完整架构状态与安全的

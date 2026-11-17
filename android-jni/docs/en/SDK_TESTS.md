@@ -269,7 +269,8 @@ Guest `siglongjmp` and `setcontext` also resume an outer handler while retiring
 the intervening Host callback and younger Guest activation. The `setcontext`
 cases pass a copy from the stack that is about to retire, check the target
 mask and floating-point rounding, and exercise a round trip with `swapcontext`
-on a separate Guest stack within the same activation.
+on a Guest stack prepared before the signal activation. The native return link
+resumes the handler within that activation.
 
 A returning Guest handler edits the parked GNU context's FP control state.
 The next native entry must observe the edit. The absolute `clock_nanosleep`

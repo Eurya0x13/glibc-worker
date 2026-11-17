@@ -214,6 +214,7 @@ install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/domain/signal-execution.c
         src/domain/signal-consuming.c src/domain/signal-user-copy.c
         src/runtime/signal-consume-hook.h src/runtime/thread-create.h
+        src/runtime/context-events.h
         src/domain/start.S DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/core/internal)
 install(TARGETS core domains signal_interpose nonlocal_interpose EXPORT GlibcWorkerCoreTargets

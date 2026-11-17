@@ -14,6 +14,10 @@ contexts remain part of the acceptance contract.
 Destructive `setcontext` and `siglongjmp` can already restore a saved native
 Guest command or an older Guest handler. Resuming a bridge scope suspended
 with `swapcontext` still requires a lifetime protocol for both stacks.
+A prepared `makecontext` entry can run and return within the current scope.
+The remaining test must switch from an inner Guest handler to an older live
+Guest continuation and later resume the inner handler with both Guest stacks
+and the intervening Host callback intact.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native

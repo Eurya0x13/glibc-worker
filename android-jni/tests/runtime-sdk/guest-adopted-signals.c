@@ -25,7 +25,7 @@ struct guest_observation {
   sigset_t inherited;
   sigjmp_buf continuation;
   ucontext_t context;
-  ucontext_t suspended_handler;
+  ucontext_t suspended_handler, prepared_fiber;
   void *fiber_stack;
   volatile sig_atomic_t fiber_ran;
   int original_rounding;
@@ -69,12 +69,8 @@ static void run_on_guest_stack(void) {
 }
 
 static _Noreturn void restore_saved_context(struct guest_observation *o) {
-  ucontext_t fiber;
-  assert(!getcontext(&fiber));
-  fiber.uc_stack = (stack_t){.ss_sp = o->fiber_stack, .ss_size = 65536};
-  fiber.uc_link = &o->suspended_handler;
-  makecontext(&fiber, run_on_guest_stack, 0);
-  assert(!swapcontext(&o->suspended_handler, &fiber) && o->fiber_ran == 1);
+  assert(!swapcontext(&o->suspended_handler, &o->prepared_fiber));
+  assert(o->fiber_ran == 1);
   assert(!fesetround(FE_UPWARD));
 
   /* The restore input itself is on the signal stack that will be retired. */
@@ -252,6 +248,11 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
     o->fiber_stack = malloc(65536);
     o->fiber_ran = 0;
     assert(o->fiber_stack);
+    assert(!getcontext(&o->prepared_fiber));
+    o->prepared_fiber.uc_stack =
+        (stack_t){.ss_sp = o->fiber_stack, .ss_size = 65536};
+    o->prepared_fiber.uc_link = &o->suspended_handler;
+    makecontext(&o->prepared_fiber, run_on_guest_stack, 0);
   }
   sigemptyset(&action.sa_mask);
   sigset_t set;

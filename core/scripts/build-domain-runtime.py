@@ -36,6 +36,7 @@ inputs = [
     fragments / "signal-send-kill.c",
     fragments / "signal-mask.inc",
     fragments / "context-mask.inc",
+    fragments / "context-events.h",
     fragments / "wait-mask.inc",
     fragments / "wait-mask.h",
     fragments / "signal-consume-hook.h",
@@ -121,6 +122,9 @@ if not (root / "patched").exists():
     )
     shutil.copyfile(
         fragments / "context-mask.inc", src / "nptl/gw-context-mask.inc"
+    )
+    shutil.copyfile(
+        fragments / "context-events.h", src / "include/gw-context-events.h"
     )
     shutil.copyfile(fragments / "wait-mask.inc", src / "nptl/gw-wait-mask.inc")
     shutil.copyfile(fragments / "wait-mask.h", src / "include/gw-wait-mask.h")
@@ -327,7 +331,7 @@ for origin, name in [
                 "logical-mask-inheritance-and-notify-v1",
                 "pre-clone-recipient-admission-v1",
                 "optional-logical-consuming-waits-v1",
-                "optional-native-context-events-v1",
+                "optional-native-context-events-v2",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

@@ -4,25 +4,35 @@
  * https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/aarch64/setcontext.S
  */
 #include <stddef.h>
-#include <ucontext.h>
+#include <gw-context-events.h>
 
-typedef int (*gw_context_event)(ucontext_t *, const ucontext_t *, int);
-static gw_context_event gw_context_hook;
+static gw_libc_context_hook gw_context_hook;
 
-int __gw_domain_context_hook(unsigned, gw_context_event);
+int __gw_domain_context_hook(unsigned, gw_libc_context_hook);
 int __gw_context_sigmask(int, const sigset_t *, sigset_t *, const ucontext_t *);
+void __gw_context_constructed(ucontext_t *);
 
 libc_hidden_proto(__gw_context_sigmask)
+    libc_hidden_proto(__gw_context_constructed)
 
-    int __gw_domain_context_hook(unsigned version, gw_context_event hook) {
-  if (version != 1 || !hook || gw_context_hook) {
+        int __gw_domain_context_hook(unsigned version,
+                                     gw_libc_context_hook hook) {
+  if (version != 2 || !hook || gw_context_hook) {
     return EINVAL;
   }
   gw_context_hook = hook;
   return 0;
 }
 
-static int context_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
+void __gw_context_constructed(ucontext_t *context) {
+  if (gw_context_hook) {
+    gw_context_hook(GW_CONTEXT_CONSTRUCT, context, NULL);
+  }
+}
+
+libc_hidden_def(__gw_context_constructed)
+
+    static int context_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
   if (gw_logical_mask && *gw_mask_active) {
     return gw_domain_sigmask(how, set, oldset);
   }
@@ -42,18 +52,22 @@ int __gw_context_sigmask(int how, const sigset_t *set, sigset_t *oldset,
     target =
         (const void *)((const char *)set - offsetof(ucontext_t, uc_sigmask));
   }
+  ucontext_t *saved = NULL;
+  if (oldset) {
+    saved = (void *)((char *)oldset - offsetof(ucontext_t, uc_sigmask));
+  }
   if (gw_context_hook && target) {
-    int error = gw_context_hook(NULL, target, oldset != NULL);
+    enum gw_context_operation operation =
+        saved ? GW_CONTEXT_SWAP : GW_CONTEXT_RESTORE;
+    int error = gw_context_hook(operation, saved, target);
     if (error) {
       return error;
     }
   }
 
   int error = context_sigmask(how, set, oldset);
-  if (!error && gw_context_hook && oldset) {
-    ucontext_t *saved =
-        (void *)((char *)oldset - offsetof(ucontext_t, uc_sigmask));
-    error = gw_context_hook(saved, NULL, 0);
+  if (!error && gw_context_hook && saved) {
+    error = gw_context_hook(GW_CONTEXT_CAPTURE, saved, NULL);
   }
   return error;
 }

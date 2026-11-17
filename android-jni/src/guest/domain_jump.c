@@ -17,11 +17,12 @@
  */
 struct jump_record {
   const void *buffer;
+  const ucontext_t *link;
   struct gw_domain_native_checkpoint *owner;
   struct jni_domain_signal *signal;
   uint64_t generation, module;
   uintptr_t sp, pc;
-  int context;
+  int context, prepared;
   int depth, rpc_top;
 };
 
@@ -228,6 +229,7 @@ static struct jump_record *lookup_context(const ucontext_t *context) {
       }
       if (match &&
           (match->generation != r->generation || match->signal != r->signal ||
+           match->prepared != r->prepared || match->link != r->link ||
            match->depth != r->depth || match->module != r->module ||
            match->rpc_top != r->rpc_top)) {
         return NULL;
@@ -255,8 +257,42 @@ static int retain_context(const ucontext_t *context) {
   return 0;
 }
 
-int gw_domain_context_event(ucontext_t *saved, const ucontext_t *target,
-                            int resumable) {
+static void track_context(enum gw_context_operation operation,
+                          ucontext_t *saved,
+                          struct gw_domain_native_checkpoint *frame) {
+  struct jump_record *r = lookup(saved, 1);
+  if (operation == GW_CONTEXT_CONSTRUCT) {
+    /* makecontext created a new stack entry. Its creator's frame may return
+     * while the application-owned context and stack remain valid. */
+    *r = (struct jump_record){
+        .buffer = saved, .prepared = 1, .link = saved->uc_link};
+  } else {
+    capture(r, saved, frame);
+  }
+  r->context = 1;
+  r->pc = gw_signal_interrupted_pc(saved);
+  r->sp = gw_signal_interrupted_sp(saved);
+}
+
+static int can_enter_prepared(const struct jump_record *r,
+                              const ucontext_t *target, const ucontext_t *saved,
+                              struct gw_domain_native_checkpoint *frame) {
+  if (r->link != target->uc_link || r->pc != gw_signal_interrupted_pc(target) ||
+      r->sp != gw_signal_interrupted_sp(target)) {
+    return 0;
+  }
+  if (!r->link || r->link == saved) {
+    return 1;
+  }
+  /* On ARM64 the owning swapcontext tail-calls setcontext after recording
+   * the outgoing context. Its uc_link is now a capture in this same scope. */
+  struct jump_record *link = lookup(r->link, 0);
+  return link && link->context && !link->prepared && link->owner == frame &&
+         link->signal == carrier->guest_signal;
+}
+
+int gw_domain_context_event(enum gw_context_operation operation,
+                            ucontext_t *saved, const ucontext_t *target) {
   if (!carrier || (saved && saved == carrier->parked_guest) ||
       (target && target == carrier->parked_guest)) {
     return 0;
@@ -273,18 +309,18 @@ int gw_domain_context_event(ucontext_t *saved, const ucontext_t *target,
   int original_errno = errno;
   uint64_t mask = gw_nonlocal_mask_block();
   int error = 0;
-  if (saved) {
-    struct jump_record *r = lookup(saved, 1);
-    capture(r, saved, frame);
-    r->context = 1;
-    r->pc = gw_signal_interrupted_pc(saved);
-    r->sp = gw_signal_interrupted_sp(saved);
+  if (operation == GW_CONTEXT_CAPTURE || operation == GW_CONTEXT_CONSTRUCT) {
+    track_context(operation, saved, frame);
   } else {
     struct jump_record *r = lookup_context(target);
     if (!r) {
       error = ENOTSUP;
+    } else if (r->prepared) {
+      if (!can_enter_prepared(r, target, saved, frame)) {
+        error = ENOTSUP;
+      }
     } else if (r->owner != frame || r->signal != carrier->guest_signal) {
-      if (resumable || !can_route(r, frame)) {
+      if (operation == GW_CONTEXT_SWAP || !can_route(r, frame)) {
         error = ENOTSUP;
       } else if (!(error = retain_context(target))) {
         route(r, frame, 0, NATIVE_SETCONTEXT, mask);

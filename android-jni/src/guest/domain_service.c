@@ -29,8 +29,7 @@ static int (*reserve_signals)(uint64_t);
 static int (*bind_mask)(uint64_t *, const uint64_t *, const int *, uint64_t);
 static int (*install_sigaction_hook)(int (*)(int, const void *, void *, int *));
 static int (*install_jump_hook)(void (*)(void *, int, int));
-static int (*install_context_hook)(unsigned, int (*)(ucontext_t *,
-                                                     const ucontext_t *, int));
+static int (*install_context_hook)(unsigned, gw_libc_context_hook);
 
 static uint64_t virtual_signals(void) {
   return session->guest_notification ? gw_guest_virtual_mask()
@@ -347,7 +346,7 @@ static int setup_signals(void) {
     return EINVAL;
   }
   if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event) ||
-      install_context_hook(1, gw_domain_context_event)) {
+      install_context_hook(2, gw_domain_context_event)) {
     return EINVAL;
   }
   return 0;
