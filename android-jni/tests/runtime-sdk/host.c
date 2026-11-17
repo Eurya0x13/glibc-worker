@@ -1009,6 +1009,21 @@ static void host_fault_masks(JNIEnv *env, jclass cls) {
   fflush(stdout);
 }
 
+static void guest_signal_unwind(JNIEnv *env, jclass cls) {
+  for (int mode = 97; mode <= 100; ++mode) {
+    int value = native_entry(env, cls, mode);
+    fprintf(stderr, "GUEST_SIGNAL_UNWIND mode=%d value=%d\n", mode, value);
+    assert(value == 73 && !(*env)->ExceptionCheck(env));
+    assert(native_entry(env, cls, 0) == 73);
+    printf(
+        "{\"stage\":\"guest-signal-unwind\",\"mode\":%d,\"value\":%d,"
+        "\"handler_cleanup\":true,\"body_cleanup\":true,"
+        "\"subsequent_call\":true,\"java_frames_crossed\":false}\n",
+        mode, value);
+    fflush(stdout);
+  }
+}
+
 static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
   void *entry = NULL;
   struct gw_loader_error error = {0};
@@ -1116,6 +1131,7 @@ static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
   int fpe = native_entry(env, cls, 87);
   assert((fpe == 73 || fpe == 74) && !(*env)->ExceptionCheck(env));
   assert(native_entry(env, cls, 0) == 73);
+  guest_signal_unwind(env, cls);
   struct sigaction trap_previous,
       trap_action = {.sa_handler = host_trap, .sa_flags = SA_RESETHAND};
   sigemptyset(&trap_action.sa_mask);

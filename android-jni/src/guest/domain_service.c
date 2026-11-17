@@ -89,6 +89,12 @@ static int guest_fault(int number, void *info, void *context) {
                                   current->exchange.guest_execution_mask,
                                   session->reserved_signals);
 }
+
+static void guest_kernel_entry(int number, void *info, void *context) {
+  if (guest_fault(number, info, context)) {
+    _exit(126);
+  }
+}
 #endif
 
 int gw_domain_guest_active(void) {
@@ -293,7 +299,8 @@ int main(int argc, char **argv) {
     session->error = EINVAL;
     goto reject;
   }
-  if (!session->bind_guest_signal || session->bind_guest_signal(guest_fault)) {
+  if (!session->bind_guest_kernel ||
+      session->bind_guest_kernel(guest_kernel_entry)) {
     session->error = EINVAL;
     goto reject;
   }

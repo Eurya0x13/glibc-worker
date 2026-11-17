@@ -2,6 +2,21 @@
 
 [English](../en/SDK_TESTS.md) | [简体中文](../zh/SDK_TESTS.md)
 
+四条 `guest-signal-unwind` 观测还要求真实 GNU 线程在硬件故障处理器内取消或退出，
+覆盖普通栈、替代信号栈；被中断函数与处理器都必须完成编译器清理，随后 JNI 调用
+和退役也须正常。源码使用 DWARF 清理属性，并为故障读指令启用异常支持，避免
+C 取消跳转的后备路径掩盖遗漏清理。归因于桥之前，可以独立运行同源 GNU 对照：
+
+```sh
+python3 android-jni/tests/guest_signal_unwind.py --runtime "$GW_RUNTIME"
+python3 android-jni/tests/guest_signal_unwind.py --abi arm64-v8a \
+  --runtime "$GW_RUNTIME" --serial "$ANDROID_SERIAL"
+```
+
+第二条需要 GNU ARM64 编译器及已授权的 shell 设备。两种对照均不加载 JVM 或桥。
+结果、编译命令、运行时/二进制哈希和原始输出位于本项目
+`build/tests/guest-signal-unwind` 或 `build/tests/guest-signal-unwind-android`。
+
 用例消费分别安装的 core、bionic-dlopen 和 android-jni 包，嵌入显式选择的 HotSpot 制品，装载 glibc JNI 模块并检查调用、引用、关闭和退出，不以 ART 代替 Android JRE。
 
 `python3 android-jni/tests/runtime_sdk.py --help` 列出桌面输入；Android 入口为 `python3 android-jni/tests/runtime_sdk_android.py --help`，还需显式设备、NDK、JRE 资源/库目录及匹配的 VM 启动 profile。部署前检查 libjvm/libjava 散列。Android 经 linker64 在 shell 进程执行，不是安装 APK；通过不证明应用沙箱兼容。

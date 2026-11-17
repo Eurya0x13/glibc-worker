@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SUITES = [
     "core/build/tests/guest-async",
     "core/build/tests/guest-async-android",
+    "android-jni/build/tests/guest-signal-unwind",
+    "android-jni/build/tests/guest-signal-unwind-android",
     *(
         f"core/build/tests/signal-{kind}{platform}"
         for kind in ("aliases", "deferred")

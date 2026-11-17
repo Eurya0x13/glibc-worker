@@ -42,7 +42,7 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
   session.note_guest = signal_note_guest_thread;
   session.guest_thread = signal_guest_lifecycle;
 #ifdef GW_DOMAIN_NONLOCAL
-  session.bind_guest_signal = signal_guest_fault_bind;
+  session.bind_guest_kernel = signal_guest_kernel_bind;
 #endif
   /* Claim bridge ownership before creating helpers or changing Guest fault
    * routing. A validation failure leaves NEW and permits a corrected retry;

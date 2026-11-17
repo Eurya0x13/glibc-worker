@@ -76,6 +76,21 @@ def valid_guest_target_observations(rows):
     ]
 
 
+def valid_signal_unwind_observations(rows):
+    return [r for r in rows if r.get("stage") == "guest-signal-unwind"] == [
+        {
+            "stage": "guest-signal-unwind",
+            "mode": mode,
+            "value": 73,
+            "handler_cleanup": True,
+            "body_cleanup": True,
+            "subsequent_call": True,
+            "java_frames_crossed": False,
+        }
+        for mode in range(97, 101)
+    ]
+
+
 def valid_relay_lifecycle(rows, mode):
     return [r for r in rows if r.get("stage") == "runtime-relay-lifecycle"] == [
         {
@@ -316,6 +331,7 @@ def execute_case(
                 or transfer[0].get("guest_wait_cases") != 19
                 or transfer[0].get("guest_registration_aliases") != 9
                 or not valid_registration_observations(rows)
+                or not valid_signal_unwind_observations(rows)
                 or transfer[0].get("wait_unwinds") != 2
                 or not valid_wait_observations(rows, transfer[0])
                 or (
@@ -416,6 +432,7 @@ def execute_case(
             wait_exercised=transfer[0]["guest_wait_cases"] - skipped,
             wait_skipped=skipped,
             wait_unwinds=transfer[0]["wait_unwinds"],
+            guest_signal_unwinds=4,
         )
 
     return summary

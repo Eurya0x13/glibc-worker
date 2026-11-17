@@ -165,35 +165,49 @@ _Atomic int domain_sr_deliveries;
 _Atomic int domain_sr_guest_deliveries;
 static _Atomic long guest_tids[DOMAIN_FIXTURE_CARRIERS + 1];
 static _Atomic uintptr_t guest_tps[DOMAIN_FIXTURE_CARRIERS + 1];
-static _Atomic(uintptr_t) guest_fault_entry;
+static _Atomic(uintptr_t) guest_kernel_entry;
 
 /* The pinned GNU service installs this before admitting module constructors
  * or pthreads. Called with Guest TP; no Host libc, TLS or errno access. */
-__attribute__((no_stack_protector)) int signal_guest_fault_bind(
-    int (*entry)(int, void *, void *)) {
+__attribute__((no_stack_protector)) int signal_guest_kernel_bind(
+    void (*entry)(int, void *, void *)) {
   uintptr_t expected = 0;
   return entry && atomic_compare_exchange_strong_explicit(
-                      &guest_fault_entry, &expected, (uintptr_t)entry,
+                      &guest_kernel_entry, &expected, (uintptr_t)entry,
                       memory_order_release, memory_order_relaxed)
              ? 0
              : EINVAL;
+}
+
+/* TLS/libc-free selection before the assembly tail transfer. A GNU unwind
+ * cannot depend on FDEs owned only by Bionic's separate loader namespace.
+ * The owning Guest handler returns to the original kernel restorer directly.
+ * https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/aarch64/linux-unwind.h
+ * https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/i386/linux-unwind.h
+ */
+__attribute__((no_stack_protector)) uintptr_t
+domain_guest_thread_select(int number, const siginfo_t *information) {
+  if (information->si_code > 0 &&
+      (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
+       number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
+    return atomic_load_explicit(&guest_kernel_entry, memory_order_acquire);
+  }
+  return 0;
 }
 
 /* Genuine GNU pthreads keep their real TLS. Hardware faults stay in Guest;
  * asynchronous Host handlers explicitly run on the real Host dispatcher. */
 __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
     int number, siginfo_t *info, void *context, void *token, uint64_t mask) {
-  uintptr_t entry =
-      atomic_load_explicit(&guest_fault_entry, memory_order_acquire);
-
   if (info->si_code > 0 &&
       (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
        number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
-    if (entry &&
-        !((int (*)(int, void *, void *))entry)(number, info, context)) {
-      return;
-    }
-  } else if (!signal_host_relay(number, info, context, token, mask)) {
+    /* No matching Guest entry was configured. A Host VM handler must never
+     * interpret this foreign GNU execution frame as its own fault. */
+    gw_raw3(SYS_exit_group, 96, 0, 0);
+    __builtin_unreachable();
+  }
+  if (!signal_host_relay(number, info, context, token, mask)) {
     return;
   }
 

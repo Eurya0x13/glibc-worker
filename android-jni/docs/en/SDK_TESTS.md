@@ -33,6 +33,25 @@ see [the Host channel contract](../../../core/docs/en/SIGNAL_WAITING.md).
 
 ## Native unwind validation
 
+Four `guest-signal-unwind` observations additionally require native GNU thread
+cancellation/exit from a hardware-fault handler, ordinary/alternate stacks,
+cleanup of the interrupted body and handler, another JNI call and teardown.
+The source uses DWARF cleanup attributes, with exception support for faulting
+loads, so a C-only cancellation jump fallback cannot hide skipped cleanup.
+Run the same GNU-only oracle independently before attributing a failure to the
+bridge:
+
+```sh
+python3 android-jni/tests/guest_signal_unwind.py --runtime "$GW_RUNTIME"
+python3 android-jni/tests/guest_signal_unwind.py --abi arm64-v8a \
+  --runtime "$GW_RUNTIME" --serial "$ANDROID_SERIAL"
+```
+
+The second command requires the GNU ARM64 compiler and an authorized shell
+device. Neither control loads a JVM or bridge. Its result, compiler command,
+runtime/binary hashes and raw output live under `build/tests/guest-signal-unwind`
+or `build/tests/guest-signal-unwind-android` in this project.
+
 Build and install android-jni with `-DGW_NATIVE_UNWIND_INTEGRATION=ON`. Run the
 consumer with `--native-unwind --nonlocal`; the runner links the opt-in core
 interposition target and builds a matching Guest service. Omitting `--nonlocal`

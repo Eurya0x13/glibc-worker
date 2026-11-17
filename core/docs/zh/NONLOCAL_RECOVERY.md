@@ -156,6 +156,29 @@ android-jni 负责桥/JNI 资源协调；jvm-jni 负责受支持调用和生命�
 
 信号注册回收的静止证明必须考虑 continuation 生命周期。处理器计数为零不能排除之后恢复到保存信号帧。
 
+## 原生 GNU 线程展开
+
+真实 GNU pthread 的硬件故障会尾跳转进入 `signal_guest_kernel_bind` 选择的
+Guest 内核处理入口。外层汇编在跳转前撤销临时 Host 帧。Guest 取消和
+`pthread_exit` 因此可以通过真实内核信号帧展开到被中断的 GNU 代码，不需要 GNU
+装载器查找仅由 Bionic 装载的映像中的帧信息。Host 所有的异步信号仍走显式 Host
+分派线程。未配置入口的 GNU 硬件故障继续失败关闭，不能交给 VM 解释。
+
+owning Guest 的 `domain_stack_call`、`domain_stack_call_record` 为保存原始栈
+位置的寄存器提供 DWARF 规则，在 SP 指向另一栈时也成立。原生 GNU 展开器继续
+使用自己的信号恢复入口识别：
+[ARM64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/aarch64/linux-unwind.h)、
+[x86_64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/i386/linux-unwind.h)。
+这提供原生强制展开的帧遍历能力，不会为任意跨域 `longjmp` 增加 C++ 异常清理。
+
+已安装 JNI 对照在普通栈、替代信号栈上测试处理器的原生 `read` 取消点和显式
+`pthread_exit`。处理器、被中断函数的编译器清理记录都必须执行；随后 JNI 调用、
+模块关闭和运行时关闭仍须成功。独立 GNU 对照使用同一源码，但不加载桥。两者
+均采用 `-fexceptions -fnon-call-exceptions`，使故障读指令按
+[GCC 代码生成契约](https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html#index-fnon-call-exceptions)
+成为真实清理点。这些标志用于测试判据，不要求现有模组重新编译。对照不跨越
+Java/VM 帧，也不声称收养载体支持取消或独立异步入口已完整实现。
+
 ## 源码依据
 
 - [glibc 跳转恢复](https://github.com/bminor/glibc/blob/glibc-2.41/setjmp/longjmp.c)：libc 清理、可选掩码恢复与机器状态恢复。

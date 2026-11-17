@@ -90,6 +90,19 @@ domain_signal_entry:
 .Lguest_thread_signal:
     mov 0(%rsp), %rdi
     mov 8(%rsp), %rsi
+    call domain_guest_thread_select
+    test %rax, %rax
+    jz .Lrelay_guest_thread
+    mov %rax, %r11
+    mov 0(%rsp), %rdi
+    mov 8(%rsp), %rsi
+    mov 16(%rsp), %rdx
+    add $64, %rsp
+    pop %rbx
+    jmp *%r11
+.Lrelay_guest_thread:
+    mov 0(%rsp), %rdi
+    mov 8(%rsp), %rsi
     mov 16(%rsp), %rdx
     mov 32(%rsp), %rcx
     mov 48(%rsp), %r8
@@ -218,6 +231,16 @@ domain_signal_entry:
     ret
 #ifdef GW_DOMAIN_CHAIN
 .Lguest_thread_signal:
+    ldp x0, x1, [sp, #32]
+    bl domain_guest_thread_select
+    cbz x0, .Lrelay_guest_thread
+    mov x16, x0
+    ldp x0, x1, [sp, #32]
+    ldr x2, [sp, #48]
+    ldp x19, x30, [sp]
+    add sp, sp, #80
+    br x16
+.Lrelay_guest_thread:
     ldp x0, x1, [sp, #32]
     ldr x2, [sp, #48]
     ldr x3, [sp, #56]

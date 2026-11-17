@@ -160,6 +160,37 @@ Run `core/experiments/same-thread/run.py --adopt --signals` with a matching
 adoption runtime; Android validation additionally requires `--abi arm64-v8a`,
 `--ndk`, and `--serial`.
 
+## Native GNU thread unwind
+
+Genuine GNU pthread hardware faults tail-enter the Guest-owned kernel handler
+selected by `signal_guest_kernel_bind`. The outer assembly removes its temporary
+Host frame before the transfer. Guest cancellation and `pthread_exit` can then
+unwind through the actual kernel frame to interrupted GNU code, without asking
+the GNU loader to find frame information in Bionic-only images. Host-owned
+asynchronous signals keep the explicit Host dispatcher path. An unconfigured
+GNU hardware-fault entry still fails closed instead of entering a VM handler.
+
+The owning Guest's `domain_stack_call` and `domain_stack_call_record` include
+DWARF rules for their preserved original stack register, including while SP
+points at another stack. The native GNU unwinder retains its signal-restorer
+recognition on
+[ARM64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/aarch64/linux-unwind.h)
+and [x86_64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/i386/linux-unwind.h).
+This supplies native forced-unwind frame traversal; it does not turn arbitrary
+cross-domain `longjmp` into C++ exception cleanup.
+
+The installed JNI control tests cancellation at a handler's native `read` and
+explicit `pthread_exit`, on ordinary and alternate signal stacks. Compiler
+cleanup records in both handler and interrupted body must execute; another JNI
+call, module close and runtime shutdown must still succeed. The separate
+GNU-only control uses the same source without loading the bridge. Both compile
+with `-fexceptions -fnon-call-exceptions`, so the faulting load is an actual
+cleanup point under
+[GCC's code generation contract](https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html#index-fnon-call-exceptions).
+These flags describe the test oracle, not a new recompilation requirement for
+existing modules. The control crosses no Java/VM frames and makes no adopted
+carrier cancellation or complete independent asynchronous-entry claim.
+
 ## Observable behavior
 
 A Host checkpoint can remain live while its carrier executes Guest code. A Host

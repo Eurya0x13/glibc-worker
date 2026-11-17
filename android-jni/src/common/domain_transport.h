@@ -26,7 +26,7 @@ static inline int jni_domain_select(const char *mode) {
 }
 
 #define GW_DOMAIN_TRANSPORT_MAGIC UINT64_C(0x4757444f4d41494e)
-#define GW_DOMAIN_TRANSPORT_VERSION 13u
+#define GW_DOMAIN_TRANSPORT_VERSION 14u
 #define GW_DOMAIN_LIBC_CAPABILITIES UINT64_C(0x475744010000000a)
 #define GW_DOMAIN_CAP_ADOPTION UINT64_C(1)
 #define GW_DOMAIN_CAP_NATIVE_UNWIND UINT64_C(2)
@@ -81,7 +81,7 @@ struct jni_domain_session {
   void (*entry)(void *);
   void (*note_guest)(int, long, uintptr_t);
   void (*guest_thread)(int);
-  int (*bind_guest_signal)(int (*)(int, void *, void *));
+  int (*bind_guest_kernel)(void (*)(int, void *, void *));
   /* Published with STOP response, after the native kernel mask is installed.
    * The supervisor never resumes application work or unmasks after this ACK. */
   uint64_t owner_stopped_mask;

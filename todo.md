@@ -79,6 +79,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   Bionic bootstrap routing and reviewed late data-import routing now cover
   real private registrations/entry. GNU Host cancellation and credential
   protocols still require their own lifecycle validation.
+  Real GNU hardware-fault entry now tail-transfers to its owning handler, with
+  stack-switch unwind information and installed JNI/native-only cancellation
+  and pthread-exit controls. This does not enable adopted-carrier cancellation.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,
   preserving sender information, queue semantics and errors.
   The optional [owning-libc send hook](core/docs/en/GUEST_SIGNAL_SEND.md) now

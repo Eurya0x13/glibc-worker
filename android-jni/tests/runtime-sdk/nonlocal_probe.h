@@ -7,4 +7,5 @@ int sdk_guest_fault_probe(int);
 int sdk_guest_stack_probe(void *, void *, int);
 int sdk_guest_wait_probe(int);
 int sdk_guest_registration_probe(void);
+int sdk_guest_signal_unwind_probe(int);
 #endif

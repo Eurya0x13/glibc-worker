@@ -50,7 +50,9 @@ int signal_prepare_release(struct signal_slot *, int thread_exiting);
 int signal_host_retirement_busy(void);
 unsigned signal_deferred_recipients(void);
 void signal_guest_lifecycle(int);
-int signal_guest_fault_bind(int (*)(int, void *, void *));
+/* GNU pthread signals tail-enter this Guest-owned kernel handler, with no
+ * Host C/assembly frame left underneath native forced unwind. */
+int signal_guest_kernel_bind(void (*)(int, void *, void *));
 uint64_t signal_carrier_mask(struct signal_slot *, uint64_t, int guest);
 uint64_t signal_host_physical_mask(uint64_t);
 uint64_t signal_host_logical_mask(uint64_t);
@@ -68,6 +70,7 @@ int signal_host_collect_notification(int, siginfo_t *);
 struct gw_signal_deferred *signal_host_consumer(void);
 int signal_host_consumer_fd(void);
 void domain_guest_thread_dispatch(int, siginfo_t *, void *, void *, uint64_t);
+uintptr_t domain_guest_thread_select(int, const siginfo_t *);
 struct signal_slot *signal_dynamic_lookup(long, uintptr_t);
 void domain_fault(void *);
 extern char domain_fault_instruction[], domain_fault_resume[];
