@@ -32,6 +32,7 @@ int __gw_domain_wait_begin(const sigset_t *set,
       ~((UINT64_C(1) << (SIGKILL - 1)) | (UINT64_C(1) << (SIGSTOP - 1)) |
         (UINT64_C(1) << (SIGCANCEL - 1)) | (UINT64_C(1) << (SIGSETXID - 1)));
   *gw_logical_mask = requested;
+  gw_mask_publish(requested);
   uint64_t kernel =
       (requested & ~gw_reserved_mask) | (*gw_carrier_mask & gw_reserved_mask);
   memset(&state->kernel, 0, sizeof state->kernel);
@@ -53,6 +54,7 @@ int __gw_domain_wait_end(struct gw_domain_wait_mask *state) {
     return INTERNAL_SYSCALL_ERRNO(result);
   }
   *gw_logical_mask = state->logical;
+  gw_mask_publish(state->logical);
   result = INTERNAL_SYSCALL_CALL(rt_sigprocmask, SIG_SETMASK, &state->physical,
                                  NULL, __NSIG_BYTES);
   return INTERNAL_SYSCALL_ERROR_P(result) ? INTERNAL_SYSCALL_ERRNO(result) : 0;

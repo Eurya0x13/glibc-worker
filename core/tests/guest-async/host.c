@@ -550,6 +550,7 @@ int main(int argc, char **argv) {
       "\"same_tid\":true,\"distinct_tls\":true,"
       "\"guest_stack\":true,\"tls_errno_fp\":true,\"guest_malloc\":true,"
       "\"layout_handshake\":true,"
+      "\"adopted_mask_inheritance\":true,"
       "\"busy_host_delivery\":true,\"host_sleep_transparent\":true,"
       "\"host_ppoll_transparent\":true,\"handler_time_in_budget\":true,"
       "\"empty_notification_retry\":true,"

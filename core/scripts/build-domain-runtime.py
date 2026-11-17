@@ -11,6 +11,7 @@ from context_mask import patch_context_masks
 from wait_mask import patch_wait_masks
 from signal_send import patch_signal_sends
 from private_signals import patch_private_signals
+from mask_lifecycle import patch_mask_lifecycle
 
 source = Path(__file__).resolve().parent
 core = source.parent
@@ -41,6 +42,7 @@ inputs = [
     core / "scripts/wait_mask.py",
     core / "scripts/signal_send.py",
     core / "scripts/private_signals.py",
+    core / "scripts/mask_lifecycle.py",
     base / "patch-hashes.txt",
     base / "source-sha256.txt",
     core / "config/targets.json",
@@ -106,6 +108,7 @@ if not (root / "patched").exists():
         "__gw_domain_thread_hook; __gw_domain_capabilities; __gw_domain_mask_bind;",
     )
     patch_signal_sends(src, fragments, replace)
+    patch_mask_lifecycle(src, replace)
     shutil.copyfile(
         fragments / "signal-mask.inc", src / "nptl/gw-signal-mask.inc"
     )
@@ -300,6 +303,7 @@ for origin, name in [
                 "guest-native-jump-hook",
                 "optional-guest-signal-send-v1",
                 "private-nptl-signals-63-64",
+                "logical-mask-inheritance-and-notify-v1",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

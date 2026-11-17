@@ -31,6 +31,11 @@ its generated source/object trees remain owned by core. `experiments/` contains
 validation entrypoints and historical evidence, not the implementation used by
 the installed domain target.
 
+The owning libc's [logical-mask lifecycle](MASK_LIFECYCLE.md) separates native
+GNU thread inheritance from a borrowed carrier's physical mask and supplies
+an optional observer for queue eligibility. It requires the matching private
+capability; it does not create Bionic state for GNU threads.
+
 ## Signal integration
 
 The regular domain target does not export libc's `sigaction`, `signal` or
@@ -54,9 +59,11 @@ A consumed one-shot retains its original flags/mask, as native queries do.
 Host registration routing covers every catchable public signal, including
 `SIGUSR1`, `SIGALRM`, `SIGCHLD` and unreserved RT signals. A routed Host action
 does not add an exclusive VM reservation; `signal_router_reserved()` reports
-the selected ownership profile plus private notification signals. Libc-private
-signal numbers remain outside this public layer. Existing custom actions require
-explicit adoption before Guest admission. `signal_router_guest_ready()` returns
+the selected ownership profile plus private notification signals.
+GNU Host NPTL remains native; Bionic private registrations use reviewed
+[owning-libc routing](PRIVATE_SIGNALS.md), while Guest NPTL leases 63/64.
+Existing custom actions require explicit adoption before Guest admission.
+`signal_router_guest_ready()` returns
 `ENOTSUP` for an unadopted custom action, without changing it. Bootstrap consumers
 can initialize and adopt before VM creation; late consumers retain the reviewed
 outer-chain requirement.

@@ -3,6 +3,7 @@
 #include "nonlocal-mask.h"
 #include "send-lifetime.h"
 #include "private-threads.h"
+#include "mask-inheritance.h"
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -213,6 +214,7 @@ static void serve(void *argument) {
   struct async_carrier *carrier = argument;
   struct exchange *exchange = &carrier->exchange;
   current = carrier;
+  test_adopted_mask_inheritance();
   carrier->busy_begin = (uintptr_t)gw_async_busy_begin;
   carrier->busy_end = (uintptr_t)gw_async_busy_end;
   assert(guest_tls == 41);
@@ -269,7 +271,7 @@ static void resolve(void) {
   } while (0)
   unsigned long (*capabilities)(void);
   RESOLVE(capabilities, "__gw_domain_capabilities");
-  assert(capabilities() == 0x4757440100000007UL);
+  assert(capabilities() == 0x4757440100000009UL);
   RESOLVE(allocate_domain, "__gw_domain_alloc");
   RESOLVE(bind_domain, "__gw_domain_bind");
   RESOLVE(run_domain, "__gw_domain_run");

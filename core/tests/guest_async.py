@@ -89,6 +89,9 @@ for name in (
     "anchor-summary.json",
     "anchor-stdout.log",
     "anchor-stderr.log",
+    "masks-summary.json",
+    "masks-stdout.log",
+    "masks-stderr.log",
 ):
     (out / name).unlink(missing_ok=True)
 commands = []
@@ -164,6 +167,7 @@ run(
         source / "guest.c",
         source / "send-lifetime.c",
         source / "private-threads.c",
+        source / "mask-inheritance.c",
         core / "src/domain/signal-pending.c",
         core / "src/domain/signal-inbox.c",
         core / "src/domain/signal-targets.c",
@@ -190,6 +194,23 @@ run(
     ]
 )
 control_loader = out / "control-loader"
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        source / "mask-control.c",
+        "-ldl",
+        "-pthread",
+        "-o",
+        out / "mask-control",
+    ]
+)
 shutil.copyfile(loader, control_loader)
 control_loader.chmod(0o755)
 run(
@@ -243,6 +264,7 @@ inputs = [
     runtime / "manifest.json",
     out / "guest",
     out / "send-control",
+    out / "mask-control",
     out / "target-control",
     control_loader,
     out / "host/guest_async_host",
@@ -291,6 +313,7 @@ if args.serial:
         out / "host/guest_async_no_anchor",
         out / "guest",
         out / "send-control",
+        out / "mask-control",
         out / "target-control",
         control_loader,
         out / "libgcc_s.so.1",
@@ -388,6 +411,21 @@ controls = [
         missing_anchor,
         {"result": "PASS", "missing_host_anchor_detected": True},
     ),
+    (
+        "masks",
+        native_command("mask-control"),
+        {
+            "result": "PASS",
+            "threads": 5,
+            "logical_inheritance": True,
+            "explicit_attributes": True,
+            "c11_inheritance": True,
+            "context_masks": True,
+            "jump_masks": True,
+            "temporary_masks": True,
+            "errno": True,
+        },
+    ),
 ]
 commands.extend(item[1] for item in controls)
 commands.append(command)
@@ -441,6 +479,7 @@ summary.update(
     native_handler_errno_control=True,
     native_targets_control=True,
     missing_host_anchor_control=True,
+    native_mask_lifecycle_control=True,
     guest_public_signal_abi=False,
     jni_vm_validated=False,
     nonlocal_async_entry_validated=False,

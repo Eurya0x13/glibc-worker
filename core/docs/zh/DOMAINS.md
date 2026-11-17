@@ -18,6 +18,10 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 
 维护的补丁片段位于 `core/src/runtime/`；构建配方及生成的源码/对象目录也归 core。`experiments/` 保留验证入口与历史证据，不再作为已安装域目标的实现来源。
 
+所属 libc 的[逻辑掩码生命周期](MASK_LIFECYCLE.md)将 GNU 原生线程继承与
+借用载体的物理掩码分开，并提供用于队列资格的可选观察器。它要求匹配的私有
+能力值，不为 GNU 线程创建 Bionic 状态。
+
 ## 信号接入
 
 普通域目标不导出 libc 的 sigaction、signal 或 sigaction64。早期启动可显式链接 `glibc_worker::signal_interpose`，在创建 VM 前初始化路由器；晚接入必须显式对接已审阅的信号链。固定 JVM/ART 制品 profile 与导入补丁归 jvm-jni。
@@ -34,7 +38,9 @@ GNU 与 bionic 的 `signal()` 行为分别对照原生实现。一次性动作�
 
 Host 注册路由覆盖所有可捕获的公开信号，包括 `SIGUSR1`、`SIGALRM`、`SIGCHLD` 和
 未保留的实时信号。路由 Host 动作不会增加 VM 独占保留；`signal_router_reserved()`
-只报告所选所有权 profile 及私有通知信号。libc 私有信号编号仍在此公开层之外。
+只报告所选所有权 profile 及私有通知信号。GNU Host NPTL 保留原生实现；
+Bionic 私有注册使用已审阅的[所属 libc 路由](PRIVATE_SIGNALS.md)，
+Guest NPTL 独占租用 63/64。
 已有自定义动作须在 Guest 准入前显式接管。`signal_router_guest_ready()` 对尚未接管的
 自定义动作返回 `ENOTSUP`，不会修改它。启动阶段可在创建 VM 前初始化并接管；晚接入仍须
 满足外层信号链已经审阅的要求。
