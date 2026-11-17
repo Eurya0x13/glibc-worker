@@ -14,6 +14,7 @@ EXTENSIONS = {".c", ".h", ".java", ".py", ".sh", ".zig"}
 C_FRAGMENTS = {
     "core/src/runtime/adopt-nptl.inc",
     "core/src/runtime/signal-guard.inc",
+    "core/src/runtime/signal-send.inc",
     "core/src/runtime/signal-mask.inc",
     "core/src/runtime/context-mask.inc",
     "core/src/runtime/wait-mask.inc",

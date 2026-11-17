@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from context_mask import patch_context_masks
 from wait_mask import patch_wait_masks
+from signal_send import patch_signal_sends
 
 source = Path(__file__).resolve().parent
 core = source.parent
@@ -27,6 +28,9 @@ inputs = [
     Path(__file__),
     fragments / "adopt-nptl.inc",
     fragments / "signal-guard.inc",
+    fragments / "signal-send.h",
+    fragments / "signal-send.inc",
+    fragments / "signal-send-kill.c",
     fragments / "signal-mask.inc",
     fragments / "context-mask.inc",
     fragments / "wait-mask.inc",
@@ -34,6 +38,7 @@ inputs = [
     fragments / "jump-hook.inc",
     core / "scripts/context_mask.py",
     core / "scripts/wait_mask.py",
+    core / "scripts/signal_send.py",
     base / "patch-hashes.txt",
     base / "source-sha256.txt",
     core / "config/targets.json",
@@ -97,6 +102,7 @@ if not (root / "patched").exists():
         "__gw_domain_thread_hook; __gw_domain_capabilities;",
         "__gw_domain_thread_hook; __gw_domain_capabilities; __gw_domain_mask_bind;",
     )
+    patch_signal_sends(src, fragments, replace)
     shutil.copyfile(
         fragments / "signal-mask.inc", src / "nptl/gw-signal-mask.inc"
     )
@@ -289,6 +295,7 @@ for origin, name in [
                 "reserved-signal-waits",
                 "guest-sigaction-hook",
                 "guest-native-jump-hook",
+                "optional-guest-signal-send-v1",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()
