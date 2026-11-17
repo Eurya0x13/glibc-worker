@@ -24,6 +24,7 @@ SUITES = [
             "-nonlocal-recovery-pending",
             "-nonlocal-recovery-host-mask",
             "-recovery-worker-signals",
+            "-recovery-adopted-signals",
         )
     ),
     "android-jni/build/tests/runtime-sdk-android-late",
@@ -31,7 +32,6 @@ SUITES = [
     "jvm-jni/build/tests/signal-profile-android",
 ]
 REMAINING = [
-    "Adopted Guest asynchronous delivery while Host/Java runs and Guest-target recovery",
     "Guest signalfd, job control and remaining I/O interruption semantics",
     "General saved/resumable continuations and Guest targets beyond C-only GetVersion",
     "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",

@@ -131,6 +131,91 @@ static int reject_damaged_router(struct fb_call *call, int sequence) {
   return 1;
 }
 
+#ifdef GW_DOMAIN_NONLOCAL
+static void release_signal_stack(void *argument) {
+  struct jni_domain_signal *activation = argument;
+  if (syscall(SYS_munmap, activation->mapping, activation->mapping_size)) {
+    signal_router_quarantine();
+  }
+  activation->mapping = NULL;
+}
+
+static int run_parked_signal(struct jni_domain_context *c, void *frame) {
+  const size_t size = 65536, page = session.signal_page_size;
+  struct gw_signal_suspension suspended;
+  int kernel = signal_guest_suspended(current_signal, &suspended);
+  if (!kernel) {
+    if (!c->parked_guest) {
+      return ESRCH;
+    }
+    suspended =
+        (struct gw_signal_suspension){.frame = c->parked_guest,
+                                      .state = c->exchange.guest,
+                                      .alternate = c->guest_altstack,
+                                      .stack_floor = c->exchange.guest.sp};
+  }
+
+  struct jni_domain_signal activation = {.carrier = c,
+                                         .frame = suspended.frame,
+                                         .stack_floor = suspended.stack_floor,
+                                         .kernel_frame = kernel,
+                                         .mapping_size = size + 2 * page};
+  activation.mapping =
+      (void *)syscall(SYS_mmap, NULL, activation.mapping_size, PROT_NONE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (activation.mapping == MAP_FAILED) {
+    return errno;
+  }
+  void *stack = (char *)activation.mapping + page;
+  if (syscall(SYS_mprotect, stack, size, PROT_READ | PROT_WRITE)) {
+    int error = errno;
+    release_signal_stack(&activation);
+    return error;
+  }
+
+  struct gw_signal_execution execution;
+  const struct gw_signal_execution_config config = {
+      .stack = stack,
+      .stack_size = size,
+      .abort_stack = (void *)c->abort_stack,
+      .abort_stack_size = 65536,
+      .alternate = suspended.alternate,
+      .swap = c->exchange.swap,
+      .invoke = session.signal_invoke,
+      .finish = session.signal_finish,
+      .release_host = release_signal_stack,
+      .argument = &activation,
+      .carrier_mask = &activation.carrier_mask};
+  int error = gw_signal_execution_from_saved(
+      &execution, &config, &suspended.state, &session.signal_entries);
+  if (!error) {
+    error = signal_guest_execute(&execution, frame);
+  }
+  if (activation.mapping) {
+    release_signal_stack(&activation);
+  }
+  return error;
+}
+
+void gw_domain_signal_notification(int number, siginfo_t *packet, void *frame) {
+  struct jni_domain_context *c = current;
+  if (!c || !current_signal || !current_signal->guest_async ||
+      number != session.guest_notification || packet->si_code != SI_QUEUE ||
+      packet->si_pid != getpid() ||
+      (uintptr_t)packet->si_value.sival_ptr != session.signal_cookie) {
+    signal_guest_notification_discard(frame);
+    return;
+  }
+  int error = run_parked_signal(c, frame);
+  if (error == ECANCELED && c->jump_record) {
+    route_guest_jump();
+  }
+  if (error) {
+    signal_router_quarantine();
+  }
+}
+#endif
+
 int gw_domain_command(struct host_context *host, struct fb_call *call,
                       int sequence) {
   (void)host;
@@ -235,6 +320,9 @@ int domain_owner_start(const char *loader, const char *libraries,
   session.handshake.required |= GW_DOMAIN_CAP_NATIVE_UNWIND;
   if (session.guest_notification) {
     session.handshake.required |= GW_DOMAIN_CAP_WORKER_ASYNC;
+    if (session.domain) {
+      session.handshake.required |= GW_DOMAIN_CAP_ADOPTED_ASYNC;
+    }
   }
 #endif
   char pointer[32];
@@ -368,6 +456,11 @@ int gw_domain_context_start(struct host_context *host) {
   e->swap(&e->host, &e->guest);
 #ifdef GW_DOMAIN_NONLOCAL
   gw_signal_stack_set(&e->host_altstack);
+  if (session.guest_notification) {
+    REQUIRE(!signal_guest_carrier_attach(current_signal));
+    e->guest_execution_mask = signal_carrier_mask(current_signal, host_mask, 1);
+    host_mask = signal_host_physical_mask(signal_host_logical_mask(host_mask));
+  }
   gw_nonlocal_mask_restore(host_mask);
 #endif
   REQUIRE(atomic_load(&c->ready));
@@ -416,6 +509,10 @@ int gw_domain_context_stop(struct host_context *host, int thread_exiting) {
   c->exchange.swap(&c->exchange.host, &c->exchange.guest);
 #ifdef GW_DOMAIN_NONLOCAL
   gw_signal_stack_set(&c->exchange.host_altstack);
+  if (session.guest_notification) {
+    REQUIRE(!signal_guest_carrier_detach(current_signal));
+    host_mask = signal_host_physical_mask(signal_host_logical_mask(host_mask));
+  }
   gw_nonlocal_mask_restore(host_mask);
 #endif
   REQUIRE(c->exchange.state == DOMAIN_DONE);

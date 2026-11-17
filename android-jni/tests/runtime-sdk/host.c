@@ -3,6 +3,7 @@
 #include "signal-router.h"
 #include "signal_channel.h"
 #include "signal-relay.h"
+#include "signals.h"
 #ifdef GW_TEST_NATIVE_UNWIND
 #include "nonlocal.h"
 #endif
@@ -31,6 +32,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include "nonlocal_probe.h"
+#include "adopted-signals.h"
 #include "internal/domain_unwind.h"
 #ifdef __ANDROID__
 #include "vm-start.h"
@@ -40,6 +42,7 @@ struct application {
   JavaVM *vm;
   int worker;
   int worker_signals;
+  int adopted_signals;
   int nonlocal;
   int router_quarantine;
   const struct gw_loader_api_v1 *loader;
@@ -47,10 +50,105 @@ struct application {
 };
 
 static _Atomic int worker_host_signal_count;
+static _Thread_local sigjmp_buf adopted_jump;
+static _Thread_local volatile sig_atomic_t adopted_jump_active;
+static _Thread_local struct adopted_signal_probe *adopted_guest_jump;
+static _Thread_local struct adopted_signal_probe *adopted_host_nested;
 
 static void worker_host_signal(int number) {
   assert(number == SIGUSR1 && signal_host_relay_running());
   atomic_fetch_add_explicit(&worker_host_signal_count, 1, memory_order_relaxed);
+}
+
+static void adopted_host_jump(int number) {
+  assert(number == SIGWINCH);
+  if (adopted_jump_active) {
+    siglongjmp(adopted_jump, 39);
+  }
+  struct adopted_signal_probe *probe = adopted_host_nested;
+  if (probe) {
+    assert(syscall(SYS_gettid) == probe->tid);
+    atomic_store_explicit(&probe->requested, 2, memory_order_release);
+    while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
+      sched_yield();
+    }
+    assert(probe->mode != SIGNAL_NESTED_JUMP);
+    probe->host_returned = 1;
+  }
+}
+
+static void await_adopted_signal(JNIEnv *env, jclass cls,
+                                 struct adopted_signal_probe *probe) {
+  if (probe->mode == SIGNAL_JAVA) {
+    jobject shared = (*env)->NewDirectByteBuffer(env, probe, sizeof *probe);
+    jmethodID observe = (*env)->GetStaticMethodID(
+        env, cls, "observeAdoptedSignal", "(Ljava/nio/ByteBuffer;)I");
+    assert(shared && observe);
+    assert((*env)->CallStaticIntMethod(env, cls, observe, shared) == 1);
+    assert(!(*env)->ExceptionCheck(env));
+    (*env)->DeleteLocalRef(env, shared);
+  } else if (probe->mode == SIGNAL_HOST_JUMP) {
+    int result = sigsetjmp(adopted_jump, 1);
+    if (!result) {
+      adopted_jump_active = 1;
+      atomic_store_explicit(&probe->requested, 1, memory_order_release);
+      for (;;) {
+        sched_yield();
+      }
+    }
+    adopted_jump_active = 0;
+    assert(result == 39 && !signal_host_retirement_busy());
+  } else if (adopted_nested(probe->mode)) {
+    atomic_store_explicit(&probe->requested, 1, memory_order_release);
+    while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
+      sched_yield();
+    }
+    assert(probe->host_returned);
+  } else {
+    const struct timespec duration = {.tv_nsec = 350000000};
+    int result = probe->mode == SIGNAL_POLL ? ppoll(NULL, 0, &duration, NULL)
+                                            : nanosleep(&duration, NULL);
+    assert(!result);
+  }
+  assert(atomic_load_explicit(&probe->handled, memory_order_acquire) ==
+         (adopted_nested(probe->mode) ? 2 : 1));
+}
+
+static void adopted_signals(JNIEnv *env, jclass cls) {
+  jmethodID prepare =
+      (*env)->GetStaticMethodID(env, cls, "prepareAdoptedSignal", "(J)V");
+  jmethodID finish =
+      (*env)->GetStaticMethodID(env, cls, "finishAdoptedSignal", "()I");
+  jmethodID jump =
+      (*env)->GetStaticMethodID(env, cls, "jumpAdoptedSignal", "(J)I");
+  assert(prepare && finish && jump);
+  for (int mode = SIGNAL_JAVA; mode < SIGNAL_CASES; ++mode) {
+    struct adopted_signal_probe probe = {.mode = mode,
+                                         .tid = (int)syscall(SYS_gettid)};
+    jlong address = (jlong)(uintptr_t)&probe;
+    adopted_host_nested = adopted_nested(mode) ? &probe : NULL;
+    if (adopted_guest_target(mode)) {
+      adopted_guest_jump = &probe;
+      assert((*env)->CallStaticIntMethod(env, cls, jump, address) == 73);
+      assert(!adopted_guest_jump && !signal_host_retirement_busy());
+    } else {
+      (*env)->CallStaticVoidMethod(env, cls, prepare, address);
+      assert(!(*env)->ExceptionCheck(env));
+
+      errno = EDOM;
+      await_adopted_signal(env, cls, &probe);
+      if (mode != SIGNAL_JAVA) {
+        assert(errno == EDOM);
+      }
+      assert((*env)->CallStaticIntMethod(env, cls, finish) == 73);
+    }
+    adopted_host_nested = NULL;
+    assert(!(*env)->ExceptionCheck(env));
+    printf(
+        "{\"stage\":\"adopted-signal\",\"mode\":%d,\"same_tid\":true,"
+        "\"owned_context\":true,\"post_signal_jni\":true}\n",
+        mode);
+  }
 }
 
 static long guest_owner_tid(void) {
@@ -397,6 +495,14 @@ static void host_trap(int number) {
 }
 
 void gw_domain_nonlocal_test_point(int point) {
+  if (point == GW_UNWIND_RPC_READY && adopted_guest_jump) {
+    struct adopted_signal_probe *probe = adopted_guest_jump;
+    adopted_guest_jump = NULL;
+    atomic_store_explicit(&probe->requested, 1, memory_order_release);
+    while (!atomic_load_explicit(&probe->handled, memory_order_acquire)) {
+      sched_yield();
+    }
+  }
   if (point == GW_UNWIND_RPC_READY && route_depth) {
     ++route_level;
     assert(route_level <= route_depth);
@@ -1340,6 +1446,9 @@ static void *application_run(void *argument) {
         "\"host_parallel_disposition\":true,\"native_cancel\":true}\n",
         children >> 16, children & UINT16_MAX);
   }
+  if (app->adopted_signals) {
+    adopted_signals(env, cls);
+  }
   jmethodID probe = (*env)->GetStaticMethodID(env, cls, "probe", "(I[B)I");
   jmethodID tid = (*env)->GetStaticMethodID(env, cls, "tid", "()J");
   assert(probe && tid);
@@ -1395,13 +1504,14 @@ static void retry_preclaim_failure(JNIEnv *env,
  */
 int main(int argc, char **argv) {
   assert(argc == 9);
+  int test_adopted_signals = !strcmp(argv[8], "adopted-signals");
 #ifdef GW_TEST_NATIVE_UNWIND
   assert(!gw_nonlocal_init());
 #endif
 #ifndef GW_TEST_LATE_SIGNALS
   assert(!signal_router_init());
   assert(!signal_router_adopt());
-  if (getenv("GW_TEST_HOST_FAULT_MASK")) {
+  if (getenv("GW_TEST_HOST_FAULT_MASK") || test_adopted_signals) {
     const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                  SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
     assert(!gw_host_signal_channel_enable(notifications, 6));
@@ -1473,6 +1583,13 @@ int main(int argc, char **argv) {
     sigemptyset(&action.sa_mask);
     assert(!signal_router_action(SIGUSR1, &action, NULL));
   }
+  if (test_adopted_signals) {
+    config.version = GW_HOST_RUNTIME_CONFIG_V2;
+    config.guest_notification = 54;
+    struct sigaction action = {.sa_handler = adopted_host_jump};
+    sigemptyset(&action.sa_mask);
+    assert(!signal_router_action(SIGWINCH, &action, NULL));
+  }
 
   int borrowed_relay = strstr(argv[8], "borrowed-relay") != NULL;
   assert(!signal_host_relay_running());
@@ -1509,6 +1626,7 @@ int main(int argc, char **argv) {
       .vm = vm,
       .worker = worker,
       .worker_signals = worker_signals,
+      .adopted_signals = test_adopted_signals,
       .nonlocal = nonlocal,
       .router_quarantine = !strcmp(argv[8], "router-quarantine"),
       .loader = loader,

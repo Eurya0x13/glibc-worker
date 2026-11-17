@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <ucontext.h>
 
 enum { DOMAIN_FIXTURE_CARRIERS = 8 };
 
@@ -25,6 +26,7 @@ struct signal_slot {
   uint64_t deferred_ignore_generation[GW_SIGNAL_FAULT_LANES];
   int deferred_active;
   int consume_fd;
+  int guest_async;
 };
 
 _Static_assert(offsetof(struct signal_slot, tid) == 24, "signal assembly ABI");
@@ -50,7 +52,23 @@ void signal_guest_lifecycle(int);
 int signal_guest_kernel_bind(void (*)(int, void *, void *));
 /* Reserve an internal notifier for native GNU recipients. Install before
  * their loader starts. The number stays leased until router shutdown. */
-int signal_guest_kernel_notify_enable(int);
+int signal_guest_kernel_notify_enable(int, void (*)(int, siginfo_t *, void *));
+void signal_guest_notification_discard(void *);
+/* Only the owning registered Host thread changes its lane. Detach after the
+ * Guest registry has revoked sends and before unmasking or releasing TLS. */
+int signal_guest_carrier_attach(struct signal_slot *);
+int signal_guest_carrier_detach(struct signal_slot *);
+
+/* A live kernel Guest frame below a routed Host handler. Valid until that
+ * handler returns or retires through its native unwind boundary. */
+struct gw_signal_suspension {
+  ucontext_t *frame;
+  struct domain state;
+  stack_t alternate;
+  uintptr_t stack_floor;
+};
+
+int signal_guest_suspended(struct signal_slot *, struct gw_signal_suspension *);
 uint64_t signal_carrier_mask(struct signal_slot *, uint64_t, int guest);
 uint64_t signal_host_physical_mask(uint64_t);
 uint64_t signal_host_logical_mask(uint64_t);

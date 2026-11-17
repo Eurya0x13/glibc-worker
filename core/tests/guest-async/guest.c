@@ -202,7 +202,7 @@ static int execute_receive(void *argument) {
   return receive(control->notification, carrier, NULL);
 }
 
-static void finish_receive(void *argument, int abandoned) {
+static void finish_receive(void *argument, enum gw_signal_exit reason) {
   struct test_execution *execution = argument;
   struct async_carrier *carrier = execution->carrier;
   assert(carrier == current && guest_tls == 41);
@@ -214,7 +214,7 @@ static void finish_receive(void *argument, int abandoned) {
   assert(!gw_signal_target_unpin(carrier->target));
   execution->pinned = 0;
   execution->finished = 1;
-  if (abandoned) {
+  if (reason == GW_SIGNAL_HOST_JUMP) {
     assert(execution->recovery_depth == carrier->recovery_depth);
     --carrier->recovery_depth;
     atomic_fetch_add_explicit(&carrier->abandoned, 1, memory_order_release);

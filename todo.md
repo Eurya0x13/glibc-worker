@@ -7,10 +7,10 @@ Normal JNI returns, Java exception propagation and surviving outer Java frames
 remain bridge compatibility obligations. See the
 [VM boundary and reproducer](jvm-jni/docs/en/NONLOCAL_VM.md).
 
-Host deferred dequeue/handler ordering and native consumption/lifecycle windows
-are implemented and validated within the configured bootstrap contract. The
-remaining independent Guest asynchronous delivery and general saved/resumable
-native contexts are deferred, not removed.
+The configured bootstrap contract covers Host deferred dequeue and handler
+ordering, plus native consumption and lifecycle windows. Tagged Guest delivery
+also runs on adopted carriers in Host/Java. General saved and resumable native
+contexts remain part of the acceptance contract.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
@@ -28,9 +28,9 @@ logical target.
 
 Guest asynchronous signals must be delivered on their target carrier while it
 executes Host/Java as well as Guest code. Waiting for the next Guest call is not
-an accepted delivery policy. The independent queue substrate is implemented in
-core; see [Guest signal inbox](core/docs/en/GUEST_SIGNAL_INBOX.md). Its native
-notification test is not acceptance of foreign TLS, JNI or VM signal entry.
+an accepted delivery policy. The [Guest signal inbox](core/docs/en/GUEST_SIGNAL_INBOX.md)
+and installed JNI service exercise tagged asynchronous entry during Java and
+Host libc execution.
 Guest handler execution must also remain transparent to a suspended Host
 blocking wait. Internal notifications do not create Host `EINTR`; preserve its
 original timeout and still expose real Host-owned signal interruptions.
@@ -39,7 +39,7 @@ have hidden-notification retry with one monotonic timeout budget. Public LP64
 sleep APIs now retain native timers, copyout, errno and cancellation while
 retrying hidden work; see the
 [sleep adapter](core/docs/en/SIGNAL_WAITING.md#transparent-native-sleeps).
-This is a Host-side prerequisite, not a production Guest entry pass. Ordinary
+Installed Guest entry exercises `ppoll` and `nanosleep` transparently. Ordinary
 blocking I/O and private/raw paths still need review.
 The native-only sleep control now reproduces remainder-pointer `EFAULT`, errno
 conventions and differing hrtimer/ppoll saturation on both kernels. A sleep
@@ -50,8 +50,9 @@ The [native cross-libc entry](core/docs/en/GUEST_ASYNC_ENTRY.md) now connects a
 Guest-owned inbox to actual adopted TCBs and guarded stacks. It validates busy
 Host/Guest interruption and transparent Host sleep/ppoll with real Guest work.
 The native fixture also retires three nested asynchronous Guest entries on a
-Host-target `siglongjmp`. Installed JNI entry, Guest-target async recovery and
-general saved frames still need integration.
+Host-target `siglongjmp`. The installed JNI tests exercise nested
+Guest/Host/Guest entry and both jump directions through live native frames.
+General saved frames still need integration.
 
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,
@@ -72,10 +73,10 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   actions and targets; keep overlapping registrations from replacing VM handlers.
   Thread/shared queue selection, aggregate RT accounting and notification/close
   transactions are implemented. The [action table](core/docs/en/SIGNAL_ACTIONS.md)
-  now serializes ignored-disposition flush, subsequent sends and action selection,
-  and the synchronous JNI service uses by-value snapshots; connect the inbox to actual Guest recipient
-  admission, disposition generations, tagged libc send/wait hooks and timely
-  entry during Host execution. Retain kernel restart/EINTR semantics when the
+  serializes ignored-disposition flush, subsequent sends and action selection.
+  The installed service connects the inbox to recipient admission, tagged libc
+  send/wait hooks and timely entry during Host execution. Complete job control,
+  signalfd and kernel restart/EINTR semantics when the
   logical action changes or a notification has no deliverable Guest packet.
   [Private NPTL isolation](core/docs/en/PRIVATE_SIGNALS.md) separates GNU's
   cancellation/timer and credential channels from Bionic's private signals;
@@ -89,17 +90,14 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   preserving sender information, queue semantics and errors.
   The optional [owning-libc send hook](core/docs/en/GUEST_SIGNAL_SEND.md) now
   connects these public sites, `gsignal`, `pthread_sigqueue` and same-process
-  `kill` to the cross-libc fixture. Exit-lock races, synchronous self-delivery
-  and errno checks are included; production recipient/disposition integration
-  remains unfinished.
-  The [core target registry](core/docs/en/SIGNAL_TARGETS.md) now supplies dynamic
-  lookup, shared eligibility and pinned retirement in that cross-libc fixture;
-  installed JNI service wiring and saved-frame integration remain required.
+  `kill` to the cross-libc fixture and installed service. Exit-lock races,
+  synchronous self-delivery and errno checks are included.
+  The [core target registry](core/docs/en/SIGNAL_TARGETS.md) supplies dynamic
+  lookup, shared eligibility and pinned retirement.
   Optional [NPTL creation callbacks](core/docs/en/THREAD_LIFECYCLE.md) now
-  reserve identity before clone and complete admission before creation returns;
-  The installed, opt-in GNU worker connects these creation callbacks and the
-  disposition table to tagged delivery, mask changes and consuming waits.
-  The adopted-carrier path and its saved-frame accounting remain required.
+  reserve identity before clone and complete admission before creation returns.
+  Both opt-in backends use the disposition table for tagged delivery, mask
+  changes and consuming waits. General saved-frame accounting remains open.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM
@@ -118,7 +116,8 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   is not a compatibility pass.
   The opt-in installed service now coordinates Guest-target jumps through a
   reviewed C-only `GetVersion` boundary, with invocation-generation records,
-  ordinary RPC cleanup and the owning glibc's fortified restore entry. Complete
+  ordinary RPC cleanup and the owning glibc's fortified restore entry. An
+  asynchronous handler can also abandon nested signal scopes on this path. Complete
   other native JNI callback boundaries and general saved/resumable native
   contexts without skipping Java/VM frames; this slice does not establish
   general Guest-target recovery.

@@ -30,14 +30,20 @@ static int (*bind_mask)(uint64_t *, const uint64_t *, const int *, uint64_t);
 static int (*install_sigaction_hook)(int (*)(int, const void *, void *, int *));
 static int (*install_jump_hook)(void (*)(void *, int, int));
 
+static uint64_t virtual_signals(void) {
+  return session->guest_notification ? gw_guest_virtual_mask()
+                                     : session->reserved_signals;
+}
+
 static uint64_t logical_mask(uint64_t physical) {
-  return (physical & ~session->reserved_signals) |
-         (current->guest_mask & session->reserved_signals);
+  uint64_t virtual = virtual_signals();
+  return (physical & ~virtual) | (current->guest_mask & virtual);
 }
 
 static uint64_t physical_mask(uint64_t logical) {
-  return (logical & ~session->reserved_signals) |
-         (current->exchange.guest_execution_mask & session->reserved_signals);
+  uint64_t virtual = virtual_signals();
+  return (logical & ~virtual) |
+         (current->exchange.guest_execution_mask & virtual);
 }
 #endif
 
@@ -47,7 +53,7 @@ uint64_t gw_domain_execution_mask(void) {
 }
 
 uint64_t gw_domain_reserved_signals(void) {
-  return session->reserved_signals;
+  return virtual_signals();
 }
 
 uint64_t gw_domain_rpc_return_mask(uint64_t original) {
@@ -107,6 +113,31 @@ static void guest_kernel_entry(int number, void *info, void *context) {
     _exit(126);
   }
 }
+
+static void suspend_for_host(struct jni_domain_context *c) {
+  ucontext_t parked = {0};
+  volatile sig_atomic_t resumed = 0;
+  if (getcontext(&parked)) {
+    _exit(125);
+  }
+  if (resumed) {
+    return;
+  }
+
+  resumed = 1;
+  parked.uc_stack = c->guest_altstack;
+  c->parked_guest = &parked;
+  c->exchange.swap(&c->exchange.guest, &c->exchange.host);
+  c->parked_guest = NULL;
+  if (c->resume_parked) {
+    c->resume_parked = 0;
+    /* Resume this owning GNU context with delivery masked. The logical
+     * signal-mask edits have already been committed to the Guest recipient. */
+    sigfillset(&parked.uc_sigmask);
+    setcontext(&parked);
+    _exit(125);
+  }
+}
 #endif
 
 int gw_domain_guest_active(void) {
@@ -118,8 +149,13 @@ static void yield_host(void) {
 #ifdef GW_DOMAIN_NONLOCAL
   gw_nonlocal_mask_block();
   gw_signal_stack_get(&current->guest_altstack);
+  if (session->guest_notification) {
+    suspend_for_host(current);
+  } else
 #endif
-  e->swap(&e->guest, &e->host);
+  {
+    e->swap(&e->guest, &e->host);
+  }
 #ifdef GW_DOMAIN_NONLOCAL
   gw_signal_stack_set(&current->guest_altstack);
 #endif
@@ -165,8 +201,12 @@ static void serve(void *argument) {
   gw_domain_jump_bind(c);
   c->exchange.guest_signal = guest_fault;
   gw_signal_stack_set(&c->guest_altstack);
-  if (bind_mask(&c->guest_mask, &c->exchange.guest_execution_mask,
-                &c->guest_native_active, session->reserved_signals)) {
+  int error =
+      session->guest_notification
+          ? gw_guest_signal_adopt(c)
+          : bind_mask(&c->guest_mask, &c->exchange.guest_execution_mask,
+                      &c->guest_native_active, session->reserved_signals);
+  if (error) {
     _exit(126);
   }
 #endif
@@ -183,6 +223,9 @@ static void serve(void *argument) {
     yield_host();
   }
 #ifdef GW_DOMAIN_NONLOCAL
+  if (session->guest_notification && gw_guest_signal_retire()) {
+    _exit(126);
+  }
   gw_domain_jump_finish();
 #endif
   gid = -1;
@@ -272,6 +315,40 @@ static _Noreturn void park_owner(void) {
   }
 }
 
+#ifdef GW_DOMAIN_NONLOCAL
+static int setup_signals(void) {
+  int helper = session->guest_notification;
+  if (helper) {
+    if (helper < SIGRTMIN || helper > SIGRTMAX) {
+      return EINVAL;
+    }
+    int error = gw_guest_workers_start(helper, session->reserved_signals,
+                                       session->quarantine_signals);
+    if (error) {
+      return error;
+    }
+    session->signal_cookie = gw_guest_signal_cookie();
+    if (session->domain) {
+      gw_guest_signal_entries(&session->signal_entries);
+      session->signal_invoke = gw_guest_signal_parked;
+      session->signal_finish = gw_guest_signal_finish_parked;
+    }
+  } else {
+    gw_guest_signals_init(NULL, 0);
+  }
+
+  if (install_sigaction_hook(gw_guest_sigaction) ||
+      !session->bind_guest_kernel ||
+      session->bind_guest_kernel(guest_kernel_entry)) {
+    return EINVAL;
+  }
+  if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event)) {
+    return EINVAL;
+  }
+  return 0;
+}
+#endif
+
 int main(int argc, char **argv) {
   if (argc != 2) {
     _exit(124);
@@ -282,7 +359,8 @@ int main(int argc, char **argv) {
   struct jni_domain_handshake *hello = &session->handshake;
   uint64_t supported = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT;
 #ifdef GW_DOMAIN_NONLOCAL
-  supported |= GW_DOMAIN_CAP_NATIVE_UNWIND | GW_DOMAIN_CAP_WORKER_ASYNC;
+  supported |= GW_DOMAIN_CAP_NATIVE_UNWIND | GW_DOMAIN_CAP_WORKER_ASYNC |
+               GW_DOMAIN_CAP_ADOPTED_ASYNC;
 #endif
   if (hello->magic != GW_DOMAIN_TRANSPORT_MAGIC ||
       hello->version != GW_DOMAIN_TRANSPORT_VERSION ||
@@ -315,30 +393,8 @@ int main(int argc, char **argv) {
     goto reject;
   }
 #ifdef GW_DOMAIN_NONLOCAL
-  if (session->guest_notification) {
-    int helper = session->guest_notification;
-    session->error =
-        session->domain || helper < SIGRTMIN || helper > SIGRTMAX
-            ? EINVAL
-            : gw_guest_workers_start(helper, session->reserved_signals,
-                                     session->quarantine_signals);
-    if (session->error) {
-      goto reject;
-    }
-  } else {
-    gw_guest_signals_init(NULL, 0);
-  }
-  if (install_sigaction_hook(gw_guest_sigaction)) {
-    session->error = EINVAL;
-    goto reject;
-  }
-  if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event)) {
-    session->error = EINVAL;
-    goto reject;
-  }
-  if (!session->bind_guest_kernel ||
-      session->bind_guest_kernel(guest_kernel_entry)) {
-    session->error = EINVAL;
+  session->error = setup_signals();
+  if (session->error) {
     goto reject;
   }
 #endif

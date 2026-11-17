@@ -15,7 +15,7 @@ add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/signal-pending.c
   src/domain/signal-deferred.c src/domain/signal-relay.c
   src/domain/signal-inbox.c src/domain/signal-targets.c
-  src/domain/signal-actions.c)
+  src/domain/signal-actions.c src/domain/signal-execution.c)
 add_library(glibc_worker::domains ALIAS domains)
 target_compile_definitions(domains PRIVATE GW_DOMAIN_CHAIN)
 target_include_directories(domains PUBLIC
@@ -211,6 +211,7 @@ install(DIRECTORY src/domain/ DESTINATION
 install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/domain/signal-inbox.c src/domain/signal-targets.c
         src/domain/signal-actions.c src/domain/signal-execution-guest.c
+        src/domain/signal-execution.c
         src/domain/signal-consuming.c src/domain/signal-user-copy.c
         src/runtime/signal-consume-hook.h src/runtime/thread-create.h
         src/domain/start.S DESTINATION

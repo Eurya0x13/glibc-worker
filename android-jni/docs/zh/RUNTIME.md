@@ -52,15 +52,19 @@ shutdown 要求生命周期所有者、停止生产者、native 工作静止且�
 
 可选 unwind 服务为同步故障使用所属 Guest 的
 [处置快照](../../../core/docs/zh/SIGNAL_ACTIONS.md)。重新注册不再分配固定的记录，
-正在执行的投递保留自己的完整处置副本。这不代表公开异步 Guest 服务已完成接入。
+正在执行的投递保留自己的完整处置副本。
 
-启用可选 native unwind 构建后，V2 配置可为 worker 后端在 `guest_notification`
+启用可选 native unwind 构建后，V2 配置可在 `guest_notification`
 显式指定一个未占用的公开 RT 编号，已占用的编号会使准入失败。匹配的 Guest
 服务在 clone 前预留 pthread 身份，在创建返回前发布 TID，并把带标签的消息
 路由到所属 GNU 信号入口。普通 Host 消息仍走 Host 分派线程。GNU 63/64 的取消
 和凭据处理器保留原生注册。STOP 确认所有应用接收者退休后才释放 Guest 注册表。
 
-worker 路径验证带标签发送、独立处置和屏蔽集合消费，无需重编译模组。预览阶段
-的作业控制信号保留进程级内核策略，对逻辑注册或发送返回 `EBUSY`。Guest
-signalfd、全部 Guest I/O 等待的隐藏与重启语义，以及在 Host/Java 中运行的
-收养载体投递仍待完成。同线程模式指定非零 V2 通知目前返回 `ENOTSUP`。
+同线程后端还要求在启动时准备好 Host 延迟信号通道及原生展开拦截。载体运行
+Java、在 Host libc 内等待或执行转发的 Host 处理器时，Guest 接收者使用真实
+收养的 GNU TCB。嵌套入口使用最近的 Guest 帧，并在切换前记录活动栈边界。
+见 [Guest 异步入口](../../../core/docs/zh/GUEST_ASYNC_ENTRY.md)。
+
+带标签发送、处置和屏蔽集合消费使用 Guest libc ABI。作业控制信号的逻辑注册
+和发送返回 `EBUSY`。Guest signalfd、其余 I/O 以及保存上下文的验收项见
+[兼容性待办](../../../todo.md)。

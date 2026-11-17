@@ -12,6 +12,10 @@ domain_stack_call:
     .cfi_offset %r12, -16
     mov %rsp, %r12
     .cfi_def_cfa %r12, 16
+    test %rcx, %rcx
+    jz .Lstack_unrecorded
+    mov %rsp, (%rcx)
+.Lstack_unrecorded:
     mov %rdi, %rax
     mov %rsi, %rdi
     test %rdx, %rdx
@@ -40,6 +44,9 @@ domain_stack_call:
     .cfi_offset x30, -8
     mov x19, sp
     .cfi_def_cfa x19, 16
+    cbz x3, .Lstack_unrecorded
+    str x19, [x3]
+.Lstack_unrecorded:
     mov x9, x0
     mov x0, x1
     cbz x2, .Lstack_ready

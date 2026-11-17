@@ -1,8 +1,11 @@
 #define _GNU_SOURCE
 #include "domain_signal_workers.h"
+#include "domain_jump.h"
 #include "domain_signals.h"
+#include "domain_transport.h"
 #include "nonlocal-mask.h"
 #include "signal-consuming.h"
+#include "signal-stack.h"
 #include "signal-user-copy.h"
 #include "thread-create.h"
 #include <dlfcn.h>
@@ -13,6 +16,7 @@
 static struct gw_signal_targets targets;
 static struct gw_signal_target *owner;
 static __thread struct gw_signal_target *current;
+static __thread struct jni_domain_context *carrier;
 static __thread uint64_t logical;
 static uint64_t physical, virtual_mask;
 static int notification;
@@ -215,8 +219,47 @@ void gw_guest_workers_unmask(void) {
 }
 
 static struct gw_guest_signal_state signal_state(void) {
-  return (struct gw_guest_signal_state){&logical, physical, virtual_mask,
-                                        current};
+  struct gw_guest_signal_state state = {.logical = &logical,
+                                        .carrier = physical,
+                                        .virtual_mask = virtual_mask,
+                                        .target = current};
+  if (carrier) {
+    state.logical = &carrier->guest_mask;
+    state.carrier = carrier->exchange.guest_execution_mask;
+  }
+  return state;
+}
+
+uint64_t gw_guest_virtual_mask(void) {
+  return virtual_mask;
+}
+
+uintptr_t gw_guest_signal_cookie(void) {
+  return (uintptr_t)&targets;
+}
+
+int gw_guest_signal_adopt(struct jni_domain_context *context) {
+  int error =
+      bind_mask(&context->guest_mask, &context->exchange.guest_execution_mask,
+                &context->guest_native_active, virtual_mask);
+  if (error) {
+    return error;
+  }
+  carrier = context;
+  return gw_signal_target_open(&targets, (uintptr_t)pthread_self(),
+                               (int)syscall(SYS_gettid), context->guest_mask,
+                               NULL, &current);
+}
+
+int gw_guest_signal_retire(void) {
+  struct gw_signal_target *target = current;
+  if (!target || !carrier) {
+    return EINVAL;
+  }
+  current = NULL;
+  carrier = NULL;
+  gw_signal_target_close(target);
+  return gw_signal_target_release(target);
 }
 
 int gw_guest_workers_fault(int number, void *information, void *frame) {
@@ -225,21 +268,103 @@ int gw_guest_workers_fault(int number, void *information, void *frame) {
                  : EINVAL;
 }
 
-void gw_guest_workers_notify(void *packet, void *frame) {
-  siginfo_t *notification_packet = packet;
-  if (!current || notification_packet->si_code != SI_QUEUE ||
-      notification_packet->si_pid != getpid() ||
-      notification_packet->si_value.sival_ptr != &targets) {
-    return;
-  }
-
+static void deliver(void *frame, struct gw_guest_signal_state state) {
   struct gw_signal_delivery delivery;
   int selected;
   while ((selected = gw_signal_actions_deliver(&gw_guest_actions, current,
                                                &delivery)) > 0) {
-    gw_guest_signal_deliver(&delivery, frame, signal_state());
+    gw_guest_signal_deliver(&delivery, frame, state);
   }
   gw_guest_workers_wake_error(-selected);
+}
+
+void gw_guest_workers_notify(void *packet, void *frame) {
+  siginfo_t *notification_packet = packet;
+  if (current && notification_packet->si_code == SI_QUEUE &&
+      notification_packet->si_pid == getpid() &&
+      notification_packet->si_value.sival_ptr == &targets) {
+    deliver(frame, signal_state());
+  }
+}
+
+int gw_guest_signal_parked(void *argument) {
+  struct jni_domain_signal *activation = argument;
+  if (carrier != activation->carrier || !activation->frame || !current) {
+    return ESRCH;
+  }
+  if (gw_signal_target_pin(current)) {
+    return ESRCH;
+  }
+  activation->pinned = 1;
+  activation->initial_mask = carrier->guest_mask;
+  activation->previous_carrier_mask = carrier->exchange.guest_execution_mask;
+  carrier->exchange.guest_execution_mask = activation->carrier_mask;
+  activation->previous_active = carrier->guest_native_active;
+  carrier->guest_native_active = 1;
+  activation->previous = carrier->guest_signal;
+  carrier->guest_signal = activation;
+
+  ucontext_t *parked = activation->frame;
+  ucontext_t frame = *parked;
+#if defined(__x86_64__)
+  if (frame.uc_mcontext.fpregs == &parked->__fpregs_mem) {
+    frame.uc_mcontext.fpregs = &frame.__fpregs_mem;
+  }
+#endif
+  struct gw_guest_signal_state state = signal_state();
+  state.stack_floor = activation->stack_floor;
+  deliver(&frame, state);
+#if defined(__x86_64__)
+  if (frame.uc_mcontext.fpregs == &frame.__fpregs_mem) {
+    frame.uc_mcontext.fpregs = &parked->__fpregs_mem;
+  }
+#endif
+  if (activation->kernel_frame) {
+    /* The older Guest sigreturn still owns the physical Host reservations.
+     * Only its Guest register/stack snapshot and nonvirtual bits may change. */
+    uint64_t mask;
+    memcpy(&mask, &parked->uc_sigmask, sizeof mask);
+    mask = (mask & state.virtual_mask) | (*state.logical & ~state.virtual_mask);
+    memcpy(&frame.uc_sigmask, &mask, sizeof mask);
+    *parked = frame;
+    return 0;
+  }
+  carrier->guest_altstack = frame.uc_stack;
+  carrier->guest_altstack.ss_flags &= ~SS_ONSTACK;
+  if (memcmp(&parked->uc_mcontext, &frame.uc_mcontext, sizeof frame.uc_mcontext)
+#if defined(__x86_64__)
+      || memcmp(&parked->__fpregs_mem, &frame.__fpregs_mem,
+                sizeof frame.__fpregs_mem)
+#endif
+  ) {
+    *parked = frame;
+    carrier->resume_parked = 1;
+  }
+  return 0;
+}
+
+void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
+  struct jni_domain_signal *activation = argument;
+  if (!activation->pinned) {
+    return;
+  }
+  if (carrier != activation->carrier || !current ||
+      carrier->guest_signal != activation) {
+    _exit(126);
+  }
+  if (reason == GW_SIGNAL_HOST_JUMP && !carrier->jump_record) {
+    carrier->guest_mask = activation->initial_mask;
+    check_publication(gw_signal_target_mask(current, carrier->guest_mask));
+  } else if (reason == GW_SIGNAL_GUEST_JUMP) {
+    gw_signal_stack_get(&carrier->guest_altstack);
+    check_publication(gw_signal_target_mask(current, carrier->guest_mask));
+  }
+
+  gw_domain_jump_signal_leave(activation);
+  carrier->guest_signal = activation->previous;
+  carrier->guest_native_active = activation->previous_active;
+  carrier->exchange.guest_execution_mask = activation->previous_carrier_mask;
+  gw_guest_workers_wake_error(gw_signal_target_unpin(current));
 }
 
 int gw_guest_workers_stop(void) {

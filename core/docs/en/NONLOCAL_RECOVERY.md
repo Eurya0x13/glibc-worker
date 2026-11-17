@@ -36,6 +36,11 @@ jumps, alternate stacks, subsequent calls and teardown. It does not jump across
 Java frames. A separate core test covers glibc's fortified `__longjmp_chk` entry;
 the final restore retains libc's check rather than substituting an unchecked jump.
 
+With tagged delivery enabled, the installed service also retires nested
+Guest handler activations before a native jump reaches the original Guest
+command through `GetVersion`. Saved and unsaved mask cases are included in
+the [adopted-carrier fixture](../../../android-jni/docs/en/SDK_TESTS.md#independent-guest-delivery-on-adopted-carriers).
+
 The native-call integration masks catchable signals while acquiring/releasing
 bridge resources, publishing commands and crossing TP/stack boundaries. Requests
 not yet executed can be retired by their sole carrier; completed requests do not

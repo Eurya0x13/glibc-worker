@@ -114,24 +114,32 @@ static void publish_mask(uint64_t logical, struct gw_guest_signal_state state) {
 
 static uintptr_t delivery_top(const struct sigaction *action,
                               const ucontext_t *context, uintptr_t current_sp,
-                              int *disarm) {
+                              uintptr_t stack_floor, int *disarm) {
   uintptr_t interrupted_sp = gw_signal_interrupted_sp(context);
   const stack_t *alternate = &context->uc_stack;
-  if (gw_stack_contains(alternate, interrupted_sp)) {
-    return 0;
+  int interrupted_on_alternate = gw_stack_contains(alternate, interrupted_sp);
+  int floor_on_alternate = gw_stack_contains(alternate, stack_floor);
+  uintptr_t resume_top = stack_floor && stack_floor < interrupted_sp &&
+                                 floor_on_alternate == interrupted_on_alternate
+                             ? stack_floor
+                             : interrupted_sp;
+  if (interrupted_on_alternate) {
+    return stack_floor ? gw_signal_stack_top(resume_top) : 0;
   }
   int on_alternate = gw_stack_contains(alternate, current_sp);
   if (action->sa_flags & SA_ONSTACK) {
     if (!on_alternate && !(alternate->ss_flags & SS_DISABLE)) {
       *disarm = !!((unsigned)alternate->ss_flags & GW_SS_AUTODISARM);
-      return (uintptr_t)alternate->ss_sp + alternate->ss_size;
+      return floor_on_alternate
+                 ? gw_signal_stack_top(stack_floor)
+                 : (uintptr_t)alternate->ss_sp + alternate->ss_size;
     }
   } else if (on_alternate) {
     /* The outer synchronous route may already have put the kernel frame on
      * the alternate stack. Respect an ordinary-stack Guest action. */
     return gw_signal_stack_top(interrupted_sp);
   }
-  return 0;
+  return stack_floor ? gw_signal_stack_top(resume_top) : 0;
 }
 
 static void dispatch_action(int number, void *information, ucontext_t *context,
@@ -177,9 +185,9 @@ static void dispatch_action(int number, void *information, ucontext_t *context,
 
   struct guest_delivery delivery = {action,  number, information,
                                     context, kernel, 0};
-  uintptr_t top =
-      delivery_top(action, context, (uintptr_t)&physical, &delivery.disarm);
-  domain_stack_call(guest_delivery_run, &delivery, top);
+  uintptr_t top = delivery_top(action, context, (uintptr_t)&physical,
+                               state.stack_floor, &delivery.disarm);
+  domain_stack_call(guest_delivery_run, &delivery, top, NULL);
 
   memcpy(&interrupted, &context->uc_sigmask, sizeof interrupted);
   publish_mask(interrupted, state);

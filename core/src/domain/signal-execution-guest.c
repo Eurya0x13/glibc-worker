@@ -4,18 +4,19 @@
 #include "signal-stack.h"
 #include <errno.h>
 #include <setjmp.h>
-#include <string.h>
 
 extern void domain_start(void);
+static _Thread_local struct gw_signal_execution *active;
 
 static _Noreturn void finish(struct gw_signal_execution *execution,
-                             int abandoned) {
+                             enum gw_signal_exit reason) {
   gw_nonlocal_mask_block();
   int saved = errno;
-  execution->finish(execution->argument, abandoned);
+  execution->finish(execution->argument, reason);
+  active = execution->previous;
   execution->landing = NULL;
-  execution->phase =
-      abandoned ? GW_SIGNAL_EXECUTION_ABORTED : GW_SIGNAL_EXECUTION_DONE;
+  execution->phase = reason == GW_SIGNAL_RETURN ? GW_SIGNAL_EXECUTION_DONE
+                                                : GW_SIGNAL_EXECUTION_ABORTED;
   errno = saved;
 
   /* host is captured again on the recovery landing, never the abandoned
@@ -28,83 +29,60 @@ static _Noreturn void run(void *argument) {
   struct gw_signal_execution *execution = argument;
   sigjmp_buf landing;
   execution->landing = &landing;
+  execution->previous = active;
+  active = execution;
   execution->phase = GW_SIGNAL_EXECUTION_RUNNING;
   gw_signal_stack_set(&execution->alternate);
 
-  if (!sigsetjmp(landing, 0)) {
+  int reason = sigsetjmp(landing, 0);
+  if (!reason) {
     execution->result = execution->invoke(execution->argument);
-    finish(execution, 0);
   }
-  finish(execution, 1);
+  finish(execution, reason);
 }
 
 static _Noreturn void abandon(void *argument) {
   struct gw_signal_execution *execution = argument;
-  if (execution->phase != GW_SIGNAL_EXECUTION_RUNNING || !execution->landing) {
+  if (execution != active || execution->phase != GW_SIGNAL_EXECUTION_RUNNING ||
+      !execution->landing) {
     _exit(125);
   }
   /* Only this libc interprets its buffer. This landing retires bridge state;
    * longjmp does not unwind application C++ or pthread cleanup handlers.
    * https://github.com/bminor/glibc/blob/glibc-2.44/setjmp/longjmp.c */
   gw_signal_stack_set(&execution->alternate);
-  siglongjmp(*(sigjmp_buf *)execution->landing, 1);
+  siglongjmp(*(sigjmp_buf *)execution->landing, GW_SIGNAL_HOST_JUMP);
 }
 
-static int valid_stack(void *stack, size_t size) {
-  return stack && size >= 16384 && size <= UINTPTR_MAX - (uintptr_t)stack;
+int gw_guest_signal_internal_jump(const void *buffer) {
+  return active && active->landing == buffer;
 }
 
-static void initialize_domain(struct domain *domain, void *stack, size_t size,
-                              struct gw_signal_execution *execution,
-                              void (*entry)(void *)) {
-  domain->tp = (uintptr_t)__builtin_thread_pointer();
-  domain->sp = ((uintptr_t)stack + size) & ~(uintptr_t)15;
-  domain->pc = (uintptr_t)domain_start;
-#if defined(__x86_64__)
-  domain->saved[2] = (uintptr_t)execution;
-  domain->saved[3] = (uintptr_t)entry;
-  __asm__ volatile("stmxcsr %0" : "=m"(domain->saved[6]));
-  __asm__ volatile("fnstcw %0" : "=m"(domain->saved[7]));
-#else
-  domain->saved[0] = (uintptr_t)execution;
-  domain->saved[1] = (uintptr_t)entry;
-  __asm__ volatile("mov %0, x18" : "=r"(domain->saved[12]));
-  __asm__ volatile("mrs %0, fpcr" : "=r"(domain->saved[21]));
-  __asm__ volatile("mrs %0, fpsr" : "=r"(domain->saved[22]));
-#endif
+_Noreturn void gw_guest_signal_escape(void) {
+  if (!active || !active->landing) {
+    _exit(125);
+  }
+  siglongjmp(*(sigjmp_buf *)active->landing, GW_SIGNAL_GUEST_JUMP);
+}
+
+void gw_guest_signal_entries(struct gw_signal_execution_entries *entries) {
+  *entries = (struct gw_signal_execution_entries){(uintptr_t)domain_start, run,
+                                                  abandon};
 }
 
 int gw_guest_signal_execution_init(
     struct gw_signal_execution *execution,
     const struct gw_signal_execution_config *config) {
-  if (!execution || !config || !config->swap || !config->invoke ||
-      !config->finish || !valid_stack(config->stack, config->stack_size) ||
-      !valid_stack(config->abort_stack, config->abort_stack_size) ||
-      !valid_stack(config->alternate.ss_sp, config->alternate.ss_size) ||
-      config->alternate.ss_flags) {
-    return EINVAL;
-  }
-  uintptr_t low = (uintptr_t)config->stack;
-  uintptr_t abort_low = (uintptr_t)config->abort_stack;
-  uintptr_t alternate_low = (uintptr_t)config->alternate.ss_sp;
-  if ((low < abort_low + config->abort_stack_size &&
-       abort_low < low + config->stack_size) ||
-      (alternate_low < abort_low + config->abort_stack_size &&
-       abort_low < alternate_low + config->alternate.ss_size)) {
-    return EINVAL;
-  }
-
-  memset(execution, 0, sizeof *execution);
-  execution->swap = config->swap;
-  execution->invoke = config->invoke;
-  execution->finish = config->finish;
-  execution->argument = config->argument;
-  execution->alternate = config->alternate;
-  execution->version = 1;
-  execution->phase = GW_SIGNAL_EXECUTION_PREPARED;
-  initialize_domain(&execution->guest, config->stack, config->stack_size,
-                    execution, run);
-  initialize_domain(&execution->abort, config->abort_stack,
-                    config->abort_stack_size, execution, abandon);
-  return 0;
+  struct gw_signal_execution_entries entries;
+  gw_guest_signal_entries(&entries);
+  struct domain saved = {.tp = (uintptr_t)__builtin_thread_pointer()};
+#if defined(__x86_64__)
+  __asm__ volatile("stmxcsr %0" : "=m"(saved.saved[6]));
+  __asm__ volatile("fnstcw %0" : "=m"(saved.saved[7]));
+#else
+  __asm__ volatile("mov %0, x18" : "=r"(saved.saved[12]));
+  __asm__ volatile("mrs %0, fpcr" : "=r"(saved.saved[21]));
+  __asm__ volatile("mrs %0, fpsr" : "=r"(saved.saved[22]));
+#endif
+  return gw_signal_execution_from_saved(execution, config, &saved, &entries);
 }

@@ -45,6 +45,16 @@ domain_signal_entry:
 #else
     jz .Lbad_signal
 #endif
+#ifdef GW_DOMAIN_CHAIN
+    mov 24(%rsp), %rax
+    cmp 0(%rbx), %rax
+    je .Lhost_tp
+    mov 0(%rsp), %edi
+    call domain_guest_notify_select
+    test %rax, %rax
+    jnz .Ltail_guest
+.Lhost_tp:
+#endif
     mov 0(%rbx), %rsi
     mov $158, %eax
     mov $0x1002, %edi
@@ -93,6 +103,7 @@ domain_signal_entry:
     call domain_guest_thread_select
     test %rax, %rax
     jz .Lrelay_guest_thread
+.Ltail_guest:
     mov %rax, %r11
     mov 0(%rsp), %rdi
     mov 8(%rsp), %rsi
@@ -202,6 +213,16 @@ domain_signal_entry:
 #else
     cbz x0, .Lbad_signal
 #endif
+#ifdef GW_DOMAIN_CHAIN
+    ldr x9, [x19]
+    ldr x10, [sp, #16]
+    cmp x9, x10
+    b.eq .Lhost_tp
+    ldr w0, [sp, #32]
+    bl domain_guest_notify_select
+    cbnz x0, .Ltail_guest
+.Lhost_tp:
+#endif
     ldp x9, x18, [x19]
     msr tpidr_el0, x9
     ldr x10, [sp, #16]
@@ -234,6 +255,7 @@ domain_signal_entry:
     ldp x0, x1, [sp, #32]
     bl domain_guest_thread_select
     cbz x0, .Lrelay_guest_thread
+.Ltail_guest:
     mov x16, x0
     ldp x0, x1, [sp, #32]
     ldr x2, [sp, #48]

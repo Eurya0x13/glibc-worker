@@ -95,22 +95,25 @@ boundary.
 
 The opt-in unwind service uses owning-Guest [action snapshots](../../../core/docs/en/SIGNAL_ACTIONS.md)
 for synchronous faults. Re-registering a handler no longer allocates a pinned
-record; an in-flight delivery retains its own complete action copy. This does
-not complete public asynchronous Guest service integration.
+record. An in-flight delivery retains its own complete action copy.
 
 With the opt-in native unwind build, a V2 config can set `guest_notification`
-to an explicitly unused public RT number for the worker backend. An occupied
-number fails admission. The matching Guest service reserves real pthread
+to an explicitly unused public RT number. An occupied number fails admission.
+The matching Guest service reserves real pthread
 identities before clone, publishes their TID before returning from create,
 and routes tagged packets to the owning GNU signal entry. Ordinary Host
 packets still use the Host dispatcher. Cancellation and credential handlers
 for GNU channels 63/64 keep their native registration. STOP checks that all
 application recipients have retired before releasing the Guest registry.
 
-The worker path exercises tagged sends, independent dispositions and blocked
-set consumption without requiring module recompilation. This preview uses
-process-wide kernel policy for unsupported job-control signals by rejecting
-logical registration/sending with `EBUSY`. Guest signalfd, hidden/restart
-semantics for the full set of Guest I/O waits, and delivery to an adopted
-carrier while in Host/Java remain open. A nonzero V2 notification on
-same-thread currently returns `ENOTSUP`.
+The same-thread backend also requires the deferred Host signal channel and
+native unwind interposition to be ready at bootstrap. Its Guest recipient
+uses the actual adopted GNU TCB while the carrier executes Java, waits in
+Host libc or runs a routed Host handler. Nested entry uses the most recent
+Guest frame and records the live stack boundary before the switch. See
+[Guest asynchronous entry](../../../core/docs/en/GUEST_ASYNC_ENTRY.md).
+
+Tagged sends, dispositions and blocked-set consumption use the Guest libc ABI.
+Logical registration and sending for job-control signals return `EBUSY`.
+Guest signalfd and the remaining I/O and saved-context acceptance cases are in
+[the compatibility work list](../../../todo.md).

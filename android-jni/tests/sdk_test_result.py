@@ -192,9 +192,24 @@ def execute_case(
                 "borrowed-relay",
                 "worker-borrowed-relay",
                 "worker-signals",
+                "adopted-signals",
                 "nonlocal",
             )
             and not valid_relay_lifecycle(rows, mode)
+        )
+        or (
+            mode == "adopted-signals"
+            and [r for r in rows if r.get("stage") == "adopted-signal"]
+            != [
+                {
+                    "stage": "adopted-signal",
+                    "mode": phase,
+                    "same_tid": True,
+                    "owned_context": True,
+                    "post_signal_jni": True,
+                }
+                for phase in range(9)
+            ]
         )
         or (
             mode == "worker-signals"

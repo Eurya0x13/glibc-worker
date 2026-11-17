@@ -3,8 +3,8 @@
 [English](../en/GUEST_ASYNC_ENTRY.md) | [简体中文](../zh/GUEST_ASYNC_ENTRY.md)
 
 core 为收养载体上的 Guest 运行时通知提供入口和弃置恢复。原生夹具覆盖正常返回
-以及跳向 Host 检查点的 `siglongjmp`。公开 Guest 信号处置、通用保存上下文和已安装
-JNI 接入仍需分别验收。
+以及跳向 Host 检查点的 `siglongjmp`。显式启用的已安装 JNI 服务为收养载体和
+GNU worker 提供带标签投递。
 
 ## 入口和所有权
 
@@ -21,8 +21,9 @@ Host errno。对该预留路由的公开注册、替换和查询返回 `EBUSY`�
 原生夹具传递明确的内核编号，并检查实际 Host 注册，不假定某段编号可用。
 
 [目标注册表](SIGNAL_TARGETS.md)在真实 TCB 绑定后管理准入、共享选择和入口 pin。
-目标是已登记的 Host 载体，包括其正在执行 Guest 域的情况。此路由不是供真正 GNU
-pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命周期和处置接入。
+目标是已登记的 Host 载体，包括其正在执行 Guest 域的情况。真正的 GNU pthread
+通过自身的原生入口接收 Guest 消息，通过明确的 [Host 转交](HOST_SIGNAL_RELAY.md)
+接收 Host 消息。
 
 在有效的所属 Guest TCB 上用 `gw_guest_signal_execution_init` 初始化
 `gw_signal_execution`。该源码与 `start.S` 由 Guest libc 编译。执行、替代信号投递
@@ -44,6 +45,18 @@ pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命�
 持有的资源，切回一个新保存的 Host 恢复点。Host 恢复替代信号栈并解除锚点，再
 继续前往目标检查点。活动入口会阻止回收，内核已选中的入口及保存续体仍由独立的
 静止协议管理。
+
+## 已安装 JNI 接入
+
+收养载体协作让出时，GNU 服务在 Guest 栈上保存仍然有效的 `getcontext`。载体
+执行 Host 或 Java 时，带标签投递使用此快照和实际暂停的 Guest TP。如果 Guest
+指令刚被中断且 Host 处理器正在运行，路由器改用更新的内核帧和切换时保存的栈
+下界。嵌套的 Guest 处理器在活动帧以下使用普通栈或替代栈。
+
+对穿过已审阅的原生 `GetVersion` 回调、目标位于 Guest 的 `siglongjmp`，信号
+调用先通过 GNU 检查点退出。然后 Host 清理放弃的原生作用域并发布回调响应。
+原 Guest RPC 完成清理后，由所属 glibc 恢复目标。最终掩码遵循目标的保存掩码
+模式。见 [已安装 SDK 测试](../../../android-jni/docs/zh/SDK_TESTS.md)。
 
 ## 等待恢复
 

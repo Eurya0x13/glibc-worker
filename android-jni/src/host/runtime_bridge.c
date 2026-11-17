@@ -33,7 +33,8 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
       return EINVAL;
     }
 #ifdef GW_DOMAIN_NONLOCAL
-    if (c->backend != GW_EXECUTION_WORKER) {
+    if (c->backend == GW_EXECUTION_SAME_THREAD &&
+        (!signal_router_fault_notifications() || !gw_nonlocal_ready())) {
       return ENOTSUP;
     }
 #else
@@ -64,6 +65,13 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
 #ifdef GW_DOMAIN_NONLOCAL
   session.bind_guest_kernel = signal_guest_kernel_bind;
   session.quarantine_signals = signal_router_quarantine;
+  if (session.domain && session.guest_notification) {
+    long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0 || page > 65536 || (65536 % page)) {
+      return ENOTSUP;
+    }
+    session.signal_page_size = (size_t)page;
+  }
 #endif
   /* Claim bridge ownership before creating helpers or changing Guest fault
    * routing. A validation failure leaves NEW and permits a corrected retry;
@@ -82,7 +90,9 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
     error = signal_router_guest_faults();
   }
   if (!error && session.guest_notification) {
-    error = signal_guest_kernel_notify_enable(session.guest_notification);
+    error = signal_guest_kernel_notify_enable(
+        session.guest_notification,
+        session.domain ? gw_domain_signal_notification : NULL);
   }
 #endif
 

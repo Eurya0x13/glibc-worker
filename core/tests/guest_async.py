@@ -184,6 +184,7 @@ run(
         core / "src/domain/signal-inbox.c",
         core / "src/domain/signal-targets.c",
         core / "src/domain/signal-execution-guest.c",
+        core / "src/domain/signal-execution.c",
         core / "src/domain/start.S",
         "-ldl",
         "-pthread",

@@ -4,8 +4,8 @@
 
 Core supplies entry and destructive recovery for a runtime-owned Guest
 notification on an adopted carrier. The native fixture exercises normal return
-and Host-target `siglongjmp`. Public Guest dispositions, arbitrary saved
-contexts and installed JNI integration remain separate acceptance work.
+and Host-target `siglongjmp`. The opt-in installed JNI service adds tagged
+delivery on adopted carriers and GNU workers.
 
 ## Entry and ownership
 
@@ -28,9 +28,9 @@ the actual Host registration instead of assuming an available range.
 
 The [target registry](SIGNAL_TARGETS.md) owns admission after actual TCB bind,
 shared selection and entry pins. Targets are registered Host carriers, including
-while their Guest domain is executing. This route is not a Host callback entry
-for genuine GNU pthreads.
-That path still requires its own Guest-native lifecycle/disposition integration.
+while their Guest domain is executing. Genuine GNU pthreads use their own
+native entry for Guest packets and the explicit [Host relay](HOST_SIGNAL_RELAY.md)
+for Host packets.
 
 Initialize a `gw_signal_execution` from the valid owning Guest TCB with
 `gw_guest_signal_execution_init`. Compile that source and `start.S` with Guest
@@ -61,6 +61,22 @@ landing. The landing restores Host stack configuration and unlinks its anchor
 before continuing to the requested Host checkpoint. Active entries prevent
 retirement. A separate quiescence contract covers kernel-selected entries and
 saved contexts.
+
+## Installed JNI integration
+
+When an adopted carrier cooperatively yields, the GNU service saves a live
+`getcontext` on the Guest stack. Tagged delivery during Host or Java execution
+uses this snapshot and the actual suspended Guest TP. If a Guest instruction
+was interrupted and a Host handler is running, the router instead supplies
+that newer kernel frame and the stack floor saved by the switch. Nested Guest
+handlers use their normal or alternate stack below live frames.
+
+For a Guest-target `siglongjmp` through the reviewed native `GetVersion`
+callback, the signal invocation first exits through its GNU checkpoint. Host
+then retires the abandoned native scopes and publishes the callback response.
+The original Guest RPC cleans up before the owning glibc resumes the target.
+The target's saved-mask mode controls its final mask. See the
+[installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md).
 
 ## Wait recovery
 

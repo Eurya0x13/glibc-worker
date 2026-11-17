@@ -989,8 +989,8 @@ void signal_router_forward_domain(int number, siginfo_t *info, void *context,
 static void forward_selected(int number, siginfo_t *info, void *context,
                              void *token, uint64_t host_mask,
                              const stack_t *host_stack, uintptr_t host_sp,
-                             int foreign, int selected,
-                             uintptr_t suspended_sp) {
+                             int foreign, int selected, uintptr_t suspended_sp,
+                             uintptr_t *guest_floor) {
   struct disposition *record = token;
   if (!record) {
     _exit(106);
@@ -1058,7 +1058,7 @@ static void forward_selected(int number, siginfo_t *info, void *context,
                                    .token = token,
                                    .mask = mask,
                                    .stack = configure ? &effective : NULL};
-  domain_stack_call(host_delivery_run, &delivery, top);
+  domain_stack_call(host_delivery_run, &delivery, top, guest_floor);
   if (configure) {
     gw_signal_stack_set(&physical);
   }
@@ -1069,15 +1069,15 @@ void signal_router_forward_selected_domain(
     int number, siginfo_t *info, void *context, void *token, uint64_t host_mask,
     const stack_t *host_stack, uintptr_t host_sp, int foreign, int selected) {
   forward_selected(number, info, context, token, host_mask, host_stack, host_sp,
-                   foreign, selected, 0);
+                   foreign, selected, 0, NULL);
 }
 
 void signal_router_forward_selected_suspended(
     int number, siginfo_t *info, void *context, void *token, uint64_t host_mask,
     const stack_t *host_stack, uintptr_t host_sp, uintptr_t suspended_sp,
-    int selected) {
+    int selected, uintptr_t *guest_floor) {
   forward_selected(number, info, context, token, host_mask, host_stack, host_sp,
-                   1, selected, suspended_sp);
+                   1, selected, suspended_sp, guest_floor);
 }
 
 _Noreturn void signal_router_default(int number) {

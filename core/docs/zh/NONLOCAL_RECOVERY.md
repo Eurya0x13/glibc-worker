@@ -16,6 +16,10 @@ android-jni 的 `GW_NATIVE_UNWIND_INTEGRATION` 默认关闭。Host 库与 Guest 
 
 用例覆盖 Guest native 执行期间恢复 Host 目标，包括保留外层 Java 回调、保存/不保存掩码、处理器内部跳转、备用栈、再次调用和关闭。它不跨过 Java 帧。独立 core 测试覆盖 glibc 强化入口 `__longjmp_chk`；最终恢复保留 libc 检查，不替换为无检查跳转。
 
+启用带标签投递后，已安装服务可以先退出嵌套的 Guest 处理器，再穿过 `GetVersion`
+原生回调跳向原 Guest 命令。[收养载体用例](../../../android-jni/docs/zh/SDK_TESTS.md#收养载体的独立-guest-投递)
+也覆盖保存及不保存掩码的情况。
+
 尚需完成 Guest 目标接入、可恢复原生上下文、状态发布窗口、完整架构状态与安全的
 JNI 资源清理。保存记录当前固定保留，线程/continuation 生命周期回收未完成。
 未知检查点、失效 scope 代数及嵌套待处理转移当前会使接入失败；这些是待解决问题，

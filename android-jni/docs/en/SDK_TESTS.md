@@ -250,6 +250,25 @@ Host handler must not change the exclusive reservation mask. This tests external
 Host delivery on an adopted carrier, not tagged Guest delivery or GNU pthread
 Host adoption.
 
+## Independent Guest delivery on adopted carriers
+
+Run the installed SDK fixture with `--native-unwind --adopted-signals`.
+The fixture configures an explicit unused Guest notification number and
+bootstraps the Host deferred-signal lanes. A GNU pthread sends each packet to
+the adopted carrier and the test requires the original TID, Guest TP, native
+stack placement and payload at the handler.
+
+The nine cases cover a Java busy loop, blocked Host `ppoll` and `nanosleep`,
+a Host-target jump, saved and unsaved Guest-target jumps through native
+`GetVersion`, and nested Guest/Host/Guest delivery. The nested cases use
+ordinary and alternate stacks and also abandon both signal invocations on a
+jump back to the original Guest command. Every case calls JNI again before
+module unload and SDK shutdown.
+
+The same fixture runs on Linux x86_64 and Android ARM64 with the selected shell
+JRE17. The recorded cases establish the tested native and Java paths. APK/ART
+integration and general resumable contexts have separate acceptance criteria.
+
 ## Evidence
 
 Each output directory contains commands and input hashes in `manifest.json`,
@@ -262,7 +281,7 @@ and the imported Host archives used to build the consumer.
 
 From the workspace root,
 `python3 android-jni/tests/same_thread_results.py --require-current`
-verifies input hashes for ten selected desktop/Android suites
+verifies input hashes for 21 selected desktop/Android suites
 and writes `android-jni/build/tests/same-thread-compatibility.json`. Missing,
 failed or stale evidence fails this check. A current selected matrix still
 reports full compatibility as `INCOMPLETE` while the acceptance work in

@@ -86,6 +86,24 @@ extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
 extern int gw_signal_selection_hidden(void *, uint64_t *) __attribute__((weak));
 
 #ifdef GW_DOMAIN_CHAIN
+struct routed_guest {
+  struct routed_guest *previous;
+  struct signal_slot *slot;
+  struct gw_signal_suspension suspended;
+};
+
+static _Thread_local struct routed_guest *routed_guest;
+
+int signal_guest_suspended(struct signal_slot *slot,
+                           struct gw_signal_suspension *suspended) {
+  if (!routed_guest || routed_guest->slot != slot ||
+      !routed_guest->suspended.stack_floor) {
+    return 0;
+  }
+  *suspended = routed_guest->suspended;
+  return 1;
+}
+
 static void restore_execution_stack(const stack_t *desired) {
   stack_t actual;
   gw_signal_stack_get(&actual);
@@ -120,6 +138,9 @@ int signal_guest_execute(struct gw_signal_execution *execution,
     }
     anchor.mask = signal_host_logical_mask(anchor.mask);
     read_control(anchor.frame, anchor.control);
+    if (execution->carrier_mask) {
+      *execution->carrier_mask = signal_carrier_mask(slot, anchor.mask, 1);
+    }
   }
   stack_t original_stack;
   gw_signal_stack_get(&original_stack);
@@ -142,12 +163,16 @@ int signal_guest_execute(struct gw_signal_execution *execution,
     restore_execution_stack(&retained_stack);
   }
   host_anchor = anchor.previous;
+  int result = execution->phase == GW_SIGNAL_EXECUTION_DONE ? execution->result
+                                                            : ECANCELED;
+  if (execution->release_host) {
+    execution->release_host(execution->argument);
+  }
   atomic_fetch_sub_explicit(&independent_entries, 1, memory_order_release);
   gw_nonlocal_leave(&scope);
   gw_nonlocal_mask_restore(incoming_mask);
 
-  return execution->phase == GW_SIGNAL_EXECUTION_DONE ? execution->result
-                                                      : ECANCELED;
+  return result;
 }
 
 static uint64_t suspended_host_mask(struct signal_slot *slot) {
@@ -208,26 +233,68 @@ static _Atomic uintptr_t guest_tps[DOMAIN_FIXTURE_CARRIERS + 1];
 static _Atomic(uintptr_t) guest_kernel_entry;
 static _Atomic int guest_kernel_notification;
 
-static void ignore_guest_notification(int number, siginfo_t *info,
-                                      void *context) {
-  (void)number;
-  (void)info;
-  /* Ordinary Host recipients cannot consume a native GNU queue. Treat an
-   * unexpected helper as hidden, including during an interposed Host wait. */
+void signal_guest_notification_discard(void *context) {
   if (gw_signal_selection_hidden) {
     uint64_t unused;
     gw_signal_selection_hidden(context, &unused);
   }
 }
 
-int signal_guest_kernel_notify_enable(int number) {
+static void ignore_guest_notification(int number, siginfo_t *info,
+                                      void *context) {
+  (void)number;
+  (void)info;
+  /* Ordinary Host recipients cannot consume a native GNU queue. */
+  signal_guest_notification_discard(context);
+}
+
+int signal_guest_kernel_notify_enable(int number,
+                                      void (*handler)(int, siginfo_t *,
+                                                      void *)) {
   if (atomic_load_explicit(&guest_kernel_notification, memory_order_acquire)) {
     return EALREADY;
   }
-  int error = signal_router_internal_action(number, ignore_guest_notification);
+  int error = signal_router_internal_action(
+      number, handler ? handler : ignore_guest_notification);
   if (!error) {
     atomic_store_explicit(&guest_kernel_notification, number,
                           memory_order_release);
+  }
+  return error;
+}
+
+static uint64_t guest_notification_bit(void) {
+  int number =
+      atomic_load_explicit(&guest_kernel_notification, memory_order_acquire);
+  return number ? UINT64_C(1) << (number - 1) : 0;
+}
+
+int signal_guest_carrier_attach(struct signal_slot *slot) {
+  if (!slot || slot != host_recipient || !guest_notification_bit() ||
+      !slot->deferred_active) {
+    return EINVAL;
+  }
+  if (slot->guest_async) {
+    return EALREADY;
+  }
+  slot->guest_async = 1;
+  return 0;
+}
+
+int signal_guest_carrier_detach(struct signal_slot *slot) {
+  if (!slot || slot != host_recipient || !slot->guest_async) {
+    return EINVAL;
+  }
+  uint64_t wanted = guest_notification_bit();
+  struct timespec timeout = {0};
+  int saved = errno;
+  while (syscall(SYS_rt_sigtimedwait, &wanted, NULL, &timeout, sizeof wanted) >
+         0) {
+  }
+  int error = errno == EAGAIN ? 0 : errno;
+  errno = saved;
+  if (!error) {
+    slot->guest_async = 0;
   }
   return error;
 }
@@ -262,6 +329,16 @@ domain_guest_thread_select(int number, const siginfo_t *information) {
   return 0;
 }
 
+/* Called with adopted Guest TLS before the assembly can switch to Host.
+ * Synchronous faults still use their existing Host recovery coordinator. */
+__attribute__((no_stack_protector, visibility("hidden"))) uintptr_t
+domain_guest_notify_select(int number) {
+  return number == atomic_load_explicit(&guest_kernel_notification,
+                                        memory_order_acquire)
+             ? atomic_load_explicit(&guest_kernel_entry, memory_order_acquire)
+             : 0;
+}
+
 /* Genuine GNU pthreads keep their real TLS. Hardware faults stay in Guest;
  * asynchronous Host handlers explicitly run on the real Host dispatcher. */
 __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
@@ -294,7 +371,7 @@ __attribute__((no_stack_protector)) void signal_note_guest_thread(
 }
 
 static void forward_anchored_host(int number, siginfo_t *info, void *token,
-                                  int selected) {
+                                  int selected, uintptr_t *guest_floor) {
   /* A VM handler must see the real suspended Host PC/registers, never the
    * Guest handler's kernel context or the last cooperative call's SP. */
   ucontext_t *frame = host_anchor->frame;
@@ -304,10 +381,61 @@ static void forward_anchored_host(int number, siginfo_t *info, void *token,
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);
   signal_router_forward_selected_suspended(
       number, info, frame, token, host_anchor->mask, &frame->uc_stack,
-      gw_signal_interrupted_sp(frame), host_anchor->suspended->sp, selected);
+      gw_signal_interrupted_sp(frame), host_anchor->suspended->sp, selected,
+      guest_floor);
   memcpy(&mask, &frame->uc_sigmask, sizeof mask);
   mask = signal_host_physical_mask(mask);
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);
+}
+
+static void deliver_foreign_host(int number, siginfo_t *info, void *context,
+                                 void *token, struct signal_slot *slot,
+                                 int selected, uintptr_t *guest_floor) {
+  if (host_anchor && host_anchor->slot == slot) {
+    forward_anchored_host(number, info, token, selected, guest_floor);
+  } else {
+    struct exchange *exchange = slot->exchange;
+    signal_router_forward_selected_suspended(
+        number, info, context, token, exchange->host_execution_mask,
+        &exchange->host_altstack, exchange->host.sp, 0, selected, guest_floor);
+  }
+}
+
+static void forward_foreign_host(int number, siginfo_t *info, void *context,
+                                 void *token, struct signal_slot *slot,
+                                 int selected) {
+  if (!slot->guest_async || selected != 1) {
+    deliver_foreign_host(number, info, context, token, slot, selected, NULL);
+    return;
+  }
+
+  /* A directed Guest notification can land during the Host handler. Publish
+   * the actual interrupted Guest frame, even when it is younger than the
+   * cooperative RPC frame. Retire this publication on Host-native escapes. */
+  struct routed_guest entry = {.previous = routed_guest, .slot = slot};
+  entry.suspended.frame = context;
+  entry.suspended.state = slot->exchange->guest;
+  gw_signal_stack_get(&entry.suspended.alternate);
+  uint64_t control[3];
+  read_control(context, control);
+#if defined(__aarch64__)
+  entry.suspended.state.saved[12] = control[2];
+  entry.suspended.state.saved[21] = control[0];
+  entry.suspended.state.saved[22] = control[1];
+#else
+  entry.suspended.state.saved[6] = control[0];
+  entry.suspended.state.saved[7] = control[1];
+#endif
+
+  struct gw_nonlocal_scope scope;
+  gw_nonlocal_enter(&scope);
+  routed_guest = &entry;
+  if (!sigsetjmp(scope.landing, 0)) {
+    deliver_foreign_host(number, info, context, token, slot, selected,
+                         &entry.suspended.stack_floor);
+  }
+  routed_guest = entry.previous;
+  gw_nonlocal_leave(&scope);
 }
 
 static void forward_host(int number, siginfo_t *info, void *context,
@@ -338,14 +466,10 @@ static void forward_host(int number, siginfo_t *info, void *context,
   } else {
     atomic_fetch_add_explicit(&domain_forwarded_async, 1, memory_order_relaxed);
   }
-  if (slot && interrupted_tp != slot->host_tp && host_anchor &&
-      host_anchor->slot == slot) {
-    forward_anchored_host(number, info, token, selected);
-  } else if (slot && interrupted_tp != slot->host_tp &&
-             slot->exchange->host_mask_valid) {
-    signal_router_forward_selected_domain(
-        number, info, context, token, suspended_host_mask(slot),
-        &slot->exchange->host_altstack, slot->exchange->host.sp, 1, selected);
+  if (slot && interrupted_tp != slot->host_tp &&
+      ((host_anchor && host_anchor->slot == slot) ||
+       slot->exchange->host_mask_valid)) {
+    forward_foreign_host(number, info, context, token, slot, selected);
   } else {
     ucontext_t *frame = context;
     uint64_t mask;
@@ -484,6 +608,9 @@ int signal_host_defer(struct signal_slot *slot, const siginfo_t *information) {
 
 uint64_t signal_carrier_mask(struct signal_slot *slot, uint64_t logical,
                              int guest) {
+  if (slot && slot->guest_async) {
+    logical &= ~guest_notification_bit();
+  }
   if (!slot || !slot->deferred_active) {
     return logical;
   }
@@ -504,6 +631,7 @@ uint64_t signal_carrier_mask(struct signal_slot *slot, uint64_t logical,
 }
 
 uint64_t signal_host_logical_mask(uint64_t physical) {
+  physical &= ~guest_notification_bit();
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -522,6 +650,7 @@ uint64_t signal_host_physical_mask(uint64_t logical) {
     signal_host_prune_notifications();
     return signal_carrier_mask(slot, logical, 0);
   }
+  logical |= guest_notification_bit();
   /* Before carrier registration there can be no notification for this thread.
    * Keep the private signals blocked until its queue and lookup are published.
    */
@@ -540,7 +669,7 @@ uint64_t signal_host_pending(uint64_t physical) {
                         ? gw_signal_deferred_visible(slot->deferred, physical)
                         : signal_host_logical_mask(physical);
   gw_nonlocal_mask_restore(previous);
-  return result;
+  return result & ~guest_notification_bit();
 }
 
 uint64_t signal_host_wait_mask(uint64_t wanted) {
@@ -920,6 +1049,7 @@ void signal_install(void) {
 
 static int signal_try_register(struct signal_slot *slot, struct exchange *e) {
   slot->deferred_active = 0;
+  slot->guest_async = 0;
   slot->deferred = NULL;
 #if defined(__x86_64__)
   if (gw_raw3(SYS_arch_prctl, 0x1003, (long)&slot->host_tp, 0)) {

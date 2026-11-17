@@ -9,6 +9,7 @@ struct gw_guest_signal_state {
   uint64_t *logical;
   uint64_t carrier, virtual_mask;
   struct gw_signal_target *target;
+  uintptr_t stack_floor; /* Nonzero when another stack owns the dispatcher. */
 };
 
 void gw_guest_signals_init(struct gw_signal_targets *, uint64_t);

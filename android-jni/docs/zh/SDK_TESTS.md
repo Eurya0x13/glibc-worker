@@ -168,13 +168,27 @@ Host TLS 并保留发送者信息，返回后 Guest TLS 哨兵值和 errno 须�
 处理器不得改变独占保留掩码。这验证收养载体上的外部 Host 投递，不代表标记 Guest 投递或
 GNU pthread 的 Host 收养已经完成。
 
+## 收养载体的独立 Guest 投递
+
+用 `--native-unwind --adopted-signals` 运行已安装 SDK 测试。夹具指定一个未占用的
+Guest 通知编号，并在启动时启用 Host 延迟信号通道。GNU pthread 将各消息发送到
+收养载体，测试要求处理器收到原 TID、Guest TP、原生栈位置和负载。
+
+九个用例覆盖 Java 忙循环、阻塞的 Host `ppoll` 和 `nanosleep`、Host 目标跳转、
+穿过原生 `GetVersion` 的保存及不保存掩码的 Guest 目标跳转，以及 Guest/Host/Guest
+嵌套投递。嵌套用例使用普通栈和替代栈，还验证跳向原 Guest 命令时退出两层信号调用。
+每个用例在模组卸载和 SDK 关闭前再次调用 JNI。
+
+同一夹具在 Linux x86_64 和指定 shell JRE17 的 Android ARM64 运行。记录对应已测
+原生和 Java 路径，APK/ART 接入与通用可恢复上下文另有验收标准。
+
 ## 证据
 
 输出目录包含 manifest.json 的命令和输入散列、原始日志及逐用例 JSON。超时、异常退出、格式错误的观测或 JNI/VM 处理器警告会生成 failure.json；只有全部选定用例通过才写 summary.json。中间 OBSERVED 行不是成功标记，运行开始删除旧汇总/失败文件。
 清单还绑定 Guest 源码、已安装 core 头文件/栈切换汇编、libffi，以及消费者使用的 Host 归档库。
 
 在工作区根目录执行 `python3 android-jni/tests/same_thread_results.py --require-current`，
-可核验十组选定桌面/Android 测试的输入散列，输出
+可核验 21 组选定桌面/Android 测试的输入散列，输出
 `android-jni/build/tests/same-thread-compatibility.json`。证据缺失、失败或过期均使检查失败。
 只要 [todo.md](../../../todo.md) 的验收要求尚未完成，即便选定矩阵全部有效通过，完整兼容性
 仍报告为 `INCOMPLETE`。

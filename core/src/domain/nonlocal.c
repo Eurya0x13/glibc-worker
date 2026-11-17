@@ -133,8 +133,10 @@ void *gw_nonlocal_capture(void *buffer, unsigned kind) {
   }
   int saved = errno;
   uint64_t mask = gw_nonlocal_mask_block();
-  struct checkpoint *r = find_checkpoint(buffer, 1);
-  *r = (struct checkpoint){buffer, top, top ? top->generation : 0};
+  if (!top || buffer != (void *)top->landing || kind != 0) {
+    struct checkpoint *r = find_checkpoint(buffer, 1);
+    *r = (struct checkpoint){buffer, top, top ? top->generation : 0};
+  }
   gw_nonlocal_mask_restore(mask);
   errno = saved;
   return captures[kind];
