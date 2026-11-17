@@ -183,9 +183,14 @@ Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新�
 调用，再恢复外层处理器。`setcontext` 用例从即将退出的栈传入上下文副本，检查目标
 掩码与浮点舍入模式，并在同一信号调用内通过 `swapcontext` 往返独立 Guest 栈。
 
-Linux x86_64 运行 14 个用例，其中包含 Host glibc `setcontext` 目标。Android
-ARM64 使用指定的 shell JRE17 运行 13 个用例。Bionic 无公开的 Host 上下文接口，
-Guest glibc 上下文用例在两端运行。
+正常返回的 Guest 处理器会修改暂停 GNU 上下文的浮点控制状态，下次原生入口必须
+观测到这项修改。绝对时间 `clock_nanosleep` 用例要求，内核睡眠期间处理 Guest 通知
+后，Host 仍按原截止时间醒来。
+
+Linux x86_64 运行 16 个用例，其中 Host glibc 用例先恢复同作用域的 `swapcontext`
+捕获，再恢复外层 `getcontext` 目标。Android ARM64 使用指定的 shell JRE17 运行
+15 个用例。Guest glibc 上下文用例在两端运行。Host glibc 用例需要 Bionic 没有
+提供的公开接口。
 
 ## 证据
 

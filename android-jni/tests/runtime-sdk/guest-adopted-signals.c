@@ -14,6 +14,9 @@
 #include <sys/syscall.h>
 #include <ucontext.h>
 #include <unistd.h>
+#if defined(__aarch64__)
+#include <asm/sigcontext.h>
+#endif
 
 struct guest_observation {
   struct adopted_signal_probe *probe;
@@ -25,6 +28,7 @@ struct guest_observation {
   ucontext_t suspended_handler;
   void *fiber_stack;
   volatile sig_atomic_t fiber_ran;
+  int original_rounding;
   stack_t alternate, previous_stack;
   uintptr_t tp, stack, outer_sp;
   size_t size;
@@ -37,6 +41,22 @@ static uintptr_t signal_sp(const ucontext_t *frame) {
   return frame->uc_mcontext.gregs[REG_RSP];
 #else
   return frame->uc_mcontext.sp;
+#endif
+}
+
+static void edit_context_rounding(ucontext_t *frame) {
+#if defined(__x86_64__)
+  struct _libc_fpstate *fp = frame->uc_mcontext.fpregs;
+  assert(fp);
+  fp->cwd = (fp->cwd & ~FE_TOWARDZERO) | FE_DOWNWARD;
+  fp->mxcsr = (fp->mxcsr & ~(FE_TOWARDZERO << 3)) | (FE_DOWNWARD << 3);
+#else
+  /* GNU getcontext places the FPSIMD extension first in its saved record.
+   * https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/aarch64/getcontext.S
+   */
+  struct fpsimd_context *fp = (void *)frame->uc_mcontext.__reserved;
+  assert(fp->head.magic == FPSIMD_MAGIC && fp->head.size == sizeof *fp);
+  fp->fpcr = (fp->fpcr & ~FE_TOWARDZERO) | FE_DOWNWARD;
 #endif
 }
 
@@ -119,6 +139,10 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
   } else {
     assert(signal_sp(frame) - o->stack < o->size);
   }
+  if (mode == SIGNAL_CONTEXT_EDIT) {
+    assert(fegetround() == FE_TONEAREST);
+    edit_context_rounding(frame);
+  }
   atomic_fetch_add_explicit(&o->probe->handled, 1, memory_order_release);
 
   if (mode == SIGNAL_HOST_JUMP || mode == SIGNAL_HOST_CONTEXT ||
@@ -171,7 +195,8 @@ static void wait_for_host_syscall(const struct adopted_signal_probe *probe) {
 static void *send_from_native(void *argument) {
   const struct guest_observation *state = argument;
   struct adopted_signal_probe *probe = state->probe;
-  if (probe->mode == SIGNAL_POLL || probe->mode == SIGNAL_SLEEP) {
+  if (probe->mode == SIGNAL_POLL || probe->mode == SIGNAL_SLEEP ||
+      probe->mode == SIGNAL_SLEEP_ABSOLUTE) {
     wait_for_host_syscall(probe);
   } else {
     while (!atomic_load_explicit(&probe->requested, memory_order_acquire)) {
@@ -199,6 +224,10 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
   assert(o->probe->tid == syscall(SYS_gettid));
   o->recipient = pthread_self();
   o->tp = (uintptr_t)__builtin_thread_pointer();
+  if (o->probe->mode == SIGNAL_CONTEXT_EDIT) {
+    o->original_rounding = fegetround();
+    assert(!fesetround(FE_TONEAREST));
+  }
   pthread_attr_t attributes;
   void *stack;
   assert(!pthread_getattr_np(o->recipient, &attributes));
@@ -237,6 +266,9 @@ jint sdk_adopted_signal_finish(JNIEnv *env, jclass cls) {
   (void)cls;
   struct guest_observation *o = &observation;
   assert(o->probe && pthread_equal(o->recipient, pthread_self()));
+  if (o->probe->mode == SIGNAL_CONTEXT_EDIT) {
+    assert(fegetround() == FE_DOWNWARD && !fesetround(o->original_rounding));
+  }
   assert(!pthread_join(o->sender, NULL));
   assert(atomic_load(&o->probe->handled) ==
          (adopted_nested(o->probe->mode) ? 2 : 1));

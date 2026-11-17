@@ -50,9 +50,11 @@ records `getcontext` before tail entry and handles `setcontext` through the
 same Host scope chain. Native context restoration retains each libc's machine
 state and uses the target's logical mask.
 
-Same-scope Guest `swapcontext` retains its native resume behavior. A Guest
-`swapcontext` that would suspend live bridge scopes returns `ENOTSUP` until
-there is a protocol that can keep those scopes and their stacks resumable.
+GNU Host `swapcontext` records the source and tail-calls native libc. It can
+enter a fresh context prepared on another stack while retaining its own scope.
+Guest `swapcontext` retains native same-scope resume behavior and returns
+`ENOTSUP` for a switch to an older bridge scope. Supporting resumption across
+bridge scopes requires lifetime accounting for both owning stacks.
 Android verification covers Guest glibc contexts and Bionic jump buffers.
 
 The native-call integration masks catchable signals while acquiring/releasing
@@ -138,8 +140,9 @@ checkpoint or resuming arbitrarily saved signal frames.
 
 Remaining obligations include general Guest-target integration, resumable native
 contexts, state-publication windows, complete architecture-state restoration and
-safe JNI resource cleanup. Capture records currently remain pinned;
-thread/continuation lifetime reclamation is unfinished. Unknown captures,
+safe JNI resource cleanup. Host scope exit releases its capture slots for reuse.
+The thread retains the record pages and its captures made outside bridge scopes.
+Unknown captures,
 stale scope generations and nested
 pending transfers currently fail the integration rather than recover. Those
 limitations are unresolved work, not the accepted first-release semantics.

@@ -56,13 +56,28 @@ static _Thread_local struct adopted_signal_probe *adopted_guest_jump;
 static _Thread_local struct adopted_signal_probe *adopted_host_nested;
 #ifndef __ANDROID__
 static _Thread_local ucontext_t adopted_native_context;
+static _Thread_local ucontext_t adopted_host_fiber;
+static _Thread_local ucontext_t adopted_host_suspended;
 static _Thread_local volatile sig_atomic_t adopted_context_active;
+static _Thread_local volatile sig_atomic_t adopted_host_fiber_ran;
+static _Thread_local void *adopted_fiber_stack;
 #endif
 
 static void worker_host_signal(int number) {
   assert(number == SIGUSR1 && signal_host_relay_running());
   atomic_fetch_add_explicit(&worker_host_signal_count, 1, memory_order_relaxed);
 }
+
+#ifndef __ANDROID__
+static void run_on_host_stack(void) {
+  char local;
+  assert((uintptr_t)&local - (uintptr_t)adopted_fiber_stack < 65536);
+  adopted_host_fiber_ran = 1;
+  assert(!setcontext(&adopted_host_suspended));
+  assert(!"Host swapcontext failed to resume");
+}
+
+#endif
 
 static void adopted_host_jump(int number) {
   assert(number == SIGWINCH);
@@ -71,6 +86,8 @@ static void adopted_host_jump(int number) {
   }
 #ifndef __ANDROID__
   if (adopted_context_active) {
+    assert(!swapcontext(&adopted_host_suspended, &adopted_host_fiber));
+    assert(adopted_host_fiber_ran);
     ucontext_t copy = adopted_native_context;
 #if defined(__x86_64__)
     copy.uc_mcontext.fpregs = &copy.__fpregs_mem;
@@ -94,6 +111,14 @@ static void adopted_host_jump(int number) {
 
 #ifndef __ANDROID__
 static void await_adopted_context(struct adopted_signal_probe *probe) {
+  adopted_fiber_stack = malloc(65536);
+  assert(adopted_fiber_stack);
+  adopted_host_fiber_ran = 0;
+  assert(!getcontext(&adopted_host_fiber));
+  adopted_host_fiber.uc_stack =
+      (stack_t){.ss_sp = adopted_fiber_stack, .ss_size = 65536};
+  adopted_host_fiber.uc_link = NULL;
+  makecontext(&adopted_host_fiber, run_on_host_stack, 0);
   assert(!getcontext(&adopted_native_context));
   if (!adopted_context_active) {
     adopted_context_active = 1;
@@ -103,6 +128,8 @@ static void await_adopted_context(struct adopted_signal_probe *probe) {
     }
   }
   adopted_context_active = 0;
+  free(adopted_fiber_stack);
+  adopted_fiber_stack = NULL;
   assert(!signal_host_retirement_busy());
   sigset_t mask;
   assert(!pthread_sigmask(SIG_SETMASK, NULL, &mask));
@@ -112,7 +139,7 @@ static void await_adopted_context(struct adopted_signal_probe *probe) {
 
 static void await_adopted_signal(JNIEnv *env, jclass cls,
                                  struct adopted_signal_probe *probe) {
-  if (probe->mode == SIGNAL_JAVA) {
+  if (probe->mode == SIGNAL_JAVA || probe->mode == SIGNAL_CONTEXT_EDIT) {
     jobject shared = (*env)->NewDirectByteBuffer(env, probe, sizeof *probe);
     jmethodID observe = (*env)->GetStaticMethodID(
         env, cls, "observeAdoptedSignal", "(Ljava/nio/ByteBuffer;)I");
@@ -145,6 +172,18 @@ static void await_adopted_signal(JNIEnv *env, jclass cls,
     } else {
       assert(probe->host_returned);
     }
+  } else if (probe->mode == SIGNAL_SLEEP_ABSOLUTE) {
+    struct timespec deadline, now;
+    assert(!clock_gettime(CLOCK_MONOTONIC, &deadline));
+    deadline.tv_nsec += 350000000;
+    if (deadline.tv_nsec >= 1000000000) {
+      ++deadline.tv_sec;
+      deadline.tv_nsec -= 1000000000;
+    }
+    assert(!clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL));
+    assert(!clock_gettime(CLOCK_MONOTONIC, &now));
+    assert(now.tv_sec > deadline.tv_sec ||
+           (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec));
   } else {
     const struct timespec duration = {.tv_nsec = 350000000};
     int result = probe->mode == SIGNAL_POLL ? ppoll(NULL, 0, &duration, NULL)
@@ -183,7 +222,7 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
 
       errno = EDOM;
       await_adopted_signal(env, cls, &probe);
-      if (mode != SIGNAL_JAVA) {
+      if (mode != SIGNAL_JAVA && mode != SIGNAL_CONTEXT_EDIT) {
         assert(errno == EDOM);
       }
       assert((*env)->CallStaticIntMethod(env, cls, finish) == 73);

@@ -271,9 +271,16 @@ cases pass a copy from the stack that is about to retire, check the target
 mask and floating-point rounding, and exercise a round trip with `swapcontext`
 on a separate Guest stack within the same activation.
 
-Linux x86_64 runs 14 cases, including a Host glibc `setcontext` target.
-Android ARM64 runs 13 cases with the selected shell JRE17. Bionic lacks the
-public Host context API, and the Guest glibc context cases run on both targets.
+A returning Guest handler edits the parked GNU context's FP control state.
+The next native entry must observe the edit. The absolute `clock_nanosleep`
+case checks that a Guest notification delivered during the kernel sleep leaves
+the original Host deadline intact.
+
+Linux x86_64 runs 16 cases, including the Host glibc context case. That case
+resumes a same-scope `swapcontext` capture before restoring its outer
+`getcontext` target. Android ARM64 runs 15 cases with the selected shell JRE17.
+Guest glibc context cases run on both targets. The Host glibc case requires
+public APIs absent from Bionic.
 
 ## Evidence
 

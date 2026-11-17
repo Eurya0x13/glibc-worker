@@ -10,7 +10,7 @@
     push %rsi
     sub $8, %rsp
     mov $\kind, %esi
-    .if \kind == 3
+    .if \kind >= 3
     lea 32(%rsp), %rdx
     mov 24(%rsp), %rcx
     .endif
@@ -26,6 +26,7 @@ CAPTURE sigsetjmp, 0
 #else
 CAPTURE __sigsetjmp, 0
 CAPTURE getcontext, 3
+CAPTURE swapcontext, 4
 #endif
 CAPTURE setjmp, 1
 CAPTURE _setjmp, 2
@@ -39,9 +40,14 @@ CAPTURE _setjmp, 2
     stp x0, x1, [sp]
     str x30, [sp, #16]
     mov w1, #\kind
-    .if \kind == 3
+    .if \kind >= 3
     add x2, sp, #32
+    .if \kind == 3
     mov x3, x30
+    .else
+    /* ARM64 swapcontext stores an internal return trampoline as its PC. */
+    mov x3, xzr
+    .endif
     .endif
     bl gw_nonlocal_capture
     mov x9, x0
@@ -56,6 +62,7 @@ CAPTURE sigsetjmp, 0
 #else
 CAPTURE __sigsetjmp, 0
 CAPTURE getcontext, 3
+CAPTURE swapcontext, 4
 #endif
 CAPTURE setjmp, 1
 CAPTURE _setjmp, 2

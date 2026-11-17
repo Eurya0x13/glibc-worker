@@ -8,9 +8,12 @@
 /* Host-side native unwind boundaries. These do not describe resumable
  * ucontext continuations or permit bypassing Java frames. Interposition is
  * opt-in until the complete recovery contract has been validated. */
+struct gw_nonlocal_checkpoint;
+
 struct gw_nonlocal_scope {
   sigjmp_buf landing;
   struct gw_nonlocal_scope *volatile previous;
+  struct gw_nonlocal_checkpoint *volatile captures;
   volatile uint64_t generation;
 };
 
