@@ -41,6 +41,7 @@ if args.ndk:
     ]
 run(configure)
 targets = [
+    "signal_inbox_test",
     "signal_deferred_test",
     "signal_ordering_test",
     "signal_handler_order_test",
@@ -59,6 +60,7 @@ run(["cmake", "--build", out / "sdk", "--target", *targets, "--parallel", "2"])
 inputs = [
     Path(__file__),
     core / "CMakeLists.txt",
+    core / "tests/signal_inbox.c",
     core / "tests/signal_deferred.c",
     core / "tests/signal_ordering.c",
     core / "tests/signal_handler_order.c",
@@ -88,10 +90,11 @@ manifest = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs
     },
 }
-cases = []
+cases, controls = [], []
 try:
     for target, arguments in [
         *((target, []) for target in targets),
+        ("signal_inbox_test", ["--notification-control"]),
         ("signal_waiting_test", ["--native"]),
         ("signal_fd_test", ["--native-close-window"]),
     ]:
@@ -136,6 +139,17 @@ try:
         case = target + (arguments[0][1:] if arguments else "")
         (out / (case + ".log")).write_text(result.stdout + result.stderr)
         result.check_returncode()
+        if target == "signal_inbox_test" and arguments:
+            data = json.loads(result.stdout)
+            assert data == {
+                "result": "CONTROL_ONLY",
+                "native_only": True,
+                "sa_restart": True,
+                "guest_packet": False,
+                "host_ppoll_eintr": True,
+            }, data
+            controls.append({"case": case, **data})
+            continue
         if target == "signal_fd_lifecycle_test":
             observations = [
                 json.loads(line) for line in result.stdout.splitlines()
@@ -175,6 +189,12 @@ except Exception as error:
 finally:
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 (out / "summary.json").write_text(
-    json.dumps({"result": "PASS", "cases": cases}, indent=2) + "\n"
+    json.dumps(
+        {"result": "PASS", "cases": cases, "native_controls": controls},
+        indent=2,
+    )
+    + "\n"
 )
-print(json.dumps({"result": "PASS", "cases": cases}))
+print(
+    json.dumps({"result": "PASS", "cases": cases, "native_controls": controls})
+)

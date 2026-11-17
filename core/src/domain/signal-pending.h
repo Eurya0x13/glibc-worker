@@ -29,6 +29,9 @@ int gw_signal_pending_take(struct gw_signal_pending *, uint64_t eligible,
 int gw_signal_pending_peek(struct gw_signal_pending *, uint64_t eligible,
                            siginfo_t *);
 uint64_t gw_signal_pending_bits(const struct gw_signal_pending *);
+/* Linux next_signal() priority, also for asynchronously sent fault numbers.
+ * Zero means no eligible signal. This does not distinguish queue ownership. */
+int gw_signal_pending_next(uint64_t available);
 void gw_signal_pending_discard(struct gw_signal_pending *, int);
 void gw_signal_pending_close(struct gw_signal_pending *);
 /* Only after senders, recipients and saved signal continuations quiesce. */

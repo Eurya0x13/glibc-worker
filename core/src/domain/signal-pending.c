@@ -37,6 +37,20 @@ static uint64_t bit(int number) {
   return UINT64_C(1) << (number - 1);
 }
 
+int gw_signal_pending_next(uint64_t available) {
+  /* Linux prioritizes these numbers even when si_code is SI_QUEUE/SI_TKILL.
+   * Thread pending must be considered before process pending by the caller.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
+   * See next_signal() and dequeue_signal(). */
+  const uint64_t faults = bit(SIGSEGV) | bit(SIGBUS) | bit(SIGILL) |
+                          bit(SIGFPE) | bit(SIGTRAP) | bit(SIGSYS);
+  if (available & faults) {
+    available &= faults;
+  }
+
+  return available ? __builtin_ctzll(available) + 1 : 0;
+}
+
 static void attach_chunk(struct gw_signal_pending *pending,
                          struct gw_signal_chunk *chunk) {
   chunk->next = pending->chunks;
@@ -118,7 +132,7 @@ int gw_signal_pending_peek(struct gw_signal_pending *pending, uint64_t eligible,
     return 0;
   }
 
-  int number = __builtin_ctzll(available) + 1;
+  int number = gw_signal_pending_next(available);
   *information = number < 32 ? pending->standard[number]
                              : pending->first[number]->information;
   unlock(pending);
@@ -134,7 +148,7 @@ int gw_signal_pending_take(struct gw_signal_pending *pending, uint64_t eligible,
     unlock(pending);
     return 0;
   }
-  int number = __builtin_ctzll(available) + 1;
+  int number = gw_signal_pending_next(available);
   if (number < 32) {
     *information = pending->standard[number];
     atomic_fetch_and_explicit(&pending->present, ~bit(number),

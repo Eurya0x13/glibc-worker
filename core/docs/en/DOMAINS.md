@@ -94,7 +94,10 @@ protects Host-reserved queues across mask-and-wait, consuming waits, pending
 queries and signalfd creation/update. Host arrivals on genuine GNU pthreads use
 the explicit [Host dispatcher policy](HOST_SIGNAL_RELAY.md), which changes the
 handler thread while retaining the original signal frame. Tagged asynchronous
-sends and general Guest pending queues remain incomplete. See
+sends and end-to-end Guest pending delivery remain incomplete. The internal
+[Guest signal inbox](GUEST_SIGNAL_INBOX.md) supplies private/shared selection,
+aggregate RT accounting and notification/close transactions; it is not yet
+connected to asynchronous Guest TLS entry or libc send/wait hooks. See
 [nonlocal recovery](NONLOCAL_RECOVERY.md) and the repository `todo.md` for the
 required final contract. The regular SDK does not silently enable the opt-in
 unwind capability.

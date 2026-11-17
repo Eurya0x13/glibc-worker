@@ -26,6 +26,15 @@ Other runtime-tagged Guest signals belong to Guest. Untagged external signals
 belong to Host. Raw syscalls bypassing the runtime cannot identify a Guest
 logical target.
 
+Guest asynchronous signals must be delivered on their target carrier while it
+executes Host/Java as well as Guest code. Waiting for the next Guest call is not
+an accepted delivery policy. The independent queue substrate is implemented in
+core; see [Guest signal inbox](core/docs/en/GUEST_SIGNAL_INBOX.md). Its native
+notification test is not acceptance of foreign TLS, JNI or VM signal entry.
+Guest handler execution must also remain transparent to a suspended Host
+blocking wait. Internal notifications do not create Host `EINTR`; preserve its
+original timeout and still expose real Host-owned signal interruptions.
+
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,
 adopted-carrier logical masks, native get/set/swapcontext mask adaptation and
@@ -43,6 +52,11 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
 
 - Complete independent asynchronous dispositions/masks, pending queues, default
   actions and targets; keep overlapping registrations from replacing VM handlers.
+  Thread/shared queue selection, aggregate RT accounting and notification/close
+  transactions are implemented; connect the inbox to actual Guest recipient
+  admission, disposition generations, tagged libc send/wait hooks and timely
+  entry during Host execution. Retain kernel restart/EINTR semantics when the
+  logical action changes or a notification has no deliverable Guest packet.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,
   preserving sender information, queue semantics and errors.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
