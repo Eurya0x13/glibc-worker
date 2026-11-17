@@ -40,9 +40,33 @@ The integration must keep catchable signals blocked across these transitions.
 The primitive does not invent a Guest `ucontext` from a Host kernel frame or
 make an uncoordinated nonlocal exit safe.
 
+For a registered carrier, `signal_guest_enter` retains the actual interrupted
+Host kernel context while executing Guest code. Pass that context only for a
+Host-origin entry; a Guest-origin interruption passes NULL and retains any
+outer Host anchor. Nested Host handlers then receive the real Host PC,
+registers and logical mask rather than a Guest PC or a stale cooperative SP.
+Their context-mask edits survive the outer kernel return. The actual Host
+floating-point control and ARM64 x18 are restored before Host dispatch.
+
+Supply a distinct, guarded `stack_t` of at least 16 KiB for each simultaneously
+live entry; zero flags select a normal physical routing stack. The underlying
+`domain_guest_signal_stack_enter` first leaves the Host stack, then configures
+the Guest physical alternate stack. It restores the old physical configuration
+only after returning to the Host stack. Reusing Host's alternate-stack top
+would let a nested kernel frame overwrite the original notification frame.
+The assembly records the lowest suspended Host SP at the actual stack switch;
+nested Host handlers use that boundary when sharing an already occupied Host
+stack. The logical Host alternate-stack configuration remains intact.
+
+These are normally returning, stack-owned anchors. They do not authorize an
+uncoordinated jump or saving a context past the entry lifetime. Active entries
+make the runtime retirement check busy; zero entries alone does not establish
+recipient, selected-frame or saved-continuation quiescence. These lifetimes
+still require the production continuation coordinator.
+
 ## Wait recovery
 
-Before executing hidden work, the integration calls
+Before executing hidden work, `signal_guest_enter` calls
 `gw_signal_selection_hidden` on the actual interrupted Host kernel frame.
 It therefore retains the existing wait's deadline, native remainder and visible
 Host interruption rules. Work in Guest TLS is charged to that same Host budget.
@@ -79,7 +103,7 @@ logical number remains installed and receives its own untagged kernel packet.
 The optional native `--ubsan` run instruments Host/core with Clang; the GNU
 Guest and its libc remain uninstrumented. It uses a separate output directory.
 
-Two carriers over two joined lifetimes consume 28 private/shared Guest packets
+Two carriers over six joined lifetimes consume 84 private/shared Guest packets
 with sender, code, value and queue-source checks. Guest entry interrupts Host
 busy code without Guest-call polling, runs during an actually blocked native
 sleep and `ppoll`, and interrupts
@@ -92,6 +116,15 @@ re-enter its kernel wait before the real Guest packet is published.
 After send admission closes, the target drains its helper, completes Guest
 teardown and joins before any TCB, stack or receiver queue is reclaimed. A
 post-close publication returns `ESRCH`.
+
+Sixty nested Host deliveries check original Host contexts, mask edits, TP/TLS,
+floating-point control and ordinary/alternate-stack placement. The six batches
+cross disabled, enabled and AUTODISARM Host alternate stacks with Host
+`SA_ONSTACK` on/off, including native stack-query flags inside the handler.
+Each carrier also receives a real Host signal during hidden Guest work in a
+native `ppoll`; that wait must return `EINTR`. A separate disposable control
+deliberately omits the Host anchor and must observe the wrong context, proving
+that a successful Guest call alone would miss this failure.
 
 Source/artifact hashes, build/run commands, device identity and structured
 results live under `core/build/tests/guest-async{,-android}/`. The summary keeps

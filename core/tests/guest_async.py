@@ -86,6 +86,9 @@ for name in (
     "targets-summary.json",
     "targets-stdout.log",
     "targets-stderr.log",
+    "anchor-summary.json",
+    "anchor-stdout.log",
+    "anchor-stderr.log",
 ):
     (out / name).unlink(missing_ok=True)
 commands = []
@@ -243,6 +246,7 @@ inputs = [
     out / "target-control",
     control_loader,
     out / "host/guest_async_host",
+    out / "host/guest_async_no_anchor",
     out / "libgcc_s.so.1",
     *sdk_inputs,
 ]
@@ -284,6 +288,7 @@ if args.serial:
     run([*adb, "shell", "mkdir", "-p", remote])
     for path in [
         out / "host/guest_async_host",
+        out / "host/guest_async_no_anchor",
         out / "guest",
         out / "send-control",
         out / "target-control",
@@ -345,6 +350,22 @@ def native_command(binary):
 
 
 command = list(map(str, command))
+if args.serial:
+    missing_anchor = [
+        *adb,
+        "shell",
+        shlex.join(
+            [
+                part.replace("/guest_async_host", "/guest_async_no_anchor")
+                for part in invocation
+            ]
+        ),
+    ]
+else:
+    missing_anchor = [
+        part.replace("/guest_async_host", "/guest_async_no_anchor")
+        for part in command
+    ]
 controls = [
     (
         "control",
@@ -355,6 +376,11 @@ controls = [
         "targets",
         native_command("target-control"),
         {"result": "PASS", "targets": 2048, "concurrent_senders": 4},
+    ),
+    (
+        "anchor",
+        missing_anchor,
+        {"result": "PASS", "missing_host_anchor_detected": True},
     ),
 ]
 commands.extend(item[1] for item in controls)
@@ -383,11 +409,11 @@ try:
     result.check_returncode()
     data = json.loads(result.stdout)
     assert data.pop("result") == "PASS"
-    assert data.pop("packets") == 28
-    assert data.pop("self_packets") == 24
-    assert data.pop("self_entries") == 24
-    assert data.pop("host_entries") >= 8
-    assert data.pop("guest_entries") == 4
+    assert data.pop("packets") == 84
+    assert data.pop("self_packets") == 72
+    assert data.pop("self_entries") == 72
+    assert data.pop("host_entries") >= 24
+    assert data.pop("guest_entries") == 12
     assert data.pop("production_ready") is False
     assert data.pop("bionic_private_routes") is bool(args.ndk)
     assert data and all(value is True for value in data.values()), data
@@ -408,6 +434,7 @@ summary = json.loads(result.stdout)
 summary.update(
     native_handler_errno_control=True,
     native_targets_control=True,
+    missing_host_anchor_control=True,
     guest_public_signal_abi=False,
     jni_vm_validated=False,
     nonlocal_async_entry_validated=False,

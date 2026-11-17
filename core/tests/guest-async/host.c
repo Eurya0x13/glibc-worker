@@ -119,6 +119,51 @@ static void host_signal(int number, siginfo_t *information, void *context) {
                             memory_order_release);
 }
 
+static void nested_host_signal(int number, siginfo_t *information,
+                               void *context) {
+  assert(number == TEST_NESTED_HOST_SIGNAL && current && host_tls == 17);
+  assert(information->si_code == SI_TKILL);
+  assert((uintptr_t)__builtin_thread_pointer() == current->exchange.host.tp);
+#ifdef GW_TEST_NO_HOST_ANCHOR
+  assert(context != current->interrupted_host_frame);
+  static const char detected[] =
+      "{\"result\":\"PASS\",\"missing_host_anchor_detected\":true}\n";
+  assert(syscall(SYS_write, STDOUT_FILENO, detected, sizeof detected - 1) ==
+         (ssize_t)(sizeof detected - 1));
+  _exit(0); /* Disposable control: no continuation/lifecycle claim. */
+#endif
+  assert(context == current->interrupted_host_frame);
+  assert(signal_host_retirement_busy());
+  assert(fegetround() == FE_DOWNWARD);
+  ucontext_t *frame = context;
+#if defined(__x86_64__)
+  assert((uintptr_t)frame->uc_mcontext.gregs[REG_RIP] ==
+         current->interrupted_host_pc);
+#else
+  assert(frame->uc_mcontext.pc == current->interrupted_host_pc);
+#endif
+  assert(gw_signal_interrupted_sp(frame) == current->interrupted_host_sp);
+  char local;
+  uintptr_t here = (uintptr_t)&local;
+  if (current->host_alternate && current->host_onstack) {
+    assert(gw_stack_contains(&frame->uc_stack, here));
+  } else {
+    assert(here >= current->host_stack_low && here < current->host_stack_high);
+  }
+  stack_t native_stack;
+  assert(!sigaltstack(NULL, &native_stack));
+  if (!current->host_alternate ||
+      (current->host_onstack && current->host_autodisarm)) {
+    assert(native_stack.ss_flags & SS_DISABLE);
+  } else {
+    assert(!!(native_stack.ss_flags & SS_ONSTACK) == current->host_onstack);
+    assert(!!((unsigned)native_stack.ss_flags & GW_SS_AUTODISARM) ==
+           current->host_autodisarm);
+  }
+  sigaddset(&frame->uc_sigmask, SIGWINCH);
+  ++current->nested_host_count;
+}
+
 void gw_signal_mask_wait_retry_observe(long number,
                                        const struct timespec *remaining) {
   if (current && current->completed_work) {
@@ -132,23 +177,33 @@ void gw_signal_mask_wait_retry_observe(long number,
 static void notification(int number, siginfo_t *information, void *context) {
   (void)information;
   assert(number == control.notification && current && host_tls == 17);
-  uint64_t execution;
-  gw_signal_selection_hidden(context, &execution);
   ucontext_t *frame = context;
 #if defined(__x86_64__)
   uintptr_t pc = frame->uc_mcontext.gregs[REG_RIP];
 #else
   uintptr_t pc = frame->uc_mcontext.pc;
 #endif
+  int in_guest = 0;
   if (atomic_load(&current->self_phase)) {
+    in_guest = 1;
     ++current->self_handlers;
   } else if (pc >= current->busy_begin && pc < current->busy_end) {
+    in_guest = 1;
     ++current->guest_handlers;
   } else {
     ++current->host_handlers;
   }
-  assert(!domain_guest_signal_stack_call(
-      &current->entry, (uintptr_t)current->entry_stack + 65536));
+  current->interrupted_host_frame = in_guest ? NULL : frame;
+  current->interrupted_host_pc = pc;
+  current->interrupted_host_sp = gw_signal_interrupted_sp(frame);
+  stack_t entry_stack = {.ss_sp = current->entry_stack, .ss_size = 65536};
+#ifdef GW_TEST_NO_HOST_ANCHOR
+  void *host_frame = NULL;
+#else
+  void *host_frame = current->interrupted_host_frame;
+#endif
+  assert(!signal_guest_enter(&current->entry, &entry_stack, host_frame));
+  current->interrupted_host_frame = NULL;
   assert(host_tls == 17);
   errno = ERANGE; /* The internal route must preserve interrupted Host errno. */
 }
@@ -178,6 +233,23 @@ static void *carrier_main(void *argument) {
 #endif
   struct signal_slot *recipient = signal_acquire(exchange);
   assert(recipient);
+  pthread_attr_t attributes;
+  void *host_stack;
+  size_t host_stack_size;
+  assert(!pthread_getattr_np(pthread_self(), &attributes));
+  assert(!pthread_attr_getstack(&attributes, &host_stack, &host_stack_size));
+  assert(!pthread_attr_destroy(&attributes));
+  carrier->host_stack_low = (uintptr_t)host_stack;
+  carrier->host_stack_high = (uintptr_t)host_stack + host_stack_size;
+  if (!carrier->host_alternate) {
+    stack_t disabled = {.ss_flags = SS_DISABLE};
+    gw_signal_stack_set(&disabled);
+  } else if (carrier->host_autodisarm) {
+    stack_t alternate = {.ss_sp = recipient->signal_stack,
+                         .ss_size = 65536,
+                         .ss_flags = GW_SS_AUTODISARM};
+    gw_signal_stack_set(&alternate);
+  }
   assert(!fesetround(FE_DOWNWARD));
   errno = EDOM;
   uint64_t host_mask = gw_nonlocal_mask_block();
@@ -190,6 +262,7 @@ static void *carrier_main(void *argument) {
   sigemptyset(&wake_mask);
   sigaddset(&wake_mask, control.notification);
   sigaddset(&wake_mask, TEST_LOGICAL_SIGNAL);
+  sigaddset(&wake_mask, TEST_NESTED_HOST_SIGNAL);
   assert(!pthread_sigmask(SIG_UNBLOCK, &wake_mask, &previous));
   atomic_store_explicit(&carrier->phase, PHASE_BUSY, memory_order_release);
   while (atomic_load_explicit(&carrier->received, memory_order_acquire) <
@@ -197,6 +270,9 @@ static void *carrier_main(void *argument) {
     __asm__ volatile("" ::: "memory");
   }
   host_check();
+  sigset_t after_nested;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &after_nested));
+  assert(sigismember(&after_nested, SIGWINCH));
 
   carrier->delay = 1;
   atomic_store_explicit(&carrier->phase, PHASE_WAIT, memory_order_release);
@@ -215,6 +291,12 @@ static void *carrier_main(void *argument) {
   assert(atomic_load(&carrier->received) == TEST_PACKETS + 2);
   assert(carrier->budget_observed);
   carrier->delay = 0;
+  atomic_store_explicit(&carrier->phase, PHASE_HOST_INTERRUPT,
+                        memory_order_release);
+  struct timespec interrupted_wait = {.tv_sec = 5};
+  assert(ppoll(NULL, 0, &interrupted_wait, NULL) == -1 && errno == EINTR);
+  errno = EDOM;
+  host_check();
   host_mask = gw_nonlocal_mask_block();
   exchange->host_execution_mask = host_mask;
   exchange->host_mask_valid = 1;
@@ -257,8 +339,8 @@ static void wait_value(_Atomic int *word, int value) {
   }
 }
 
-static void wait_native_sleep(struct async_carrier *carrier, int polling) {
-  wait_value(&carrier->phase, polling ? PHASE_POLL : PHASE_WAIT);
+static void wait_native_sleep(struct async_carrier *carrier, int phase) {
+  wait_value(&carrier->phase, phase);
   struct timespec start, now;
   assert(!clock_gettime(CLOCK_MONOTONIC, &start));
   for (;;) {
@@ -273,7 +355,7 @@ static void wait_native_sleep(struct async_carrier *carrier, int polling) {
       text[length] = 0;
       long number;
       if (sscanf(text, "%ld", &number) == 1 &&
-          number == (polling ? SYS_ppoll : SYS_clock_nanosleep)) {
+          number == (phase == PHASE_WAIT ? SYS_clock_nanosleep : SYS_ppoll)) {
         return;
       }
     }
@@ -331,8 +413,16 @@ static void prepare_routes(void) {
 }
 
 static void start_carriers(int batch, pthread_t threads[TEST_CARRIERS]) {
+  struct sigaction action = {
+      .sa_sigaction = nested_host_signal,
+      .sa_flags = SA_SIGINFO | (batch & 1 ? SA_ONSTACK : 0)};
+  sigemptyset(&action.sa_mask);
+  assert(!sigaction(TEST_NESTED_HOST_SIGNAL, &action, NULL));
   for (int i = 0; i < TEST_CARRIERS; ++i) {
-    carriers[i] = (struct async_carrier){.index = batch * TEST_CARRIERS + i};
+    carriers[i] = (struct async_carrier){.index = batch * TEST_CARRIERS + i,
+                                         .host_alternate = batch >= 2,
+                                         .host_autodisarm = batch >= 4,
+                                         .host_onstack = batch & 1};
     assert(!pthread_create(&threads[i], NULL, carrier_main, &carriers[i]));
     wait_value(&carriers[i].phase, PHASE_READY);
     assert(!owner_command(&carriers[i], OWNER_ALLOC, 0));
@@ -357,18 +447,23 @@ static void send_busy_packets(void) {
 static void send_wait_packets(void) {
   for (int polling = 0; polling < 2; ++polling) {
     for (int i = 0; i < TEST_CARRIERS; ++i) {
-      wait_native_sleep(&carriers[i], polling);
+      int phase = polling ? PHASE_POLL : PHASE_WAIT;
+      wait_native_sleep(&carriers[i], phase);
       if (polling) {
         int empty = atomic_load(&carriers[i].empty_notifications);
         assert(!owner_command(&carriers[i], OWNER_EMPTY, 0));
         wait_value(&carriers[i].empty_notifications, empty + 1);
-        wait_native_sleep(&carriers[i], polling);
+        wait_native_sleep(&carriers[i], phase);
       }
       assert(!owner_command(
           &carriers[i], OWNER_SEND,
           carriers[i].index * 1000 + TEST_PACKETS + 1 + polling));
       wait_value(&carriers[i].received, TEST_PACKETS + 1 + polling);
     }
+  }
+  for (int i = 0; i < TEST_CARRIERS; ++i) {
+    wait_native_sleep(&carriers[i], PHASE_HOST_INTERRUPT);
+    assert(!owner_command(&carriers[i], OWNER_EMPTY, 0));
   }
 }
 
@@ -402,6 +497,7 @@ static void join_carriers(pthread_t threads[TEST_CARRIERS],
     assert(!pthread_join(threads[i], &result) && result == &carriers[i]);
     assert(carriers[i].guest_handlers == 1 && carriers[i].host_handlers >= 2);
     assert(carriers[i].self_handlers == 6);
+    assert(carriers[i].nested_host_count == TEST_PACKETS + 1);
     assert(atomic_load(&carriers[i].host_signal_count) == 1);
     assert(!owner_command(&carriers[i], OWNER_FREE, 0));
     sum->packets += atomic_load(&carriers[i].received);
@@ -445,6 +541,7 @@ int main(int argc, char **argv) {
     join_carriers(threads, &sum);
   }
   assert(!signal_router_verify());
+  assert(!signal_host_retirement_busy());
   assert(!signal_router_restore());
   printf(
       "{\"result\":\"PASS\",\"packets\":%d,\"self_packets\":%d,"
@@ -457,6 +554,9 @@ int main(int argc, char **argv) {
       "\"host_ppoll_transparent\":true,\"handler_time_in_budget\":true,"
       "\"empty_notification_retry\":true,"
       "\"host_disposition_preserved\":true,"
+      "\"nested_host_original_context\":true,\"nested_host_stacks\":true,"
+      "\"nested_host_wait_interrupt\":true,"
+      "\"nested_host_autodisarm\":true,"
       "\"public_send_hooks\":true,\"send_exit_serialization\":true,"
       "\"self_sends_before_return\":true,\"send_errno_contract\":true,"
       "\"handler_errno_visible\":true,"

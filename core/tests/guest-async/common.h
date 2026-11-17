@@ -9,10 +9,11 @@
 
 enum {
   TEST_CARRIERS = 2,
-  TEST_BATCHES = 2,
+  TEST_BATCHES = 6,
   TEST_PACKETS = 4,
   TEST_TOTAL_PACKETS = TEST_PACKETS + 3,
   TEST_LOGICAL_SIGNAL = 56,
+  TEST_NESTED_HOST_SIGNAL = SIGUSR1,
   TEST_LAYOUT_WORDS = 12
 };
 
@@ -23,6 +24,7 @@ enum {
   PHASE_BUSY,
   PHASE_WAIT,
   PHASE_POLL,
+  PHASE_HOST_INTERRUPT,
   PHASE_GUEST,
   PHASE_DONE
 };
@@ -32,6 +34,9 @@ struct async_carrier {
   struct gw_signal_target *target;
   struct domain_signal_call entry;
   void *token, *entry_stack;
+  void *interrupted_host_frame;
+  uintptr_t interrupted_host_pc, interrupted_host_sp;
+  uintptr_t host_stack_low, host_stack_high;
   _Atomic int phase, received, closed, guest_running;
   _Atomic int host_signal_count;
   _Atomic int empty_notifications;
@@ -42,6 +47,8 @@ struct async_carrier {
   int index, expected, failures;
   int host_handlers, guest_handlers, self_handlers, delay;
   int completed_work, budget_observed;
+  _Atomic int nested_host_count;
+  int host_alternate, host_onstack, host_autodisarm;
 };
 
 struct async_control {

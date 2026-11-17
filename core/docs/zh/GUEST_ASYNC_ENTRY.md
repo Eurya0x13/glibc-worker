@@ -30,9 +30,26 @@ pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命�
 必须在这些切换期间保持可捕获信号屏蔽。原语不会把 Host 内核帧伪造成 Guest
 `ucontext`，也不会让未经协调的非局部退出变得安全。
 
+对于已登记载体，`signal_guest_enter` 在执行 Guest 期间持有实际被中断的
+Host 内核上下文。只有 Host 来源入口才传入该上下文；Guest 来源中断传 NULL，
+保留已有的外层 Host 锚点。嵌套 Host 处理器因此得到真正的 Host PC、寄存器和
+逻辑掩码，而非 Guest PC 或过期的协作切换 SP。处理器对上下文掩码的修改会在
+外层内核返回后保留。进入 Host 分派前恢复实际 Host 浮点控制状态及 ARM64 x18。
+
+每个同时存活的入口需提供独立、有保护页、至少 16 KiB 的 `stack_t`，flags
+为零，作为物理路由栈。底层 `domain_guest_signal_stack_enter` 先离开 Host
+栈，再配置 Guest 物理备用信号栈；返回 Host 栈后才恢复旧配置。如果重用 Host
+备用栈顶，嵌套内核帧会覆盖仍存活的原通知帧。汇编在实际切栈处记录最低的
+悬挂 Host SP，嵌套 Host 处理器共享已占用的 Host 栈时使用此边界，同时保留
+Host 逻辑备用栈配置。
+
+这些锚点位于栈上，只支持正常返回，不允许未经协调的跳转，也不允许把上下文
+保存至入口生命周期之外。活跃入口会让运行时退出检查返回忙；入口计数为零
+不能证明接收者、已选择信号帧或保存续体已经静默，仍需生产续体协调器。
+
 ## 等待恢复
 
-执行隐藏工作前，接入方对实际被中断的 Host 内核帧调用
+执行隐藏工作前，`signal_guest_enter` 对实际被中断的 Host 内核帧调用
 `gw_signal_selection_hidden`，从而保留原等待的截止时间、原生余量及真正 Host
 中断规则。Guest TLS 中执行的工作也计入同一份 Host 预算。空通知或过期通知同样
 使用隐藏路径。选中的私有内核动作带有 `SA_RESTART`，但仅此不足以让睡眠/ppoll
@@ -62,7 +79,7 @@ python3 core/tests/guest_async.py --abi arm64-v8a \
 可选的原生 `--ubsan` 运行使用 Clang 检查 Host/core；GNU Guest 及其 libc 不插桩。
 该配置使用独立输出目录。
 
-两个载体经过两批已 join 的生命周期，消费 28 个私有/共享 Guest 包，并检查
+两个载体经过六批已 join 的生命周期，消费 84 个私有/共享 Guest 包，并检查
 发送者、code、数值和队列来源。Guest 入口在没有 Guest 调用轮询时中断 Host
 忙循环，在真正阻塞的
 原生睡眠和 `ppoll` 期间执行，还中断由内核保存 PC 确认的 Guest 忙循环。每次
@@ -72,6 +89,13 @@ python3 core/tests/guest_async.py --abi arm64-v8a \
 真正的 Guest 包发布前重新进入内核等待。发送准入关闭后，目标先排空通知、
 完成 Guest 析构，再 join，随后才回收 TCB、栈和接收队列。关闭后的发布返回
 `ESRCH`。
+
+60 次嵌套 Host 投递检查原始 Host 上下文、掩码修改、TP/TLS、浮点控制和
+普通/备用栈位置。六批组合覆盖 Host 备用栈禁用、启用和 AUTODISARM，以及
+Host `SA_ONSTACK` 开关，包括处理器内原生栈查询的标志。每个载体还在
+原生 `ppoll` 的隐藏 Guest 工作期间接收一个真正的 Host
+信号，该等待必须返回 `EINTR`。独立的一次性对照故意不提供 Host 锚点，必须
+观察到错误上下文，证明仅有 Guest 调用成功不足以发现此类失败。
 
 源码/制品哈希、构建/运行命令、设备身份和结构化结果保存在
 `core/build/tests/guest-async{,-android}/`。摘要中的 `production_ready`、

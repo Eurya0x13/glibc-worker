@@ -21,20 +21,15 @@
  * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/include/uapi/asm/sigcontext.h
  * https://github.com/torvalds/linux/blob/v6.12/arch/x86/include/uapi/asm/sigcontext.h
  */
-static void save_guest_control(struct exchange *exchange, ucontext_t *context) {
-  _Static_assert(sizeof context->uc_sigmask >= sizeof(uint64_t),
-                 "kernel signal mask representation");
-  memcpy(&exchange->interrupted_guest_mask, &context->uc_sigmask,
-         sizeof exchange->interrupted_guest_mask);
-  gw_signal_stack_get(&exchange->interrupted_guest_altstack);
+static void read_control(ucontext_t *context, uint64_t control[3]) {
 #if defined(__x86_64__)
   if (!context->uc_mcontext.fpregs) {
     _exit(96);
   }
-  exchange->interrupted_control[0] = context->uc_mcontext.fpregs->mxcsr;
-  exchange->interrupted_control[1] = context->uc_mcontext.fpregs->cwd;
+  control[0] = context->uc_mcontext.fpregs->mxcsr;
+  control[1] = context->uc_mcontext.fpregs->cwd;
 #else
-  exchange->interrupted_control[2] = context->uc_mcontext.regs[18];
+  control[2] = context->uc_mcontext.regs[18];
   unsigned char *records = context->uc_mcontext.__reserved;
   size_t offset = 0, size = sizeof context->uc_mcontext.__reserved;
   while (size - offset >= sizeof(struct _aarch64_ctx)) {
@@ -45,8 +40,8 @@ static void save_guest_control(struct exchange *exchange, ucontext_t *context) {
     if (head->magic == FPSIMD_MAGIC &&
         head->size >= sizeof(struct fpsimd_context)) {
       struct fpsimd_context *fp = (void *)head;
-      exchange->interrupted_control[0] = fp->fpcr;
-      exchange->interrupted_control[1] = fp->fpsr;
+      control[0] = fp->fpcr;
+      control[1] = fp->fpsr;
       return;
     }
     if (head->size % 16) {
@@ -58,14 +53,84 @@ static void save_guest_control(struct exchange *exchange, ucontext_t *context) {
 #endif
 }
 
+static void save_guest_control(struct exchange *exchange, ucontext_t *context) {
+  _Static_assert(sizeof context->uc_sigmask >= sizeof(uint64_t),
+                 "kernel signal mask representation");
+  memcpy(&exchange->interrupted_guest_mask, &context->uc_sigmask,
+         sizeof exchange->interrupted_guest_mask);
+  gw_signal_stack_get(&exchange->interrupted_guest_altstack);
+  read_control(context, exchange->interrupted_control);
+}
+
 struct signal_slot signal_slots[DOMAIN_FIXTURE_CARRIERS];
 /* Only access after Host TP restoration. Assembly still uses the stable
  * TLS-free registry, while Host mask/wait APIs avoid scanning that registry. */
 static _Thread_local struct signal_slot *host_recipient;
+
+struct host_signal_anchor {
+  struct host_signal_anchor *previous;
+  struct signal_slot *slot;
+  ucontext_t *frame;
+  uint64_t mask, control[3];
+  uintptr_t suspended_sp;
+};
+/* Accessed only after assembly restored Host TLS. These stack-owned anchors
+ * live until the normally returning entry restores its owning kernel frame. */
+static _Thread_local struct host_signal_anchor *host_anchor;
 static _Atomic unsigned deferred_recipients;
+static _Atomic unsigned independent_entries;
 extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
     __attribute__((weak));
 extern int gw_signal_selection_hidden(void *, uint64_t *) __attribute__((weak));
+
+#ifdef GW_DOMAIN_CHAIN
+int signal_guest_enter(const struct domain_signal_call *call,
+                       const stack_t *stack, void *host_frame) {
+  struct signal_slot *slot = host_recipient;
+  if (!slot || !call || call->tp != slot->exchange->guest.tp) {
+    return EINVAL;
+  }
+  struct host_signal_anchor anchor = {
+      .previous = host_anchor, .slot = slot, .frame = host_frame};
+  atomic_fetch_add_explicit(&independent_entries, 1, memory_order_acquire);
+  if (host_frame) {
+    memcpy(&anchor.mask, &anchor.frame->uc_sigmask, sizeof anchor.mask);
+    if (gw_signal_selection_hidden) {
+      gw_signal_selection_hidden(host_frame, &anchor.mask);
+    }
+    anchor.mask = signal_host_logical_mask(anchor.mask);
+    read_control(anchor.frame, anchor.control);
+    host_anchor = &anchor;
+  }
+
+  int result =
+      domain_guest_signal_stack_enter(call, stack, &anchor.suspended_sp);
+  host_anchor = anchor.previous;
+  atomic_fetch_sub_explicit(&independent_entries, 1, memory_order_release);
+  return result;
+}
+
+static uint64_t suspended_host_mask(struct signal_slot *slot) {
+  return host_anchor && host_anchor->slot == slot
+             ? host_anchor->mask
+             : slot->exchange->host_execution_mask;
+}
+#endif
+
+static void restore_anchored_control(struct signal_slot *slot) {
+  if (!host_anchor || host_anchor->slot != slot) {
+    return;
+  }
+  const uint64_t *control = host_anchor->control;
+#if defined(__x86_64__)
+  __asm__ volatile("ldmxcsr %0" : : "m"(control[0]));
+  __asm__ volatile("fldcw %0" : : "m"(control[1]));
+#else
+  __asm__ volatile("msr fpcr, %0" : : "r"(control[0]));
+  __asm__ volatile("msr fpsr, %0" : : "r"(control[1]));
+  __asm__ volatile("mov x18, %0" : : "r"(control[2]));
+#endif
+}
 
 unsigned signal_deferred_recipients(void) {
   return atomic_load_explicit(&deferred_recipients, memory_order_acquire);
@@ -143,6 +208,23 @@ __attribute__((no_stack_protector)) void signal_note_guest_thread(
   atomic_store_explicit(&guest_tids[index], tid, memory_order_release);
 }
 
+static void forward_anchored_host(int number, siginfo_t *info, void *token,
+                                  int selected) {
+  /* A VM handler must see the real suspended Host PC/registers, never the
+   * Guest handler's kernel context or the last cooperative call's SP. */
+  ucontext_t *frame = host_anchor->frame;
+  uint64_t mask;
+  memcpy(&mask, &frame->uc_sigmask, sizeof mask);
+  mask = signal_host_logical_mask(mask);
+  memcpy(&frame->uc_sigmask, &mask, sizeof mask);
+  signal_router_forward_selected_suspended(
+      number, info, frame, token, host_anchor->mask, &frame->uc_stack,
+      gw_signal_interrupted_sp(frame), host_anchor->suspended_sp, selected);
+  memcpy(&mask, &frame->uc_sigmask, sizeof mask);
+  mask = signal_host_physical_mask(mask);
+  memcpy(&frame->uc_sigmask, &mask, sizeof mask);
+}
+
 static void forward_host(int number, siginfo_t *info, void *context,
                          void *token, struct signal_slot *slot,
                          uintptr_t interrupted_tp, uint64_t entry_mask,
@@ -151,11 +233,15 @@ static void forward_host(int number, siginfo_t *info, void *context,
   if (selected < 0) {
     selected = signal_router_select(number, info, token);
   }
+  void *selection_frame = slot && interrupted_tp != slot->host_tp &&
+                                  host_anchor && host_anchor->slot == slot
+                              ? host_anchor->frame
+                              : context;
   int mask_wait =
       !selected && gw_signal_selection_hidden
-          ? gw_signal_selection_hidden(context, &execution)
+          ? gw_signal_selection_hidden(selection_frame, &execution)
       : gw_signal_selection_interrupt
-          ? gw_signal_selection_interrupt(token, context, &execution)
+          ? gw_signal_selection_interrupt(token, selection_frame, &execution)
           : 0;
 
   if (number == SIGUSR2) {
@@ -167,10 +253,13 @@ static void forward_host(int number, siginfo_t *info, void *context,
   } else {
     atomic_fetch_add_explicit(&domain_forwarded_async, 1, memory_order_relaxed);
   }
-  if (slot && interrupted_tp != slot->host_tp &&
-      slot->exchange->host_mask_valid) {
+  if (slot && interrupted_tp != slot->host_tp && host_anchor &&
+      host_anchor->slot == slot) {
+    forward_anchored_host(number, info, token, selected);
+  } else if (slot && interrupted_tp != slot->host_tp &&
+             slot->exchange->host_mask_valid) {
     signal_router_forward_selected_domain(
-        number, info, context, token, slot->exchange->host_execution_mask,
+        number, info, context, token, suspended_host_mask(slot),
         &slot->exchange->host_altstack, slot->exchange->host.sp, 1, selected);
   } else {
     ucontext_t *frame = context;
@@ -415,6 +504,11 @@ int signal_host_collect_notification(int number, siginfo_t *information) {
 }
 
 int signal_host_retirement_busy(void) {
+  /* This is a busy test, never proof of recipient/continuation quiescence.
+   * Entry admission must be frozen separately before retiring the runtime. */
+  if (atomic_load_explicit(&independent_entries, memory_order_acquire)) {
+    return 1;
+  }
   struct signal_slot *slot = host_slot();
   if (!slot || !slot->deferred_active) {
     return 0;
@@ -448,7 +542,7 @@ static int dispatch_promoted(int number, siginfo_t *info, void *context,
   uint64_t mask = signal_router_selection_begin();
   int guest_blocked =
       interrupted_tp != slot->host_tp &&
-      (slot->exchange->host_execution_mask & (UINT64_C(1) << (number - 1)));
+      (suspended_host_mask(slot) & (UINT64_C(1) << (number - 1)));
   int ignored = 0;
   uint64_t generation = signal_router_ignore_generation(number, &ignored);
   int discard = guest_blocked &&
@@ -529,7 +623,7 @@ static int dispatch_deferred(int number, siginfo_t *info, void *context,
   if (slot && slot->deferred_active && interrupted_tp != slot->host_tp &&
       info->si_code <= 0 &&
       (gw_signal_fault_bits() & (UINT64_C(1) << (number - 1))) &&
-      (slot->exchange->host_execution_mask & (UINT64_C(1) << (number - 1)))) {
+      (suspended_host_mask(slot) & (UINT64_C(1) << (number - 1)))) {
     int saved_errno = errno;
     uint64_t mask = signal_router_selection_begin();
     int ignored = 0;
@@ -707,6 +801,9 @@ static void dispatch_core(int number, siginfo_t *info, void *context,
 void domain_signal_dispatch(int number, siginfo_t *info, void *context,
                             struct signal_slot *slot, uintptr_t interrupted_tp,
                             void *token, uint64_t entry_mask) {
+  if (slot && interrupted_tp != slot->host_tp) {
+    restore_anchored_control(slot);
+  }
   dispatch_core(number, info, context, slot, interrupted_tp, token, entry_mask);
 }
 

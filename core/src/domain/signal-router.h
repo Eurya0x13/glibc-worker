@@ -76,6 +76,11 @@ void signal_router_forward_domain(int, siginfo_t *, void *, void *, uint64_t,
 void signal_router_forward_selected_domain(int, siginfo_t *, void *, void *,
                                            uint64_t, const stack_t *, uintptr_t,
                                            int, int);
+/* The independent-entry Host frame may already occupy its logical signal
+ * stack. Use the actual lowest suspended SP, not the stack's original top. */
+void signal_router_forward_selected_suspended(int, siginfo_t *, void *, void *,
+                                              uint64_t, const stack_t *,
+                                              uintptr_t, uintptr_t, int);
 _Noreturn void signal_router_default(int);
 int signal_router_verify(void);
 /* Admission guard: every pre-existing custom Host action must have been

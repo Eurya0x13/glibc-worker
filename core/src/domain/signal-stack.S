@@ -20,6 +20,21 @@ domain_stack_call:
     pop %r12
     ret
 .size domain_stack_call,.-domain_stack_call
+.global domain_stack_call_record
+.type domain_stack_call_record,@function
+domain_stack_call_record:
+    push %r12
+    mov %rsp, (%rcx)
+    mov %rsp, %r12
+    mov %rdi, %rax
+    mov %rsi, %rdi
+    mov %rdx, %rsp
+    and $-16, %rsp
+    call *%rax
+    mov %r12, %rsp
+    pop %r12
+    ret
+.size domain_stack_call_record,.-domain_stack_call_record
 #elif defined(__aarch64__)
 .text
 .global domain_stack_call
@@ -38,6 +53,21 @@ domain_stack_call:
     ldp x19, x30, [sp], #16
     ret
 .size domain_stack_call,.-domain_stack_call
+.global domain_stack_call_record
+.type domain_stack_call_record,%function
+domain_stack_call_record:
+    stp x19, x30, [sp, #-16]!
+    mov x19, sp
+    str x19, [x3]
+    mov x9, x0
+    mov x0, x1
+    and x2, x2, #-16
+    mov sp, x2
+    blr x9
+    mov sp, x19
+    ldp x19, x30, [sp], #16
+    ret
+.size domain_stack_call_record,.-domain_stack_call_record
 #else
 #error Unsupported domain stack architecture
 #endif

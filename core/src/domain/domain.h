@@ -66,6 +66,11 @@ int domain_guest_signal_call(const struct domain_signal_call *);
  * coordinator. This primitive alone supplies no signal/context lifetime ABI. */
 int domain_guest_signal_stack_call(const struct domain_signal_call *,
                                    uintptr_t);
+/* Normally returning entry with a separate physical signal stack. Signals
+ * remain blocked until Guest code deliberately enables them. The integration
+ * owns the stack and suspended_sp storage for the entire nested entry. */
+int domain_guest_signal_stack_enter(const struct domain_signal_call *,
+                                    const stack_t *, uintptr_t *suspended_sp);
 
 /* Failures are counted in shared POD storage; no foreign libc is called. */
 #define CHECK(e, condition) ((e)->failures += !(condition))

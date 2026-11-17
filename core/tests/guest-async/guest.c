@@ -97,6 +97,24 @@ static int receive(int number, void *information, void *context) {
   assert(fegetround() == FE_UPWARD);
   assert(!gw_signal_target_pin(carrier->target));
 
+  int phase = atomic_load(&carrier->phase);
+  if (carrier->interrupted_host_frame &&
+      (phase == PHASE_BUSY || phase == PHASE_HOST_INTERRUPT)) {
+    /* Deliberately bypass tagged sends: this is a real Host-owned signal
+     * arriving while Guest code executes in a Host-origin async entry. */
+    uint64_t bit = UINT64_C(1) << (TEST_NESTED_HOST_SIGNAL - 1), previous;
+    assert(
+        !syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &bit, &previous, sizeof bit));
+    int count = carrier->nested_host_count;
+    assert(!syscall(SYS_tgkill, getpid(), syscall(SYS_gettid),
+                    TEST_NESTED_HOST_SIGNAL));
+    assert(carrier->nested_host_count == count + 1);
+    assert(!syscall(SYS_rt_sigprocmask, SIG_SETMASK, &previous, NULL,
+                    sizeof previous));
+    assert(errno == saved_errno && guest_tls == 41);
+    assert(fegetround() == FE_UPWARD);
+  }
+
   siginfo_t packet;
   enum gw_signal_queue_source source;
   int selected = 0;
