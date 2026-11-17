@@ -73,12 +73,53 @@ the saved return mask, including nested frames selected before user entry.
 GNU cancellation is checked while setup remains delivery-blocked and after
 normal retirement; no automatic cleanup record survives into a user handler.
 Assembly separately retains actual handler-entry masks and saved return masks. Host handlers see logical `uc_sigmask`; valid
-mask edits survive return. NULL mask-wait arguments retain native behavior.
+mask edits survive return. Nullable mask-waits atomically snapshot the current
+physical mask when no temporary mask is supplied; they do not apply input-mask
+filtering to this snapshot. `poll` and `epoll_wait` use those guarded paths too.
+With the channel inactive all these interfaces retain their native backend.
 Input filtering follows each owning-libc interface: Bionic's mask/poll/select
 paths filter its private signals, while epoll passes its temporary mask through.
 A mask query makes no temporary mask mutation, and BLOCK/UNBLOCK apply input
 filters before combining with existing bits; a native action mask can already
 have private libc bits blocked.
+
+## Transparent Host wait recovery
+
+Active bootstrap `sigsuspend`, `ppoll`, `pselect`, `epoll_pwait` and
+`epoll_pwait2`, including Bionic LP64 aliases and nullable masks, suppress
+`EINTR` caused only by an empty/ignored internal notification. `poll` and
+`epoll_wait` share the guarded implementation. A real Host handler keeps its
+native interruption, including when delivered during hidden work or between
+retry attempts. A successful transparent retry preserves the caller's errno.
+
+A hidden wait stays published until the retry decision. Actual Host handler
+entry marks published hidden ancestors visible, including across nested waits.
+Ordinary visible deliveries keep the existing syscall-PC/SP return-mask binding.
+Pending cancellation is checked before another atomic syscall with delivery
+blocked; the bounded cancellation cleanup retires the row and restores its mask.
+Blocking deferred-consuming waits also retry hidden-only notifications regardless
+of the caller's ordinary `SA_RESTART` policy.
+
+One monotonic timeout budget covers the entire operation, including time spent
+in hidden work. Remaining time is recomputed rather than reusing the kernel's
+pre-handler remainder. Saturation is unnecessary: elapsed time is subtracted
+from the original valid duration, avoiding an overflowing absolute deadline.
+Expired waits make a final zero-time readiness check. Millisecond epoll waits
+round their remaining duration upward; negative millisecond timeouts remain
+infinite. Invalid native timeout inputs still reach the kernel unchanged.
+See Linux [`ppoll` and timeout handling](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
+
+The regression fixture injects empty notifications before atomic entry, delays
+notification work past the deadline, enters a nested wait, and delivers real
+Host signals both during hidden work and after retry publication. A separate
+native-only control demonstrates that `SA_RESTART` alone still exposes `EINTR`.
+The fixture exercises notification recovery under Host TLS; it is not acceptance
+of a production Guest handler entered while Java executes.
+
+This is not general Host syscall virtualization. Plain `select`, sleep APIs,
+ordinary blocking I/O, private libc calls and raw syscalls do not acquire this
+recovery scope. General saved/resumable native continuations and actual Guest
+asynchronous entry still require the remaining integration/lifetime work.
 
 ## Linux consuming order and atomic commit
 
@@ -122,7 +163,8 @@ without consuming data. GNU FILE no-cancel reads keep their native no-cancel
 entry. Blocking occurs outside the transaction through an atomic `ppoll` wait;
 `SA_RESTART`, `EINTR`, return masks, deadline and errno are preserved. Wait
 records use a process-owned stable pool with O(1) normal recycling, not pointers
-to automatic frames. A signal detaches its matching wait row before user code. Nested readers,
+to automatic frames. Visible signals detach their matching wait row before user
+code; hidden-only notifications retain it through the retry decision. Nested readers,
 native `siglongjmp`, GNU `setcontext` and saved-stack resume therefore cannot
 leave a dangling consumer pointer or a half-decoded packet. Detached saved
 records and referenced parents stay pinned with the process runtime; ordinary

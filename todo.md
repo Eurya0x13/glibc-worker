@@ -34,6 +34,10 @@ notification test is not acceptance of foreign TLS, JNI or VM signal entry.
 Guest handler execution must also remain transparent to a suspended Host
 blocking wait. Internal notifications do not create Host `EINTR`; preserve its
 original timeout and still expose real Host-owned signal interruptions.
+Active bootstrap atomic mask-waits, nullable masks, `poll` and `epoll_wait` now
+have hidden-notification retry with one monotonic timeout budget. This is a
+Host-side prerequisite, not a production Guest entry pass. Plain `select`,
+sleep APIs, ordinary blocking I/O and private/raw paths still need review.
 
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,

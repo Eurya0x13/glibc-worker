@@ -29,14 +29,22 @@ int gw_signal_selection_wait_copy(struct gw_signal_selection *, siginfo_t *,
 int gw_signal_selection_sleep(int, uint64_t, const struct timespec *, int,
                               void (*)(void *), void *);
 int gw_signal_selection_interrupt(void *, void *, uint64_t *);
+/* Host TP is restored and catchable signals are blocked. Hidden notifications
+ * do not become Host handler interruptions. A later real Host delivery wins. */
+int gw_signal_selection_hidden(void *, uint64_t *);
+void gw_signal_wait_host_delivery(void);
 /* Begin leaves delivery blocked until the caller's raw atomic mask-wait.
  * End restores the caller mask/valid handler edits and retires the stable row.
  */
 long gw_signal_wait_syscall(void *, long, long, long, long, long, long, long);
 int gw_signal_wait_result(long);
 void *gw_signal_mask_wait_begin(uint64_t);
+void *gw_signal_mask_wait_current_begin(void);
 uint64_t gw_signal_mask_wait_execution(void *);
 int gw_signal_mask_wait_end(void *, int result, int error);
 void gw_signal_mask_wait_cancel_check(void *);
+/* A true result republishes the stable row and leaves delivery blocked for
+ * another atomic syscall. The caller retains the original timeout budget. */
+int gw_signal_mask_wait_retry(void *, int result, int error);
 int signal_select_prepare(void);
 #endif

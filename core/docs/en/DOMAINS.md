@@ -39,6 +39,11 @@ The regular domain target does not export libc's `sigaction`, `signal` or
 Late integrations must route their reviewed signal chain explicitly. A JVM/ART
 artifact profile and import patching belong to jvm-jni.
 
+The opt-in target retains its archive objects through project-owned entrypoints.
+A libc-named linker reference alone is insufficient: a weak implementation from
+a sanitizer runtime can satisfy it before our archive is examined. This target
+supplies strong wrappers; it does not compose arbitrary third-party interposers.
+
 The explicit bootstrap target also routes `siginterrupt`, `sigignore` and
 `sigset`; GNU builds additionally route `bsd_signal`, `ssignal`, `sysv_signal`,
 `__sysv_signal` and `__sigaction`. Helpers must not replace a kernel entry through

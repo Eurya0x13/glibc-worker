@@ -13,9 +13,10 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/select.h>
+#include <time.h>
 
-/* Only explicit bootstrap consumers link this object. Inactive or NULL-mask
- * calls retain their native libc backend. Active-channel LP64 calls publish
+/* Only explicit bootstrap consumers link this object. Inactive-channel calls
+ * retain their native libc backend. Active-channel LP64 calls publish
  * a stable row around their atomic kernel mask-wait and preserve cancellation
  * checks without exposing automatic cleanup records to user handlers.
  * Bionic LP64 aliases terminate in the 64-bit entry rather than calling back
@@ -32,8 +33,12 @@
  * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/unix/sysv/linux/ppoll.c
  * https://github.com/torvalds/linux/blob/v6.12/fs/select.c
  */
-static int mask_wait_enabled(const sigset_t *mask) {
-  return mask && signal_router_fault_notifications();
+static int mask_wait_enabled(void) {
+  return signal_router_fault_notifications() != NULL;
+}
+
+static int suspend_enabled(const sigset_t *mask) {
+  return mask && mask_wait_enabled();
 }
 
 static void cancellation_point(void) {
@@ -44,8 +49,10 @@ static void cancellation_point(void) {
 
 static void *begin_wait(const sigset_t *mask, int filter) {
   cancellation_point();
-  uint64_t bits;
-  memcpy(&bits, mask, sizeof bits);
+  uint64_t bits = 0;
+  if (mask) {
+    memcpy(&bits, mask, sizeof bits);
+  }
 #ifdef __ANDROID__
   /* Bionic filters sigsuspend/poll/select, but its epoll wrappers pass masks
    * unchanged. Keep that per-interface distinction, including timer bit 32.
@@ -57,7 +64,8 @@ static void *begin_wait(const sigset_t *mask, int filter) {
 #else
   (void)filter;
 #endif
-  void *record = gw_signal_mask_wait_begin(bits);
+  void *record = mask ? gw_signal_mask_wait_begin(bits)
+                      : gw_signal_mask_wait_current_begin();
   if (record) {
     extern void gw_signal_mask_wait_test_point(int) __attribute__((weak));
     if (gw_signal_mask_wait_test_point) {
@@ -85,6 +93,105 @@ static const struct timespec *copy_timeout(const struct timespec *timeout,
     return copy;
   }
   return NULL;
+}
+
+struct retry_budget {
+  struct timespec start, duration;
+  int timed;
+};
+
+static int begin_budget(struct retry_budget *budget,
+                        const struct timespec *duration) {
+  budget->timed = duration && duration->tv_sec >= 0 && duration->tv_nsec >= 0 &&
+                  duration->tv_nsec < 1000000000;
+  if (!budget->timed) {
+    return 0; /* Infinite waits or invalid inputs left to the native syscall. */
+  }
+
+  budget->duration = *duration;
+  return clock_gettime(CLOCK_MONOTONIC, &budget->start);
+}
+
+static int remaining_budget(const struct retry_budget *budget,
+                            struct timespec *remaining) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now)) {
+    return -1;
+  }
+  if (now.tv_sec < budget->start.tv_sec ||
+      (now.tv_sec == budget->start.tv_sec &&
+       now.tv_nsec < budget->start.tv_nsec)) {
+    errno = EIO;
+    return -1;
+  }
+
+  struct timespec elapsed = {now.tv_sec - budget->start.tv_sec,
+                             now.tv_nsec - budget->start.tv_nsec};
+  if (elapsed.tv_nsec < 0) {
+    --elapsed.tv_sec;
+    elapsed.tv_nsec += 1000000000;
+  }
+  if (elapsed.tv_sec > budget->duration.tv_sec ||
+      (elapsed.tv_sec == budget->duration.tv_sec &&
+       elapsed.tv_nsec >= budget->duration.tv_nsec)) {
+    *remaining = (struct timespec){0};
+    return 0;
+  }
+
+  *remaining = (struct timespec){budget->duration.tv_sec - elapsed.tv_sec,
+                                 budget->duration.tv_nsec - elapsed.tv_nsec};
+  if (remaining->tv_nsec < 0) {
+    --remaining->tv_sec;
+    remaining->tv_nsec += 1000000000;
+  }
+  return 0;
+}
+
+static int transparent_wait(void *record, long number, long arguments[6],
+                            const struct timespec *duration, int timeout_index,
+                            int milliseconds) {
+  int saved_errno = errno;
+  struct retry_budget budget;
+  if (begin_budget(&budget, duration)) {
+    return end_wait(record, -1);
+  }
+
+  struct timespec left;
+  int result;
+  for (;;) {
+    result = gw_signal_wait_result(gw_signal_wait_syscall(
+        record, number, arguments[0], arguments[1], arguments[2], arguments[3],
+        arguments[4], arguments[5]));
+    if (!gw_signal_mask_wait_retry(record, result, errno)) {
+      break;
+    }
+
+    /* Linux updates some relative syscall timeouts before entering a handler;
+     * that remainder excludes time spent in the handler. Recompute from one
+     * monotonic budget so hidden work never resets/extends the Host wait.
+     * Subtract elapsed time instead of adding an overflowing absolute time.
+     * https://github.com/torvalds/linux/blob/v6.12/fs/select.c
+     * See poll_select_finish() and poll_select_set_timeout(). */
+    if (budget.timed) {
+      if (remaining_budget(&budget, &left)) {
+        result = -1;
+        break;
+      }
+      arguments[timeout_index] =
+          milliseconds ? left.tv_sec * 1000 + (left.tv_nsec + 999999) / 1000000
+                       : (long)&left;
+    }
+    extern void gw_signal_mask_wait_retry_observe(long, const struct timespec *)
+        __attribute__((weak));
+    if (gw_signal_mask_wait_retry_observe) {
+      gw_signal_mask_wait_retry_observe(number, budget.timed ? &left : NULL);
+    }
+  }
+
+  if (result >= 0) {
+    errno = saved_errno;
+  }
+  return end_wait(record, result);
 }
 
 static char unavailable;
@@ -142,7 +249,7 @@ int sigsuspend(const sigset_t *mask) {
   if (!function) {
     return -1;
   }
-  if (!mask_wait_enabled(mask)) {
+  if (!suspend_enabled(mask)) {
     return function(mask);
   }
 
@@ -151,9 +258,8 @@ int sigsuspend(const sigset_t *mask) {
     return -1;
   }
   uint64_t bits = gw_signal_mask_wait_execution(record);
-  int result = gw_signal_wait_result(gw_signal_wait_syscall(
-      record, SYS_rt_sigsuspend, (long)&bits, sizeof bits, 0, 0, 0, 0));
-  return end_wait(record, result);
+  long arguments[] = {(long)&bits, sizeof bits, 0, 0, 0, 0};
+  return transparent_wait(record, SYS_rt_sigsuspend, arguments, NULL, -1, 0);
 }
 
 int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
@@ -164,7 +270,7 @@ int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
   if (!function) {
     return -1;
   }
-  if (!mask_wait_enabled(mask)) {
+  if (!mask_wait_enabled()) {
     signal_host_prune_notifications();
     return function(fds, count, timeout, mask);
   }
@@ -176,10 +282,9 @@ int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
     return -1;
   }
   uint64_t bits = gw_signal_mask_wait_execution(record);
-  int result = gw_signal_wait_result(
-      gw_signal_wait_syscall(record, SYS_ppoll, (long)fds, count, (long)timeout,
-                             (long)&bits, sizeof bits, 0));
-  return end_wait(record, result);
+  long arguments[] = {(long)fds,   count,       (long)timeout,
+                      (long)&bits, sizeof bits, 0};
+  return transparent_wait(record, SYS_ppoll, arguments, timeout, 2, 0);
 }
 
 int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
@@ -190,7 +295,7 @@ int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
   if (!function) {
     return -1;
   }
-  if (!mask_wait_enabled(mask)) {
+  if (!mask_wait_enabled()) {
     signal_host_prune_notifications();
     return function(count, read, write, except, timeout, mask);
   }
@@ -208,10 +313,9 @@ int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
     size_t size;
   } data = {&bits, sizeof bits};
 
-  int result = gw_signal_wait_result(gw_signal_wait_syscall(
-      record, SYS_pselect6, count, (long)read, (long)write, (long)except,
-      (long)timeout, (long)&data));
-  return end_wait(record, result);
+  long arguments[] = {count,        (long)read,    (long)write,
+                      (long)except, (long)timeout, (long)&data};
+  return transparent_wait(record, SYS_pselect6, arguments, timeout, 4, 0);
 }
 
 int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
@@ -223,7 +327,7 @@ int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
   if (!function) {
     return -1;
   }
-  if (!mask_wait_enabled(mask)) {
+  if (!mask_wait_enabled()) {
     signal_host_prune_notifications();
     return function(fd, events, count, timeout, mask);
   }
@@ -233,10 +337,11 @@ int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
     return -1;
   }
   uint64_t bits = gw_signal_mask_wait_execution(record);
-  int result = gw_signal_wait_result(
-      gw_signal_wait_syscall(record, SYS_epoll_pwait, fd, (long)events, count,
-                             timeout, (long)&bits, sizeof bits));
-  return end_wait(record, result);
+  struct timespec duration = {timeout / 1000, (timeout % 1000) * 1000000L};
+  long arguments[] = {fd,      (long)events, count,
+                      timeout, (long)&bits,  sizeof bits};
+  return transparent_wait(record, SYS_epoll_pwait, arguments,
+                          timeout < 0 ? NULL : &duration, 3, 1);
 }
 
 int epoll_pwait2(int fd, struct epoll_event *events, int count,
@@ -253,7 +358,7 @@ int epoll_pwait2(int fd, struct epoll_event *events, int count,
   if (!function) {
     return -1;
   }
-  if (!mask_wait_enabled(mask)) {
+  if (!mask_wait_enabled()) {
     signal_host_prune_notifications();
     return function(fd, events, count, timeout, mask);
   }
@@ -266,14 +371,13 @@ int epoll_pwait2(int fd, struct epoll_event *events, int count,
   }
   uint64_t bits = gw_signal_mask_wait_execution(record);
 #ifdef SYS_epoll_pwait2
-  int result = gw_signal_wait_result(
-      gw_signal_wait_syscall(record, SYS_epoll_pwait2, fd, (long)events, count,
-                             (long)timeout, (long)&bits, sizeof bits));
+  long arguments[] = {fd,          (long)events, count, (long)timeout,
+                      (long)&bits, sizeof bits};
+  return transparent_wait(record, SYS_epoll_pwait2, arguments, timeout, 3, 0);
 #else
   errno = ENOSYS;
-  int result = -1;
+  return end_wait(record, -1);
 #endif
-  return end_wait(record, result);
 }
 
 int poll(struct pollfd *fds, nfds_t count, int timeout) {
@@ -281,6 +385,10 @@ int poll(struct pollfd *fds, nfds_t count, int timeout) {
   function_type function = (function_type)resolve(&caches[5], "poll");
   if (!function) {
     return -1;
+  }
+  if (mask_wait_enabled()) {
+    struct timespec duration = {timeout / 1000, (timeout % 1000) * 1000000L};
+    return ppoll(fds, count, timeout < 0 ? NULL : &duration, NULL);
   }
   signal_host_prune_notifications();
   return function(fds, count, timeout);
@@ -303,6 +411,9 @@ int epoll_wait(int fd, struct epoll_event *events, int count, int timeout) {
   function_type function = (function_type)resolve(&caches[7], "epoll_wait");
   if (!function) {
     return -1;
+  }
+  if (mask_wait_enabled()) {
+    return epoll_pwait(fd, events, count, timeout, NULL);
   }
   signal_host_prune_notifications();
   return function(fd, events, count, timeout);

@@ -812,6 +812,10 @@ static void host_delivery_run(void *argument) {
   if (delivery->stack) {
     gw_signal_stack_set(delivery->stack);
   }
+  extern void gw_signal_wait_host_delivery(void) __attribute__((weak));
+  if (gw_signal_wait_host_delivery) {
+    gw_signal_wait_host_delivery();
+  }
   gw_nonlocal_mask_restore(signal_host_physical_mask
                                ? signal_host_physical_mask(delivery->mask)
                                : delivery->mask);

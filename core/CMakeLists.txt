@@ -33,9 +33,12 @@ add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-mask-wait.S)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 target_link_libraries(signal_interpose PUBLIC domains)
-target_link_options(signal_interpose INTERFACE -Wl,-u,sigaction -Wl,-u,signal
-  -Wl,-u,pthread_sigmask -Wl,-u,sigpending -Wl,-u,sigtimedwait
-  -Wl,-u,sigsuspend -Wl,-u,ppoll -Wl,-u,signalfd -Wl,-u,fcntl
+# Libc and sanitizer runtimes can already satisfy a libc-named undefined
+# symbol. Retain each interposition object through its project-owned entry.
+target_link_options(signal_interpose INTERFACE
+  -Wl,-u,gw_signal_registration_interpose_anchor
+  -Wl,-u,signal_mask_prepare -Wl,-u,signal_wait_prepare
+  -Wl,-u,signal_suspend_prepare -Wl,-u,signal_fd_prepare
   -Wl,-u,signal_stdio_enable)
 set_target_properties(signal_interpose PROPERTIES OUTPUT_NAME glibc_worker_signal_interpose)
 # Native capture/restore interposition stays opt-in during recovery integration.

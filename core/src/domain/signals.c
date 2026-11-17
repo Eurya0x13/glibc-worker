@@ -65,6 +65,7 @@ static _Thread_local struct signal_slot *host_recipient;
 static _Atomic unsigned deferred_recipients;
 extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
     __attribute__((weak));
+extern int gw_signal_selection_hidden(void *, uint64_t *) __attribute__((weak));
 
 unsigned signal_deferred_recipients(void) {
   return atomic_load_explicit(&deferred_recipients, memory_order_acquire);
@@ -147,8 +148,13 @@ static void forward_host(int number, siginfo_t *info, void *context,
                          uintptr_t interrupted_tp, uint64_t entry_mask,
                          int selected) {
   uint64_t execution = entry_mask;
+  if (selected < 0) {
+    selected = signal_router_select(number, info, token);
+  }
   int mask_wait =
-      gw_signal_selection_interrupt
+      !selected && gw_signal_selection_hidden
+          ? gw_signal_selection_hidden(context, &execution)
+      : gw_signal_selection_interrupt
           ? gw_signal_selection_interrupt(token, context, &execution)
           : 0;
 
@@ -512,6 +518,9 @@ static int dispatch_deferred(int number, siginfo_t *info, void *context,
         memcpy(&mask, &frame->uc_sigmask, sizeof mask);
         mask = signal_carrier_mask(slot, mask, 0);
         memcpy(&frame->uc_sigmask, &mask, sizeof mask);
+      } else if (gw_signal_selection_hidden) {
+        uint64_t unused;
+        gw_signal_selection_hidden(context, &unused);
       }
       errno = saved_errno;
       return 1;

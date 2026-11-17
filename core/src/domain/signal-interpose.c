@@ -7,6 +7,11 @@
 /* Opt-in executable interposition for bootstrap-owned integrations. The
  * regular SDK never exports libc names merely by linking the domain target.
  * Late VM integrations route reviewed imports explicitly instead. */
+/* Archive retention must use a project-owned symbol: a weak sigaction supplied
+ * by a sanitizer runtime otherwise satisfies -u,sigaction without extracting
+ * this object. The opt-in CMake target forces this anchor, not a libc name. */
+void gw_signal_registration_interpose_anchor(void) {}
+
 int sigaction(int number, const struct sigaction *action,
               struct sigaction *previous) {
   return signal_router_action(number, action, previous);

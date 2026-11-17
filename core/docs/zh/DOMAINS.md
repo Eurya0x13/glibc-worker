@@ -22,6 +22,10 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 
 普通域目标不导出 libc 的 sigaction、signal 或 sigaction64。早期启动可显式链接 `glibc_worker::signal_interpose`，在创建 VM 前初始化路由器；晚接入必须显式对接已审阅的信号链。固定 JVM/ART 制品 profile 与导入补丁归 jvm-jni。
 
+显式拦截目标通过项目专有入口保留静态库对象。只引用 libc 名称不足以保证装载：
+检测工具运行时提供的弱实现可能在检查静态库之前就满足该引用。此目标提供强符号封装，
+不负责组合任意第三方拦截器。
+
 显式启动拦截目标还接管 `siginterrupt`、`sigignore` 和 `sigset`；GNU 构建另外接管
 `bsd_signal`、`ssignal`、`sysv_signal`、`__sysv_signal` 和 `__sigaction`，防止辅助接口
 经 libc 的内部注册调用替换内核路由入口。BSD 重启策略及动作掩码遵循载体 libc；
