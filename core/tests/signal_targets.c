@@ -153,6 +153,85 @@ static void shared_and_failed_wake(void) {
   assert(!gw_signal_targets_destroy(&registry));
 }
 
+static void queue_packet(struct gw_signal_targets *registry,
+                         struct gw_signal_target *target, int number,
+                         int value) {
+  siginfo_t info = packet(value);
+  info.si_signo = number;
+  struct gw_signal_publication result = gw_signal_targets_send(
+      registry, target ? target->key : 0, target ? target->tid : 0, &info);
+  assert(!result.status && !result.wake_error);
+}
+
+static void take_blocked(struct gw_signal_target *target, int number, int value,
+                         enum gw_signal_queue_source expected) {
+  siginfo_t information;
+  enum gw_signal_queue_source source;
+  assert(!gw_signal_target_deliver(target, &information, &source));
+  assert(source == GW_SIGNAL_NONE);
+  assert(gw_signal_target_take(target, UINT64_C(1) << (number - 1),
+                               &information, &source) == number);
+  assert(source == expected && information.si_value.sival_int == value);
+}
+
+static void consuming_and_discard(void) {
+  struct gw_signal_targets registry;
+  gw_signal_targets_init(&registry, UINT64_C(1) << 49, 6, notify, &notified);
+  struct gw_signal_target *a, *b;
+  assert(!gw_signal_target_open(&registry, 1, 1, UINT64_MAX, NULL, &a));
+  assert(!gw_signal_target_open(&registry, 2, 2, UINT64_MAX, NULL, &b));
+  int before = atomic_load(&notified);
+  queue_packet(&registry, NULL, 56, 1);
+  queue_packet(&registry, a, 56, 2);
+  queue_packet(&registry, b, 56, 3);
+  queue_packet(&registry, a, 57, 4);
+  queue_packet(&registry, b, 57, 5);
+  queue_packet(&registry, NULL, 57, 6);
+  queue_packet(&registry, a, SIGUSR1, 7);
+  queue_packet(&registry, b, SIGUSR1, 8);
+  queue_packet(&registry, NULL, SIGUSR1, 9);
+  assert(registry.inbox.queued == 6);
+
+  take_blocked(a, 56, 2, GW_SIGNAL_THREAD);
+  assert(!gw_signal_targets_discard(&registry, 56));
+  assert(registry.inbox.queued == 3);
+  assert(!(gw_signal_target_pending(a) & (UINT64_C(1) << 55)));
+  assert(!(gw_signal_target_pending(b) & (UINT64_C(1) << 55)));
+  take_blocked(a, 57, 4, GW_SIGNAL_THREAD);
+  take_blocked(a, 57, 6, GW_SIGNAL_PROCESS);
+  assert(!gw_signal_targets_discard(&registry, SIGUSR1));
+  assert(registry.inbox.queued == 1 && !gw_signal_target_pending(a));
+  take_blocked(b, 57, 5, GW_SIGNAL_THREAD);
+  assert(!registry.inbox.queued && !gw_signal_target_pending(b));
+
+  for (int i = 0; i < 3; ++i) {
+    queue_packet(&registry, a, 56, 10 + i);
+  }
+  queue_packet(&registry, NULL, 56, 13);
+  queue_packet(&registry, b, 57, 14);
+  queue_packet(&registry, b, 57, 15);
+  siginfo_t info = packet(16);
+  assert(gw_signal_targets_send(&registry, 1, 1, &info).status == EAGAIN);
+  assert(!gw_signal_targets_discard(&registry, 56));
+  assert(registry.inbox.queued == 2);
+  queue_packet(&registry, a, 56, 17);
+  take_blocked(b, 57, 14, GW_SIGNAL_THREAD);
+  assert(!gw_signal_targets_discard(&registry, 57));
+  assert(registry.inbox.queued == 1);
+  assert(gw_signal_targets_discard(&registry, 50) == EBUSY);
+  assert(gw_signal_targets_discard(&registry, 0) == EINVAL);
+  assert(gw_signal_targets_discard(&registry, 32) == EINVAL);
+  assert(gw_signal_targets_discard(&registry, 65) == EINVAL);
+  assert(registry.inbox.queued == 1);
+  take_blocked(a, 56, 17, GW_SIGNAL_THREAD);
+  assert(atomic_load(&notified) == before);
+
+  gw_signal_targets_close(&registry);
+  assert(gw_signal_targets_discard(&registry, 56) == ESRCH);
+  assert(!gw_signal_target_release(a) && !gw_signal_target_release(b));
+  assert(!gw_signal_targets_destroy(&registry));
+}
+
 struct sender {
   struct gw_signal_targets *registry;
   uintptr_t key;
@@ -202,14 +281,52 @@ static void concurrent_close(void) {
   assert(!gw_signal_targets_destroy(&registry));
 }
 
+static void concurrent_discard(void) {
+  struct gw_signal_targets registry;
+  gw_signal_targets_init(&registry, 0, 50000, notify, &notified);
+  struct gw_signal_target *target;
+  assert(!gw_signal_target_open(&registry, 1, 1, 0, NULL, &target));
+  struct sender senders[4];
+  pthread_t threads[4];
+  for (int i = 0; i < 4; ++i) {
+    senders[i] = (struct sender){
+        .registry = &registry, .key = i < 2 ? 1 : 0, .tid = i < 2 ? 1 : 0};
+    assert(!pthread_create(&threads[i], NULL, send_many, &senders[i]));
+  }
+  for (int i = 0; i < 4; ++i) {
+    while (!atomic_load_explicit(&senders[i].started, memory_order_acquire)) {
+      sched_yield();
+    }
+  }
+  for (int i = 0; i < 1000; ++i) {
+    assert(!gw_signal_targets_discard(&registry, 56));
+  }
+  for (int i = 0; i < 4; ++i) {
+    assert(!pthread_join(threads[i], NULL));
+    assert(atomic_load(&senders[i].accepted) == 10000);
+    assert(!atomic_load(&senders[i].closed));
+  }
+  assert(!gw_signal_targets_discard(&registry, 56));
+  assert(!registry.inbox.queued && !gw_signal_target_pending(target));
+  queue_packet(&registry, target, 56, 73);
+  consume(target, 73, GW_SIGNAL_THREAD);
+  gw_signal_targets_close(&registry);
+  assert(!gw_signal_target_release(target));
+  assert(!gw_signal_targets_destroy(&registry));
+}
+
 int main(void) {
   uint64_t all = UINT64_MAX, previous;
   assert(
       !syscall(SYS_rt_sigprocmask, SIG_SETMASK, &all, &previous, sizeof all));
   identity_and_growth();
   shared_and_failed_wake();
+  consuming_and_discard();
   concurrent_close();
+  concurrent_discard();
   assert(
       !syscall(SYS_rt_sigprocmask, SIG_SETMASK, &previous, NULL, sizeof all));
-  puts("{\"result\":\"PASS\",\"targets\":2048,\"concurrent_senders\":4}");
+  puts(
+      "{\"result\":\"PASS\",\"targets\":2048,\"concurrent_senders\":4,"
+      "\"discard_quota\":true,\"blocked_consuming\":true}");
 }

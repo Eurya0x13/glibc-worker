@@ -251,6 +251,35 @@ int gw_signal_target_deliver(struct gw_signal_target *target,
   return result;
 }
 
+int gw_signal_target_take(struct gw_signal_target *target, uint64_t eligible,
+                          siginfo_t *information,
+                          enum gw_signal_queue_source *source) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int result =
+      gw_signal_inbox_take(&target->receiver, eligible, information, source);
+  unlock(registry);
+  return result;
+}
+
+int gw_signal_targets_discard(struct gw_signal_targets *registry, int number) {
+  lock(registry);
+  int error = gw_signal_inbox_discard(&registry->inbox, NULL, number);
+  if (!error) {
+    /* Closed identities have already discarded their private queues. Dense
+     * active membership stays stable under this outer transaction. */
+    for (size_t i = 0; i < registry->count; ++i) {
+      error = gw_signal_inbox_discard(&registry->inbox,
+                                      &registry->active[i]->receiver, number);
+      if (error) {
+        break;
+      }
+    }
+  }
+  unlock(registry);
+  return error;
+}
+
 uint64_t gw_signal_target_pending(struct gw_signal_target *target) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);

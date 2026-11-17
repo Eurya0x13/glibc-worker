@@ -178,6 +178,28 @@ uint64_t gw_signal_inbox_pending(struct gw_signal_receiver *receiver) {
   return result;
 }
 
+int gw_signal_inbox_discard(struct gw_signal_inbox *inbox,
+                            struct gw_signal_receiver *receiver, int number) {
+  if (!allowed(number) || (receiver && receiver->owner != inbox)) {
+    return EINVAL;
+  }
+  if (inbox->reserved & bit(number)) {
+    return EBUSY;
+  }
+
+  lock(inbox);
+  int error = inbox->closed || (receiver && receiver->closed) ? ESRCH : 0;
+  if (!error) {
+    struct gw_signal_pending *pending =
+        receiver ? &receiver->directed : &inbox->shared;
+    uint64_t before = pending->queued;
+    gw_signal_pending_discard(pending, number);
+    inbox->queued -= before - pending->queued;
+  }
+  unlock(inbox);
+  return error;
+}
+
 void gw_signal_receiver_close(struct gw_signal_receiver *receiver) {
   struct gw_signal_inbox *inbox = receiver->owner;
   lock(inbox);

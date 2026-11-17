@@ -375,7 +375,13 @@ controls = [
     (
         "targets",
         native_command("target-control"),
-        {"result": "PASS", "targets": 2048, "concurrent_senders": 4},
+        {
+            "result": "PASS",
+            "targets": 2048,
+            "concurrent_senders": 4,
+            "discard_quota": True,
+            "blocked_consuming": True,
+        },
     ),
     (
         "anchor",

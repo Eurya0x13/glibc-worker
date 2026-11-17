@@ -66,6 +66,12 @@ int gw_signal_inbox_take(struct gw_signal_receiver *, uint64_t eligible,
 int gw_signal_inbox_deliver(struct gw_signal_receiver *, siginfo_t *,
                             enum gw_signal_queue_source *);
 uint64_t gw_signal_inbox_pending(struct gw_signal_receiver *);
+/* Discard one queue's pending instances and release its aggregate RT quota.
+ * NULL receiver selects the shared queue. A registry-level disposition change
+ * serializes this with every directed queue and future sends. No notification
+ * is issued or retracted: already selected kernel helpers can be stale. */
+int gw_signal_inbox_discard(struct gw_signal_inbox *,
+                            struct gw_signal_receiver *, int);
 void gw_signal_receiver_close(struct gw_signal_receiver *);
 void gw_signal_inbox_close(struct gw_signal_inbox *);
 /* These are quiescent operations. EBUSY prevents destroying a group with live

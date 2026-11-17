@@ -43,6 +43,14 @@ struct gw_signal_publication gw_signal_target_mask(struct gw_signal_target *,
                                                    uint64_t);
 int gw_signal_target_deliver(struct gw_signal_target *, siginfo_t *,
                              enum gw_signal_queue_source *);
+/* A consuming wait may take logically blocked signals. Retain the same
+ * thread-before-shared selection and registry transaction as handler entry. */
+int gw_signal_target_take(struct gw_signal_target *, uint64_t eligible,
+                          siginfo_t *, enum gw_signal_queue_source *);
+/* Flush all pending instances of one signal under the registry writer,
+ * releasing aggregate quota. Disposition owners must also serialize the new
+ * action and future sends; this operation does not install SIG_IGN itself. */
+int gw_signal_targets_discard(struct gw_signal_targets *, int);
 uint64_t gw_signal_target_pending(struct gw_signal_target *);
 int gw_signal_target_pin(struct gw_signal_target *);
 /* Derive another continuation hold from a pin the caller already owns.

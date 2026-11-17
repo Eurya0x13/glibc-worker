@@ -40,6 +40,32 @@ notification with `gw_signal_targets_retry`, or quarantine at the integration
 boundary. Successful target admission also remains committed if its initial
 notification fails; the registry error exposes that failure.
 
+## Consuming waits and disposition changes
+
+`gw_signal_target_take` selects from an explicit eligibility mask without
+changing the target's logical mask. Unlike handler delivery, it can consume a
+blocked signal, as required by a signal-wait adapter. Thread-directed pending
+still wins over shared pending and both retain the inbox's per-number ordering.
+This is a nonblocking queue operation; it does not implement a kernel wait,
+timeout, application-pointer copyout or notification consumption.
+
+`gw_signal_targets_discard` flushes one signal from the shared queue and every
+active target's directed queue under the registry writer. It releases exactly
+the discarded realtime quota and preserves all other numbers and masks.
+The lower-level `gw_signal_inbox_discard` supplies the corresponding one-queue
+operation. As elsewhere, do not bypass the registry with direct receiver
+mutations when using registry-owned targets.
+
+Use the flush while holding the disposition owner's outer transaction, together
+with publication of the new action and policy for subsequent sends. Flushing
+alone does not install `SIG_IGN` or make later publications disappear. A prior
+kernel notification can still enter and find no deliverable packet; it must
+take the normal hidden/stale-notification path. Selected handler generations
+and saved frames retain their own lifetimes. Linux applies ignored-disposition
+pending cleanup in
+[do_sigaction](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c);
+the outer runtime must connect that policy to these queue operations.
+
 ## Entry and saved-frame lifetime
 
 `gw_signal_target_pin` admits a new entry only while the target is open.
@@ -66,8 +92,13 @@ test oracle's logical-mask schedule, not runtime target lookup.
 The native control grows to 2,048 stable targets, replaces a descriptor key while
 an older identity remains pinned, races four senders against close, checks
 shared admission/unblocking and injects accepted-but-failed notifications for
-both publication and mask changes. It runs under the matched GNU libc on Linux
-and Android ARM64. The Host/core variant also runs under Clang UBSan.
+both publication and mask changes. Additional checks consume logically blocked
+packets, flush standard and realtime packets across private/shared queues,
+recover a full aggregate quota, preserve unrelated FIFO values, reject
+invalid/reserved numbers and race four senders against repeated flushes.
+A subsequent publication and delivery must still work. It runs under the
+matched GNU libc on Linux and Android ARM64. The Host/core variant also runs
+under Clang UBSan.
 
 These are recipient/queue lifetime guarantees. The installed JNI service still
 needs public asynchronous dispositions, complete logical mask/wait hooks and
