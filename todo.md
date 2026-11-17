@@ -76,7 +76,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   logical action changes or a notification has no deliverable Guest packet.
   [Private NPTL isolation](core/docs/en/PRIVATE_SIGNALS.md) separates GNU's
   cancellation/timer and credential channels from Bionic's private signals;
-  complete private Host handler entry and lazy registration routing as well.
+  Bionic bootstrap routing and reviewed late data-import routing now cover
+  real private registrations/entry. GNU Host cancellation and credential
+  protocols still require their own lifecycle validation.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,
   preserving sender information, queue semantics and errors.
   The optional [owning-libc send hook](core/docs/en/GUEST_SIGNAL_SEND.md) now

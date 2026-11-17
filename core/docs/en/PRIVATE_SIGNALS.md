@@ -61,8 +61,19 @@ starts and cancels a genuine GNU pthread with a cleanup handler, and fires a
 GNU `SIGEV_THREAD` timer callback. It requires unchanged Host private actions,
 installed GNU private actions and native GNU TLS in cleanup/callback code.
 
-This isolation is not complete Bionic private-handler interception. A Host
-private handler must still enter through TLS restoration while a carrier is
-executing Guest code; lazy Bionic registrations need the same reviewed import
-routing as other Host registrations. No arbitrary private syscall interception
-or unsupported libc artifact is implied.
+The bootstrap interposer includes Bionic's private range in Host routing and
+forwards pre-`main` registrations natively before enabling the router. Its real
+`android_run_on_all_threads` registration/send path is exercised while adopted
+carriers execute GNU code. The native Bionic handlers run with restored Host
+TLS. Their ordinary Guest syscall interruptions retain native EINTR semantics.
+
+Late Android integration additionally requires a reviewed owning-libc artifact
+and both Bionic action imports in the [signal profile](../../../jvm-jni/docs/en/ADAPTER.md#signal-registration-integration).
+These data sites preserve the reviewed ART front when present. Installed JNI
+tests exercise Bionic registration with the selected VM already running and
+verify that its kernel routes remain intact afterward.
+
+This is not arbitrary private syscall interception. GNU Host NPTL cancellation
+across an adopted carrier needs separate lifecycle coordination; the Bionic
+path does not validate it. Nor does a native registration test establish live
+ART recipient quiescence or general saved Guest continuations.

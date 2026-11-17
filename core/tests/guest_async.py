@@ -389,6 +389,7 @@ try:
     assert data.pop("host_entries") >= 8
     assert data.pop("guest_entries") == 4
     assert data.pop("production_ready") is False
+    assert data.pop("bionic_private_routes") is bool(args.ndk)
     assert data and all(value is True for value in data.values()), data
 except Exception as error:
     if isinstance(error, subprocess.TimeoutExpired):

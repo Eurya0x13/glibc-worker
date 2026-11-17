@@ -64,6 +64,43 @@ JNI 跳板必须知道完整方法描述符。当前私有适配器包含反射�
 
 OpenJDK 8–25 的装载接口可分为若干版本族，且维护分支存在参数回移植，见 [JRE 兼容性契约](JRE_COMPATIBILITY.md)。不能把固定旧制品的钩子直接套到其他 JRE。该项目没有宣称已实现通用 JRE 源码补丁或 ART 私有接口。
 
+<a id="signal-registration-integration"></a>
+
+## 信号注册接入
+
+后加载信号接入使用独立审阅的 `GW_SIGNAL_PROFILE_HEADER`，原生库装载
+family/profile 不包含这些信息。除 VM/ART 位置外，Android 还要求
+`GW_HOST_LIBC_SHA256`、`GW_HOST_SIGACTION_OFFSET` 和
+`GW_HOST_SIGACTION64_OFFSET`，标识确切所属 Bionic 制品及其两个数据导入。
+缺少或不匹配时，在修改导入或接纳 Guest 接收者之前返回 `ENOTSUP`。
+桌面原生接入不使用 Bionic 参数。
+
+维护者必须审阅实际制品的私有信号注册调用路径。运行时核对文件哈希、
+所属映射、槽位对齐、原指针及数据页权限。普通 HotSpot 将导入路由至
+core；ART 保留已审阅的公开前端和底层路由。两个导入纳入原有安装、
+回滚和恢复事务，并恢复原 RELRO 权限，不改写 libc 指令。绕过这些
+审阅导入的原始注册仍不属于本适配器的范围。
+
+实验构建器通过 `--host-libc-signal-profile` 接受显式的 `schema: 1`、
+`abi: "arm64-v8a"`、`sha256` 和 `imports` 对象，后者包含经审阅的
+`sigaction`、`sigaction64` 整数偏移。它不推断 JRE family，也不自动
+批准新的兼容制品。安装时停止应用注册/JNI 进入，接收者和 VM 关闭前
+保留接入层；空闲测试 VM 不代表已经证明活跃 ART 的接收者静默。
+
+原生调用方需通过 `signal_router_action`/`signal_router_action64` 注册自己的
+处理器，或提供单独审阅的导入点。修改 VM 和 Bionic 内部的 PLT 导入点并不会
+拦截其他所有 DSO 对 libc 公开符号的调用。已安装的 late JNI 测试使用这一显式
+调用边界；Bionic 的全线程回调测试则走 Bionic 自身真正的内部注册路径。
+
+`tests/signal_profile.py` 复用显式准备的 Android late SDK payload 和匹配的
+VM 启动头文件。传入 `--payload`、`--vm-startup-profile`、`--ndk` 和
+`--serial`。脚本在普通 HotSpot/Bionic 的五个导入点每次写入后分别注入失败，
+要求五个原值全部恢复、路由器关闭，并正常完成 `DestroyJavaVM`。可重复传入
+`--rejection-prefix`，选择单独构建、故意缺少 Host 字段、Bionic 摘要错误或
+导入偏移非法的 SDK；每个都必须在启用路由器前以 `ENOTSUP` 拒绝，并仍可销毁
+VM。输入摘要和各用例输出保存在 `build/tests/signal-profile-android`。
+这是 shell JRE17 测试，不代表 ART 动态接入或静止期验证。
+
 ## 运行时组合
 
 模块化使用四个独立安装包；旧宿主可选择 `scripts/package-runtime.sh` 组装的单 DSO `libglibc_bridge.so` 和合并 helper JAR。同一进程只能选择一种组合，避免两套单例状态。兼容制品包含公共桥和适配器，但不包含测试 Activity、JNI 夹具或测试 JRE 路径缓存补丁。

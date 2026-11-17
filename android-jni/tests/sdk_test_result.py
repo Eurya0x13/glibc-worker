@@ -100,6 +100,7 @@ def execute_case(
     require_host_fault_mask=False,
     require_guest_target=False,
     fpe_optional=False,
+    require_host_private=False,
 ):
     timed_out = False
     try:
@@ -132,7 +133,9 @@ def execute_case(
             except json.JSONDecodeError:
                 malformed = True
 
-    terminal = [r for r in rows if r.get("result") == "PASS"]
+    terminal = [
+        r for r in rows if r.get("result") == "PASS" and "stage" not in r
+    ]
     transfer = [r for r in rows if r.get("stage") == "nonlocal-transfer"]
     fpe = [r for r in rows if r.get("stage") == "guest-fpe"]
     fpe_supported = fpe == [
@@ -368,6 +371,23 @@ def execute_case(
         terminal = [
             {"case": mode, "signal": int(signal.SIGTRAP), "result": "PASS"}
         ]
+
+    if require_host_private:
+        expected = (
+            []
+            if mode == "unconfigured-profile"
+            else [
+                {
+                    "stage": "bionic-private-registration",
+                    "result": "PASS",
+                    "vm_running": True,
+                    "host_tls": True,
+                }
+            ]
+        )
+        failed |= [
+            r for r in rows if r.get("stage") == "bionic-private-registration"
+        ] != expected
 
     evidence = {
         "case": mode,

@@ -41,6 +41,8 @@ if args.ndk:
     ]
 run(configure)
 targets = [
+    "signal_bootstrap_test",
+    "signal_private_test",
     "signal_inbox_test",
     "signal_deferred_test",
     "signal_ordering_test",
@@ -63,6 +65,8 @@ run(["cmake", "--build", out / "sdk", "--target", *targets, "--parallel", "2"])
 inputs = [
     Path(__file__),
     core / "CMakeLists.txt",
+    core / "tests/signal_bootstrap.c",
+    core / "tests/signal_private.c",
     core / "tests/signal_inbox.c",
     core / "tests/signal_deferred.c",
     core / "tests/signal_ordering.c",

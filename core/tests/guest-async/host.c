@@ -4,10 +4,12 @@
 #include "nonlocal-mask.h"
 #include "signal-router.h"
 #include "signal-select.h"
+#include "signal-stack.h"
 #include "signals.h"
 #include <assert.h>
 #include <errno.h>
 #include <fenv.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <poll.h>
@@ -24,6 +26,39 @@ static struct async_control control;
 static struct async_carrier carriers[TEST_CARRIERS];
 static _Thread_local struct async_carrier *current;
 static _Thread_local int host_tls = 17;
+#ifdef __ANDROID__
+static _Atomic int private_callbacks;
+
+static int private_callback(void *argument) {
+  assert(argument == &private_callbacks && host_tls == 17);
+  if (current) {
+    assert(atomic_load(&current->phase) == PHASE_GUEST);
+    assert((uintptr_t)__builtin_thread_pointer() == current->exchange.host.tp);
+  }
+  atomic_fetch_add_explicit(&private_callbacks, 1, memory_order_relaxed);
+  return 1;
+}
+
+static void private_host_routes(void) {
+  int (*run_on_all)(int (*)(void *), void *) =
+      dlsym(RTLD_NEXT, "android_run_on_all_threads");
+  assert(run_on_all);
+  for (int i = 0; i < TEST_CARRIERS; ++i) {
+    while (atomic_load_explicit(&carriers[i].phase, memory_order_acquire) !=
+           PHASE_GUEST) {
+      sched_yield();
+    }
+  }
+  int previous = atomic_load(&private_callbacks);
+  /* This native Bionic API registers/restores its own private signal through
+   * libc's PLT and invokes a handler on both adopted GNU carriers. Neither
+   * the registration nor the send is performed by this test's interposer.
+   * https://android.googlesource.com/platform/bionic/+/android13-release/libc/bionic/pthread_internal.cpp
+   */
+  assert(run_on_all(private_callback, &private_callbacks));
+  assert(atomic_load(&private_callbacks) == previous + TEST_CARRIERS + 1);
+}
+#endif
 
 /* LP64 kernel ABI, not either libc's public struct sigaction. Public GNU
  * queries intentionally reject 32/33; inspect the actual shared dispositions.
@@ -183,6 +218,7 @@ static void *carrier_main(void *argument) {
   host_mask = gw_nonlocal_mask_block();
   exchange->host_execution_mask = host_mask;
   exchange->host_mask_valid = 1;
+  gw_signal_stack_get(&exchange->host_altstack);
   atomic_store_explicit(&carrier->phase, PHASE_GUEST, memory_order_release);
   exchange->swap(&exchange->host, &exchange->guest);
   gw_nonlocal_mask_restore(host_mask);
@@ -342,6 +378,11 @@ static void send_guest_packets_and_close(void) {
     wake(&carriers[i].self_allowed);
     wait_value(&carriers[i].guest_running, 1);
     assert(carriers[i].self_received == 6);
+#ifdef __ANDROID__
+    if (!i) {
+      private_host_routes();
+    }
+#endif
     assert(!owner_command(&carriers[i], OWNER_SEND,
                           carriers[i].index * 1000 + TEST_TOTAL_PACKETS));
     wait_value(&carriers[i].phase, PHASE_DONE);
@@ -421,6 +462,11 @@ int main(int argc, char **argv) {
       "\"handler_errno_visible\":true,"
       "\"runtime_target_registry\":true,\"entry_pins_balanced\":true,"
       "\"nptl_signal_isolation\":true,\"guest_cancel_timer\":true,"
+#ifdef __ANDROID__
+      "\"bionic_private_routes\":true,"
+#else
+      "\"bionic_private_routes\":false,"
+#endif
       "\"recipient_close\":true,\"production_ready\":false}\n",
       sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,
       sum.self_entries);

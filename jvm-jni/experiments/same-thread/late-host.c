@@ -55,22 +55,29 @@ int main(int argc, char **argv) {
 #endif
   const char *path = getenv("GW_LATE_BRIDGE");
   void *bridge = path ? dlopen(path, RTLD_NOW | RTLD_LOCAL) : NULL;
-  int (*run)(JavaVM *, JNIEnv *, int, char **) =
-      bridge ? dlsym(bridge, "domain_run_existing_vm") : NULL;
-  if (!run) {
+  if (!bridge) {
     fprintf(stderr, "late bridge dlopen: %s\n", dlerror());
     return 2;
   }
-  if (getenv("GW_LATE_FAIL_AFTER")) {
+  const char *expected_status = getenv("GW_LATE_EXPECT_STATUS");
+  if (getenv("GW_LATE_FAIL_AFTER") || expected_status) {
     int (*install)(JNIEnv *) = dlsym(bridge, "domain_late_signal_install");
     int status = install ? install(env) : EINVAL;
-    if ((*env)->ExceptionCheck(env) || status != ENOMEM ||
-        (*vm)->DestroyJavaVM(vm) != JNI_OK) {
+    int expected = expected_status ? atoi(expected_status) : ENOMEM;
+    int (*enabled)(void) = dlsym(bridge, "signal_router_enabled");
+    if ((*env)->ExceptionCheck(env) || status != expected || !enabled ||
+        enabled() || (*vm)->DestroyJavaVM(vm) != JNI_OK) {
       return 3;
     }
     puts("LATE_SIGNAL_REJECTION {\"result\":\"PASS\",\"vm_destroyed\":true}");
     fflush(stdout);
     return 0;
+  }
+  int (*run)(JavaVM *, JNIEnv *, int, char **) =
+      dlsym(bridge, "domain_run_existing_vm");
+  if (!run) {
+    fprintf(stderr, "late bridge entry: %s\n", dlerror());
+    return 2;
   }
   return run(vm, env, argc, argv);
 }

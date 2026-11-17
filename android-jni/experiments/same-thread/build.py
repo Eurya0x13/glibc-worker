@@ -22,6 +22,7 @@ parser.add_argument("--runtime", type=Path, required=True)
 parser.add_argument("--system-load", action="store_true")
 parser.add_argument("--late-signal", action="store_true")
 parser.add_argument("--art-signal-profile", type=Path)
+parser.add_argument("--host-libc-signal-profile", type=Path)
 parser.add_argument("--jvm-family", type=int, choices=range(1, 7))
 args = parser.parse_args()
 if args.late_signal and not args.system_load:
@@ -29,6 +30,8 @@ if args.late_signal and not args.system_load:
 android = args.abi == "arm64-v8a"
 if args.art_signal_profile and not (android and args.late_signal):
     parser.error("ART signal profile requires ARM64 late loading")
+if args.host_libc_signal_profile and not (android and args.late_signal):
+    parser.error("Host libc signal profile requires ARM64 late loading")
 out = (
     root
     / (
@@ -280,6 +283,28 @@ if args.late_signal:
                 offset = art_profile["bottom_callbacks"][name]
                 header.write(
                     f"#define GW_ART_{name.upper()}_OFFSET {offset}UL\n"
+                )
+    if args.host_libc_signal_profile:
+        host_profile = json.loads(args.host_libc_signal_profile.read_text())
+        imports = host_profile.get("imports", {})
+        digest = host_profile.get("sha256", "")
+        if (
+            host_profile.get("abi") != "arm64-v8a"
+            or host_profile.get("schema") != 1
+            or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or set(imports) != {"sigaction", "sigaction64"}
+            or any(
+                type(offset) is not int or offset <= 0 or offset % 8
+                for offset in imports.values()
+            )
+        ):
+            parser.error("Unsupported Host libc signal profile")
+        with (out / "late-signal-profile.h").open("a") as header:
+            header.write(f'#define GW_HOST_LIBC_SHA256 "{digest}"\n')
+            for name, offset in imports.items():
+                header.write(
+                    f"#define GW_HOST_{name.upper()}_OFFSET {offset}UL\n"
                 )
     # The launcher has no router exports. All bridge code is dlopened only
     # after JNI_CreateJavaVM has completed, not linked into the launcher.

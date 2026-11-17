@@ -31,7 +31,9 @@ struct binding {
   uintptr_t replacement;
   int protection;
 };
-static struct binding bindings[3];
+/* Three reviewed VM data sites plus two owning Bionic PLT imports. This is
+ * the protocol's fixed site count, not a capacity for application objects. */
+static struct binding bindings[5];
 static unsigned installed, binding_count;
 static void *chain_base;
 static signal_router_backend vm_action;
@@ -217,6 +219,60 @@ static int prepare_art_chain(JNIEnv *env, uintptr_t public_action, void *libc) {
 #endif
 }
 
+static int prepare_host_private(JNIEnv *env, void *libc) {
+#ifndef __ANDROID__
+  (void)env;
+  (void)libc;
+  return 0;
+#elif defined(GW_HOST_LIBC_SHA256) && defined(GW_HOST_SIGACTION_OFFSET) && \
+    defined(GW_HOST_SIGACTION64_OFFSET)
+  Dl_info owner = {0};
+  struct stat file;
+  if (!dladdr((void *)libc_action, &owner) || !owner.dli_fname ||
+      stat(owner.dli_fname, &file) ||
+      !verify_artifact(env, owner.dli_fname, GW_HOST_LIBC_SHA256)) {
+    return ENOTSUP;
+  }
+
+  const char *names[] = {"sigaction", "sigaction64"};
+  const uintptr_t offsets[] = {GW_HOST_SIGACTION_OFFSET,
+                               GW_HOST_SIGACTION64_OFFSET};
+  const uintptr_t routes[] = {(uintptr_t)signal_router_action,
+                              (uintptr_t)signal_router_action64};
+  for (unsigned i = 0; i < 2; ++i) {
+    uintptr_t native = (uintptr_t)dlsym(libc, names[i]);
+    uintptr_t front = (uintptr_t)dlsym(RTLD_DEFAULT, names[i]);
+    Dl_info front_owner = {0};
+    if (!native || !front ||
+        (chain_base && (!dladdr((void *)front, &front_owner) ||
+                        front_owner.dli_fbase != chain_base)) ||
+        (!chain_base && front != native)) {
+      return ENOTSUP;
+    }
+
+    /* A Bionic internal call may already go through ART's public front.
+     * Preserve that front and its reviewed bottom hook rather than bypassing
+     * its private signal chaining. Plain HotSpot uses the core router. */
+    uintptr_t replacement = chain_base ? front : routes[i];
+    int error = prepare_binding(binding_count + i, &owner, &file, offsets[i],
+                                native, replacement, 0);
+    if (error && front != native) {
+      error = prepare_binding(binding_count + i, &owner, &file, offsets[i],
+                              front, replacement, 0);
+    }
+    if (error) {
+      return error;
+    }
+  }
+  binding_count += 2;
+  return 0;
+#else
+  (void)env;
+  (void)libc;
+  return ENOTSUP;
+#endif
+}
+
 int domain_late_signal_install(JNIEnv *env) {
   if (installed) {
     return EALREADY;
@@ -261,6 +317,10 @@ int domain_late_signal_install(JNIEnv *env) {
                      : prepare_art_chain(env, public_action, libc);
   if (prepared) {
     fprintf(stderr, "LATE_SIGNAL_GATE stage=prepare status=%d\n", prepared);
+    return prepared;
+  }
+  prepared = prepare_host_private(env, libc);
+  if (prepared) {
     return prepared;
   }
   long page = sysconf(_SC_PAGESIZE);

@@ -27,7 +27,8 @@ struct gw_signal_contract {
 
 /* Returns an errno value. The contract must remain immutable while in use.
  * SIGKILL and SIGSTOP cannot be reserved. Host libc's private signals can be
- * reserved for mask preservation, but cannot become public logical packets. */
+ * reserved for mask preservation; implementation-private channels are not
+ * public logical packets. */
 int gw_signal_contract_validate(const struct gw_signal_contract *);
 
 /* Pure, TLS-free classification. Returns zero and writes owner, or an errno

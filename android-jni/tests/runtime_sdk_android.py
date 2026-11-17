@@ -384,6 +384,7 @@ for mode, reject in cases:
             and mode != "router-quarantine",
             require_guest_target=args.native_unwind and args.unwind_windows,
             fpe_optional=True,
+            require_host_private=True,
             fatal=fatal,
         )
     )

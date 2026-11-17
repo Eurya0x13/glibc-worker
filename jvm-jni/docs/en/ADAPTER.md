@@ -60,6 +60,52 @@ Trampolines require complete method descriptors. The current private adapter use
 
 OpenJDK8–25 has multiple interface families and maintenance backports; never apply a pinned old hook to arbitrary JREs. No universal JRE source patch or ART private adapter is claimed.
 
+<a id="signal-registration-integration"></a>
+
+## Signal registration integration
+
+Late signal integration has its own reviewed `GW_SIGNAL_PROFILE_HEADER`; the
+native-load family/profile does not supply it. In addition to the VM/ART sites,
+Android requires `GW_HOST_LIBC_SHA256`, `GW_HOST_SIGACTION_OFFSET` and
+`GW_HOST_SIGACTION64_OFFSET`. These identify the exact owning Bionic artifact
+and its two data imports. Missing or mismatched inputs return `ENOTSUP` before
+changing imports or admitting Guest recipients. Native desktop integration
+does not use Bionic inputs.
+
+The maintainer reviews the actual artifact's private registration call paths.
+The runtime verifies its file hash, owning mapping, slot alignment, original
+pointer and data-page protection. Plain HotSpot routes the imports to core;
+ART retains its reviewed public front and bottom routing. Both imports join
+the existing installation/rollback/restore transaction, with original RELRO
+permissions restored. No libc instructions are rewritten. Raw registrations
+bypassing these reviewed imports remain outside this adapter.
+
+The experiment builder accepts `--host-libc-signal-profile` with explicit
+`schema: 1`, `abi: "arm64-v8a"`, `sha256` and an `imports` object containing
+reviewed integer offsets for `sigaction` and `sigaction64`. It does not infer
+JRE families or generate new compatibility approvals. Stop application
+registration/JNI entry during installation and retain the integration through
+recipient and VM shutdown; an idle test VM does not prove live ART quiescence.
+
+Participating native consumers must route their own registrations through
+`signal_router_action`/`signal_router_action64`, or supply separately reviewed
+imports. Patching the VM and Bionic's internal PLT sites does not interpose
+every other DSO's call to the public libc symbol. The installed late JNI test
+uses this explicit consumer boundary; the Bionic run-on-all-threads test uses
+Bionic's actual internal registration path.
+
+`tests/signal_profile.py` reuses an explicitly prepared installed Android late
+SDK payload and the matching VM startup header. Pass `--payload`,
+`--vm-startup-profile`, `--ndk` and `--serial`. It injects failure after each of
+the five plain-HotSpot/Bionic import writes and requires all five originals
+restored, the router disabled and normal `DestroyJavaVM` completion. Optional
+repeated `--rejection-prefix` arguments select separately built SDKs with
+intentionally missing Host fields, a wrong Bionic digest or an invalid import
+offset; each must reject with `ENOTSUP` before enabling the router and still
+destroy the VM. The script retains input hashes and per-case output under
+`build/tests/signal-profile-android`. This is a shell JRE17 test, not an ART
+live-attachment or quiescence claim.
+
 ## Runtime composition
 
 Use four installed packages modularly or scripts/package-runtime.sh's single libglibc_bridge.so/merged helpers. Choose one per process to avoid duplicate singletons. Compatibility packaging includes public bridge/adapter, not test Activity, JNI fixtures or JRE startup path-cache patches.

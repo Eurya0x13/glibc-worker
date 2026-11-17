@@ -23,6 +23,9 @@ SUITES = [
             "-nonlocal-recovery-host-mask",
         )
     ),
+    "android-jni/build/tests/runtime-sdk-android-late",
+    "android-jni/build/tests/runtime-sdk-android-late-nonlocal-recovery-pending",
+    "jvm-jni/build/tests/signal-profile-android",
 ]
 REMAINING = [
     "Independent asynchronous Guest delivery and tagged sends",

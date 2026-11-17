@@ -51,6 +51,16 @@ GNU 私有处理器直接在 GNU TLS 下进入，取消仍由所属展开实现�
 再触发 GNU `SIGEV_THREAD` 计时器回调。要求 Host 私有处理器不变、GNU
 私有处理器已安装，清理与回调代码使用真实 GNU TLS。
 
-隔离不等于完整 Bionic 私有处理器拦截。载体正在执行 Guest 时，Host
-私有处理器仍必须经过 TLS 恢复入口；Bionic 延迟注册也需要经过审阅的
-导入路由。这里不承诺拦截任意私有系统调用或支持未经适配的 libc 制品。
+启动期拦截将 Bionic 私有范围纳入 Host 路由，并在路由器启用前原生转发
+`main` 之前的注册。真实 `android_run_on_all_threads` 注册、投递路径在
+收养载体执行 GNU 代码时运行，原生 Bionic 处理器使用恢复后的 Host TLS。
+它们对普通 Guest 系统调用的中断保留原生 EINTR 语义。
+
+Android 后加载接入还必须在 [信号 profile](../../../jvm-jni/docs/zh/ADAPTER.md#signal-registration-integration)
+中提供经审阅的所属 libc 制品和两个 Bionic action 导入位置。这些数据
+位置在存在 ART 时保留已审阅的前端。已安装 JNI 测试在选定 VM 已运行时
+执行 Bionic 注册，随后核对内核路由仍然完整。
+
+这不等于拦截任意私有系统调用。GNU Host NPTL 对收养载体的取消还需要
+独立生命周期协调，Bionic 路径不验证该语义。原生注册测试也不证明活跃
+ART 接收者静默或通用已保存 Guest 续体恢复。

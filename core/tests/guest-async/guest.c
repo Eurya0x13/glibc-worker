@@ -154,6 +154,10 @@ static int receive(int number, void *information, void *context) {
 static void self_sends(struct async_carrier *carrier) {
   select_carrier(carrier);
   union sigval value = {.sival_int = 9917};
+  /* A real Host private handler can interrupt the preceding native Guest
+   * futex. Establish the errno input for these public send API assertions
+   * after that wait, rather than assuming the raw syscall never saw EINTR. */
+  errno = EBADF;
   carrier->self_phase = 1;
   assert(!raise(TEST_LOGICAL_SIGNAL) && carrier->self_received == 1);
   assert(!gsignal(TEST_LOGICAL_SIGNAL) && carrier->self_received == 2);

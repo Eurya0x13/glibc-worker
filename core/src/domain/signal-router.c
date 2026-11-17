@@ -63,7 +63,7 @@ static _Atomic uint64_t guest_private;
 static _Atomic unsigned records, retained;
 static struct disposition *allocations;
 static atomic_flag writer = ATOMIC_FLAG_INIT;
-static int (*system_action)(int, const struct sigaction *, struct sigaction *);
+static _Atomic(signal_router_backend) system_action;
 static _Atomic int enabled;
 static _Atomic int guest_faults;
 static int fault_notifications[GW_SIGNAL_FAULT_LANES];
@@ -417,13 +417,16 @@ int signal_router_init_with_backend(signal_router_backend backend) {
 #endif
   /* Routing a Host registration is not an exclusive VM reservation. Untagged
    * external packets belong to Host on every public signal, including USR1,
-   * ALRM, CHLD and unreserved RT numbers. Keep native libc's private numbers
-   * outside this public layer. The explicit late adapter separately adopts
-   * pre-existing handlers, with its reviewed outer-chain requirement. */
+   * ALRM, CHLD and unreserved RT numbers. Bionic private handlers also need
+   * Host TLS restoration; owning GNU Host NPTL entries remain native. Late
+   * adapters separately route the reviewed owning-libc imports and adopt
+   * pre-existing handlers with the reviewed outer-chain requirement. */
   memset(managed, 0, sizeof managed);
   for (int number = 1; number < NSIG; ++number) {
     if (number == SIGKILL || number == SIGSTOP ||
+#ifndef __ANDROID__
         (number >= 32 && number < SIGRTMIN) ||
+#endif
         (atomic_load(&guest_private) & (UINT64_C(1) << (number - 1)))) {
       continue;
     }
@@ -608,8 +611,23 @@ static int router_action(int number, const struct sigaction *action,
   }
 
   if (!system_action) {
-    errno = ENOSYS;
-    return -1;
+    /* Bionic's own constructors can call an executable-interposed sigaction
+     * before main, including fdtrack's private signal registration. Forward
+     * those calls natively instead of silently losing the initial handler.
+     * Explicit late backends still replace this cache during bootstrap.
+     * https://android.googlesource.com/platform/bionic/+/android13-release/libc/bionic/fdtrack.cpp
+     */
+    int saved = errno;
+    signal_router_backend backend = dlsym(RTLD_NEXT, "sigaction");
+    if (!backend || backend == signal_router_action) {
+      errno = ENOSYS;
+      return -1;
+    }
+    signal_router_backend empty = NULL;
+    atomic_compare_exchange_strong_explicit(&system_action, &empty, backend,
+                                            memory_order_acq_rel,
+                                            memory_order_acquire);
+    errno = saved;
   }
   if (number > 0 && number < NSIG &&
       (atomic_load_explicit(&guest_private, memory_order_acquire) &

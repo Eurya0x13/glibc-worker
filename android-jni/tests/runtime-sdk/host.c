@@ -92,13 +92,43 @@ static _Thread_local volatile sig_atomic_t deferred_faults;
 static _Thread_local volatile sig_atomic_t async_fault_active, async_fault_hits;
 static _Thread_local volatile sig_atomic_t unreserved_signal_hits;
 static struct sigaction original_segv;
-static _Thread_local int relay_canary = 0x7193;
+static _Thread_local volatile int relay_canary = 0x7193;
 static _Atomic unsigned relay_deliveries;
 static _Atomic long relay_tid;
 
+#ifdef GW_TEST_LATE_SIGNALS
+/* This explicitly participating consumer starts with native registrations.
+ * A late profile patches reviewed VM/libc imports, not every application's
+ * native call site. Route our own registrations only after installation. */
+static signal_router_backend consumer_action = sigaction;
+#define sigaction(...) consumer_action(__VA_ARGS__)
+#endif
+
+#ifdef __ANDROID__
+static _Atomic unsigned private_calls;
+
+static int private_host_callback(void *argument) {
+  assert(argument == &private_calls && relay_canary == 0x7193);
+  atomic_fetch_add_explicit(&private_calls, 1, memory_order_relaxed);
+  return 1;
+}
+
+static void private_host_registration(void) {
+  int (*run_on_all)(int (*)(void *), void *) =
+      dlsym(RTLD_NEXT, "android_run_on_all_threads");
+  assert(run_on_all && !signal_router_verify());
+  assert(run_on_all(private_host_callback, &private_calls));
+  assert(atomic_load(&private_calls) > 1 && !signal_router_verify());
+  puts(
+      "{\"stage\":\"bionic-private-registration\",\"result\":\"PASS\","
+      "\"vm_running\":true,\"host_tls\":true}");
+}
+#endif
+
 static void host_relay(int number, siginfo_t *information, void *frame) {
-  assert((number == SIGURG || number == SIGTRAP) && frame &&
-         relay_canary == 0x7193);
+  assert(number == SIGURG || number == SIGTRAP);
+  assert(frame);
+  assert(relay_canary == 0x7193);
   assert(information->si_code == SI_QUEUE && information->si_pid == getpid() &&
          information->si_uid == getuid());
 
@@ -1283,11 +1313,16 @@ int main(int argc, char **argv) {
   int installed = domain_late_signal_install(env);
   if (getenv("GW_EXPECT_SIGNAL_PROFILE_REJECTION")) {
     assert(installed == ENOTSUP);
+    assert(!signal_router_enabled());
     puts("{\"result\":\"PASS\",\"case\":\"unconfigured-signal-profile\"}");
     fflush(NULL);
     _exit(0);
   }
   assert(!installed);
+  consumer_action = signal_router_action;
+#endif
+#ifdef __ANDROID__
+  private_host_registration();
 #endif
   struct gw_host_bridge_config bridge = {
       .abi_version = GW_HOST_BRIDGE_CONFIG_V2,
