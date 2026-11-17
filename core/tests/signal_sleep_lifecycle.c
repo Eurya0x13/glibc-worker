@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <ucontext.h>
@@ -24,6 +25,8 @@ static volatile sig_atomic_t jump_kind, jumped;
 static sigjmp_buf jump_buffer;
 #ifndef __ANDROID__
 static ucontext_t saved_context;
+static ucontext_t handler_context, outside_context;
+static volatile sig_atomic_t context_resumes;
 #endif
 static _Atomic long waiting_tid;
 static int visible_before_entry, notify_sender, delay_hidden;
@@ -79,6 +82,13 @@ static void receive(int number) {
     return;
   }
 #ifndef __ANDROID__
+  if (jump_kind == 4) {
+    assert(!swapcontext(&handler_context, &outside_context));
+    assert(context_resumes == 1);
+    assert(!swapcontext(&handler_context, &outside_context));
+    assert(context_resumes == 2);
+    return;
+  }
   assert(jump_kind == 2);
   assert(!setcontext(&saved_context));
 #endif
@@ -184,6 +194,40 @@ static void jump_from_sleep(int kind) {
 }
 
 #ifndef __ANDROID__
+static void outside_handler(void) {
+  ++context_resumes;
+  assert_deferred();
+  struct timespec zero = {0};
+  assert(!nanosleep(&zero, NULL));
+  assert(!setcontext(&handler_context));
+  _exit(111);
+}
+
+static void saved_handler(void) {
+  const size_t stack_size = 65536;
+  void *stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  assert(stack != MAP_FAILED);
+  assert(!getcontext(&outside_context));
+  outside_context.uc_stack = (stack_t){.ss_sp = stack, .ss_size = stack_size};
+  outside_context.uc_link = NULL;
+  makecontext(&outside_context, outside_handler, 0);
+  jump_kind = 4;
+  context_resumes = 0;
+  atomic_store(&waiting_tid, syscall(SYS_gettid));
+  pthread_t sender;
+  assert(!pthread_create(&sender, NULL, send_signal, NULL));
+
+  struct timespec duration = {.tv_sec = 60}, remaining;
+  assert(nanosleep(&duration, &remaining) == -1 && errno == EINTR);
+  assert(!pthread_join(sender, NULL));
+  assert(context_resumes == 2 && remaining.tv_sec <= duration.tv_sec);
+  assert_deferred();
+  struct timespec zero = {0};
+  assert(!nanosleep(&zero, NULL));
+  assert(!munmap(stack, stack_size));
+}
+
 static void cleanup_recipient(void *recipient) {
   assert_deferred();
   sigset_t mask;
@@ -250,6 +294,7 @@ int main(void) {
 #endif
   sleep_notifications();
 #ifndef __ANDROID__
+  saved_handler();
   cancellation();
 #endif
   assert(!signal_prepare_release(recipient, 0));
@@ -261,10 +306,11 @@ int main(void) {
       "\"sleep_actual_block_notification\":true,\"sleep_preentry_rearm\":true,"
 #ifdef __ANDROID__
       "\"sleep_setcontext\":\"unavailable\","
+      "\"sleep_saved_handler_context\":\"unavailable\","
       "\"pthread_cancel\":\"unavailable\"}");
 #else
       "\"sleep_setcontext\":true,\"pthread_cancel\":true,\"cancel_before_"
       "entry\":true,"
-      "\"cancel_mask_restored\":true}");
+      "\"cancel_mask_restored\":true,\"sleep_saved_handler_context\":true}");
 #endif
 }

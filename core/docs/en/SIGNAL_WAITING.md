@@ -195,8 +195,13 @@ nested/visible interruptions and relative/absolute clock cases.
 `/proc/self/task/TID/syscall`, then tests notification, cancellation, native
 `siglongjmp`/`setcontext`, subsequent sleeps and recipient teardown. It also
 queues a helper in the pre-entry rearm window. These are Host-side acceptance
-tests on Linux x86_64 and Android ARM64, not proof of independent Guest handler
-entry during Java execution or general saved-continuation reclamation.
+tests. GNU additionally suspends a live sleep handler onto a separate native
+context, performs another sleep there, and resumes the original handler twice
+before allowing its interrupted sleep to retire. The fixture owns both stacks
+until all saved work has returned; it does not reclaim arbitrary saved contexts.
+The suites run on Linux x86_64 and Android ARM64 and are not proof of independent
+Guest handler entry during Java execution or general saved-continuation
+reclamation.
 
 ## Linux consuming order and atomic commit
 

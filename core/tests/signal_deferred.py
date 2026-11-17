@@ -180,11 +180,13 @@ try:
             expected.update(
                 {
                     "sleep_setcontext": "unavailable",
+                    "sleep_saved_handler_context": "unavailable",
                     "pthread_cancel": "unavailable",
                 }
                 if args.ndk
                 else {
                     "sleep_setcontext": True,
+                    "sleep_saved_handler_context": True,
                     "pthread_cancel": True,
                     "cancel_before_entry": True,
                     "cancel_mask_restored": True,
