@@ -37,8 +37,9 @@ pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命�
 使用隐藏路径。选中的私有内核动作带有 `SA_RESTART`，但仅此不足以让睡眠/ppoll
 透明恢复，因此仍需显式等待适配器。
 
-此内部入口不提供私有位掩码虚拟化、带标签的公开 libc 发送、Guest 处置/默认动作，
-或消费等待。测试接入显式控制通知掩码和发送者。普通阻塞 I/O 以及私有/原始 Host
+此内部入口不提供私有位掩码虚拟化、Guest 处置/默认动作或消费等待。可选的
+[所属 libc 发送扩展](GUEST_SIGNAL_SEND.md)现已在夹具中接入带标签的公开发送。
+测试接入显式控制通知掩码和发送者。普通阻塞 I/O 以及私有/原始 Host
 等待仍受[信号等待](SIGNAL_WAITING.md)中列出的边界约束。
 
 ## 可复现的原生验证
@@ -60,8 +61,9 @@ python3 core/tests/guest_async.py --abi arm64-v8a \
 可选的原生 `--ubsan` 运行使用 Clang 检查 Host/core；GNU Guest 及其 libc 不插桩。
 该配置使用独立输出目录。
 
-两个载体经过两批已 join 的生命周期，消费 28 个定向 Guest 包，并检查 FIFO 和
-发送者信息。Guest 入口在没有 Guest 调用轮询时中断 Host 忙循环，在真正阻塞的
+两个载体经过两批已 join 的生命周期，消费 28 个私有/共享 Guest 包，并检查
+发送者、code、数值和队列来源。Guest 入口在没有 Guest 调用轮询时中断 Host
+忙循环，在真正阻塞的
 原生睡眠和 `ppoll` 期间执行，还中断由内核保存 PC 确认的 Guest 忙循环。每次
 入口检查 TID、Guest TP/TLS、保护页栈位置、errno、FP 控制状态及 Guest 分配。
 两种定时 Host 等待都透明完成；重试观测确认 150 ms Guest 工作从原始 500 ms

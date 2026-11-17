@@ -35,9 +35,12 @@ struct async_carrier {
   _Atomic int phase, received, closed, guest_running;
   _Atomic int host_signal_count;
   _Atomic int empty_notifications;
+  _Atomic int self_allowed;
+  _Atomic int self_phase, self_received;
+  _Atomic int self_errno;
   uintptr_t busy_begin, busy_end;
   int index, expected, failures;
-  int host_handlers, guest_handlers, delay;
+  int host_handlers, guest_handlers, self_handlers, delay;
   int completed_work, budget_observed;
 };
 
@@ -46,6 +49,7 @@ struct async_control {
   _Atomic int request, response, ready;
   struct async_carrier *carrier;
   int operation, error, value, notification;
+  int send_lifecycle;
   void (*entry)(void *);
   struct gw_signal_inbox inbox;
 };

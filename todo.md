@@ -76,6 +76,11 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   logical action changes or a notification has no deliverable Guest packet.
 - Implement tagged Guest `raise`, `pthread_kill`, `sigqueue` and supported aliases,
   preserving sender information, queue semantics and errors.
+  The optional [owning-libc send hook](core/docs/en/GUEST_SIGNAL_SEND.md) now
+  connects these public sites, `gsignal`, `pthread_sigqueue` and same-process
+  `kill` to the cross-libc fixture. Exit-lock races, synchronous self-delivery
+  and errno checks are included; production recipient/disposition integration
+  remains unfinished.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM

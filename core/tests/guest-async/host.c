@@ -87,7 +87,9 @@ static void notification(int number, siginfo_t *information, void *context) {
 #else
   uintptr_t pc = frame->uc_mcontext.pc;
 #endif
-  if (pc >= current->busy_begin && pc < current->busy_end) {
+  if (atomic_load(&current->self_phase)) {
+    ++current->self_handlers;
+  } else if (pc >= current->busy_begin && pc < current->busy_end) {
     ++current->guest_handlers;
   } else {
     ++current->host_handlers;
@@ -293,6 +295,7 @@ static void send_busy_packets(void) {
     for (int packet = 1; packet <= TEST_PACKETS; ++packet) {
       assert(!owner_command(&carriers[i], OWNER_SEND,
                             carriers[i].index * 1000 + packet));
+      wait_value(&carriers[i].received, packet);
     }
   }
 }
@@ -316,7 +319,10 @@ static void send_wait_packets(void) {
 
 static void send_guest_packets_and_close(void) {
   for (int i = 0; i < TEST_CARRIERS; ++i) {
+    atomic_store_explicit(&carriers[i].self_allowed, 1, memory_order_release);
+    wake(&carriers[i].self_allowed);
     wait_value(&carriers[i].guest_running, 1);
+    assert(carriers[i].self_received == 6);
     assert(!owner_command(&carriers[i], OWNER_SEND,
                           carriers[i].index * 1000 + TEST_TOTAL_PACKETS));
     wait_value(&carriers[i].phase, PHASE_DONE);
@@ -326,7 +332,7 @@ static void send_guest_packets_and_close(void) {
 }
 
 struct totals {
-  int packets, host_entries, guest_entries;
+  int packets, self_packets, host_entries, guest_entries, self_entries;
 };
 
 static void join_carriers(pthread_t threads[TEST_CARRIERS],
@@ -335,11 +341,14 @@ static void join_carriers(pthread_t threads[TEST_CARRIERS],
     void *result;
     assert(!pthread_join(threads[i], &result) && result == &carriers[i]);
     assert(carriers[i].guest_handlers == 1 && carriers[i].host_handlers >= 2);
+    assert(carriers[i].self_handlers == 6);
     assert(atomic_load(&carriers[i].host_signal_count) == 1);
     assert(!owner_command(&carriers[i], OWNER_FREE, 0));
     sum->packets += atomic_load(&carriers[i].received);
+    sum->self_packets += carriers[i].self_received;
     sum->host_entries += carriers[i].host_handlers;
     sum->guest_entries += carriers[i].guest_handlers;
+    sum->self_entries += carriers[i].self_handlers;
     stack_free((void *)carriers[i].exchange.stack_low, 1024 * 1024);
     stack_free(carriers[i].entry_stack, 65536);
   }
@@ -351,6 +360,7 @@ int main(int argc, char **argv) {
   test_layout(control.layout);
   prepare_routes();
   start_owner(argv);
+  assert(control.send_lifecycle);
 
   struct totals sum = {0};
   for (int batch = 0; batch < TEST_BATCHES; ++batch) {
@@ -364,16 +374,22 @@ int main(int argc, char **argv) {
   assert(!signal_router_verify());
   assert(!signal_router_restore());
   printf(
-      "{\"result\":\"PASS\",\"packets\":%d,\"host_entries\":%d,"
-      "\"guest_entries\":%d,\"same_tid\":true,\"distinct_tls\":true,"
+      "{\"result\":\"PASS\",\"packets\":%d,\"self_packets\":%d,"
+      "\"host_entries\":%d,"
+      "\"guest_entries\":%d,\"self_entries\":%d,"
+      "\"same_tid\":true,\"distinct_tls\":true,"
       "\"guest_stack\":true,\"tls_errno_fp\":true,\"guest_malloc\":true,"
       "\"layout_handshake\":true,"
       "\"busy_host_delivery\":true,\"host_sleep_transparent\":true,"
       "\"host_ppoll_transparent\":true,\"handler_time_in_budget\":true,"
       "\"empty_notification_retry\":true,"
       "\"host_disposition_preserved\":true,"
+      "\"public_send_hooks\":true,\"send_exit_serialization\":true,"
+      "\"self_sends_before_return\":true,\"send_errno_contract\":true,"
+      "\"handler_errno_visible\":true,"
       "\"recipient_close\":true,\"production_ready\":false}\n",
-      sum.packets, sum.host_entries, sum.guest_entries);
+      sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,
+      sum.self_entries);
   fflush(stdout);
   _exit(0);
 }

@@ -80,6 +80,9 @@ for name in (
     "manifest.json",
     "stdout.log",
     "stderr.log",
+    "control-summary.json",
+    "control-stdout.log",
+    "control-stderr.log",
 ):
     (out / name).unlink(missing_ok=True)
 commands = []
@@ -153,6 +156,7 @@ run(
         "-I" + str(core / "src/domain"),
         "-I" + str(core / "include"),
         source / "guest.c",
+        source / "send-lifetime.c",
         core / "src/domain/signal-pending.c",
         core / "src/domain/signal-inbox.c",
         "-ldl",
@@ -162,6 +166,24 @@ run(
         out / "guest",
     ]
 )
+run(
+    [
+        compiler,
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        source / "send-control.c",
+        "-pthread",
+        "-o",
+        out / "send-control",
+    ]
+)
+control_loader = out / "control-loader"
+shutil.copyfile(loader, control_loader)
+control_loader.chmod(0o755)
 unwind = Path(
     subprocess.check_output(
         [compiler, "-print-file-name=libgcc_s.so.1"], text=True
@@ -191,6 +213,8 @@ inputs = [
     runtime / "libm.so.6",
     runtime / "manifest.json",
     out / "guest",
+    out / "send-control",
+    control_loader,
     out / "host/guest_async_host",
     out / "libgcc_s.so.1",
     *sdk_inputs,
@@ -224,6 +248,12 @@ command = [
     out / "guest",
     args.notification,
 ]
+control_command = [
+    control_loader,
+    "--library-path",
+    runtime,
+    out / "send-control",
+]
 if args.serial:
     adb = [adb_tool, "-s", args.serial]
     digest = hashlib.sha256(
@@ -234,12 +264,15 @@ if args.serial:
     for path in [
         out / "host/guest_async_host",
         out / "guest",
+        out / "send-control",
+        control_loader,
         out / "libgcc_s.so.1",
         loader,
         runtime / "libc.so.6",
         runtime / "libm.so.6",
     ]:
         run([*adb, "push", path, remote + "/"])
+    run([*adb, "shell", "chmod", "0755", remote + "/control-loader"])
     manifest["device"] = {
         "serial": args.serial,
         "fingerprint": run(
@@ -264,10 +297,46 @@ if args.serial:
         str(args.notification),
     ]
     command = [*adb, "shell", shlex.join(invocation)]
+    control_command = [
+        *adb,
+        "shell",
+        shlex.join(
+            [
+                "/system/bin/timeout",
+                "-s",
+                "KILL",
+                "10",
+                remote + "/control-loader",
+                "--library-path",
+                remote,
+                remote + "/send-control",
+            ]
+        ),
+    ]
 command = list(map(str, command))
+control_command = list(map(str, control_command))
+commands.append(control_command)
 commands.append(command)
 (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+capture_prefix = "control-"
 try:
+    native = subprocess.run(
+        control_command, capture_output=True, text=True, timeout=15
+    )
+    (out / "control-stdout.log").write_text(native.stdout)
+    (out / "control-stderr.log").write_text(native.stderr)
+    native.check_returncode()
+    native_data = json.loads(native.stdout)
+    assert native_data == {
+        "result": "PASS",
+        "native_handler_errno": True,
+        "cases": 6,
+    }, native_data
+    (out / "control-summary.json").write_text(
+        json.dumps(native_data, indent=2) + "\n"
+    )
+
+    capture_prefix = ""
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     (out / "stdout.log").write_text(result.stdout)
     (out / "stderr.log").write_text(result.stderr)
@@ -275,6 +344,8 @@ try:
     data = json.loads(result.stdout)
     assert data.pop("result") == "PASS"
     assert data.pop("packets") == 28
+    assert data.pop("self_packets") == 24
+    assert data.pop("self_entries") == 24
     assert data.pop("host_entries") >= 8
     assert data.pop("guest_entries") == 4
     assert data.pop("production_ready") is False
@@ -285,7 +356,7 @@ except Exception as error:
             ("stdout", error.stdout),
             ("stderr", error.stderr),
         ):
-            (out / (name + ".log")).write_bytes(
+            (out / (capture_prefix + name + ".log")).write_bytes(
                 partial.encode() if isinstance(partial, str) else partial or b""
             )
     (out / "failure.json").write_text(
@@ -294,6 +365,7 @@ except Exception as error:
     raise
 summary = json.loads(result.stdout)
 summary.update(
+    native_handler_errno_control=True,
     guest_public_signal_abi=False,
     jni_vm_validated=False,
     nonlocal_async_entry_validated=False,

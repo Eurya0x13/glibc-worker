@@ -48,9 +48,11 @@ An empty/stale notification uses this hidden path too. The selected private
 kernel action has `SA_RESTART`; that flag alone is insufficient for sleep/ppoll
 transparency, so the explicit wait adapter remains necessary.
 
-This internal entry does not add private-bit mask virtualization, tagged public
-libc sends, Guest dispositions/default actions or consuming waits. The test
-integration explicitly controls its notification mask and senders. General
+This internal entry does not add private-bit mask virtualization,
+Guest dispositions/default actions or consuming waits. The optional
+[owning-libc send extension](GUEST_SIGNAL_SEND.md) now supplies tagged public
+sends in the fixture. The test integration explicitly controls its notification
+mask and senders. General
 blocking I/O and private/raw Host waits retain the limits in
 [signal waiting](SIGNAL_WAITING.md).
 
@@ -75,9 +77,10 @@ logical number remains installed and receives its own untagged kernel packet.
 The optional native `--ubsan` run instruments Host/core with Clang; the GNU
 Guest and its libc remain uninstrumented. It uses a separate output directory.
 
-Two carriers over two joined lifetimes consume 28 directed Guest packets with
-FIFO and sender checks. Guest entry interrupts Host busy code without Guest-call
-polling, runs during an actually blocked native sleep and `ppoll`, and interrupts
+Two carriers over two joined lifetimes consume 28 private/shared Guest packets
+with sender, code, value and queue-source checks. Guest entry interrupts Host
+busy code without Guest-call polling, runs during an actually blocked native
+sleep and `ppoll`, and interrupts
 a Guest busy loop identified by its real kernel-saved PC. Each entry checks TID,
 Guest TP/TLS, guarded-stack placement, errno, FP control and Guest allocation.
 Both timed Host waits complete transparently; retry observations prove 150 ms
