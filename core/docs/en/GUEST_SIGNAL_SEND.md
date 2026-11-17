@@ -95,7 +95,9 @@ still alive, then release the sender. They exercise both `pthread_kill` and
 `pthread_sigqueue`, including native fallback under the lock and valid
 post-exit descriptor probes before joining.
 
-The fixture serializes shared-recipient selection and explicitly manages its
-logical masks. It supplies neither a production target registry nor a public
-Guest handler `ucontext`. These send-site checks do not establish JNI/VM signal
+The fixture explicitly schedules logical masks and acknowledges consumption
+before changing its chosen shared recipient. The [core registry](SIGNAL_TARGETS.md)
+performs actual lookup, admission, selection and retirement. It is not yet wired
+into the installed JNI service and supplies no public Guest handler `ucontext`.
+These send-site checks do not establish JNI/VM signal
 compatibility, arbitrary GNU target entry or asynchronous nonlocal recovery.

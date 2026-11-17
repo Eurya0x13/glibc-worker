@@ -1,7 +1,7 @@
 #ifndef GW_TEST_GUEST_ASYNC_H
 #define GW_TEST_GUEST_ASYNC_H
 #include "domain.h"
-#include "signal-inbox.h"
+#include "signal-targets.h"
 #include <linux/futex.h>
 #include <stdatomic.h>
 #include <sys/syscall.h>
@@ -29,7 +29,7 @@ enum {
 
 struct async_carrier {
   struct exchange exchange;
-  struct gw_signal_receiver receiver;
+  struct gw_signal_target *target;
   struct domain_signal_call entry;
   void *token, *entry_stack;
   _Atomic int phase, received, closed, guest_running;
@@ -51,7 +51,7 @@ struct async_control {
   int operation, error, value, notification;
   int send_lifecycle;
   void (*entry)(void *);
-  struct gw_signal_inbox inbox;
+  struct gw_signal_targets targets;
 };
 
 static inline void test_layout(uint32_t words[TEST_LAYOUT_WORDS]) {
@@ -60,12 +60,12 @@ static inline void test_layout(uint32_t words[TEST_LAYOUT_WORDS]) {
       sizeof(struct async_carrier),
       sizeof(struct exchange),
       sizeof(struct domain_signal_call),
-      sizeof(struct gw_signal_receiver),
-      sizeof(struct gw_signal_inbox),
+      sizeof(struct gw_signal_target),
+      sizeof(struct gw_signal_targets),
       sizeof(struct gw_signal_pending),
       sizeof(siginfo_t),
-      offsetof(struct async_control, inbox),
-      offsetof(struct async_carrier, receiver),
+      offsetof(struct async_control, targets),
+      offsetof(struct async_carrier, target),
       offsetof(struct async_carrier, entry),
       offsetof(struct async_carrier, received)};
   for (int i = 0; i < TEST_LAYOUT_WORDS; ++i) {

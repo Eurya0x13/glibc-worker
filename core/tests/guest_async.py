@@ -83,6 +83,9 @@ for name in (
     "control-summary.json",
     "control-stdout.log",
     "control-stderr.log",
+    "targets-summary.json",
+    "targets-stdout.log",
+    "targets-stderr.log",
 ):
     (out / name).unlink(missing_ok=True)
 commands = []
@@ -159,6 +162,7 @@ run(
         source / "send-lifetime.c",
         core / "src/domain/signal-pending.c",
         core / "src/domain/signal-inbox.c",
+        core / "src/domain/signal-targets.c",
         "-ldl",
         "-pthread",
         "-lm",
@@ -184,6 +188,26 @@ run(
 control_loader = out / "control-loader"
 shutil.copyfile(loader, control_loader)
 control_loader.chmod(0o755)
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        "-I" + str(core / "src/domain"),
+        core / "tests/signal_targets.c",
+        core / "src/domain/signal-pending.c",
+        core / "src/domain/signal-inbox.c",
+        core / "src/domain/signal-targets.c",
+        "-pthread",
+        "-o",
+        out / "target-control",
+    ]
+)
 unwind = Path(
     subprocess.check_output(
         [compiler, "-print-file-name=libgcc_s.so.1"], text=True
@@ -199,6 +223,7 @@ host_compiler = (out / "host/host-compiler.txt").read_text().strip()
 inputs = [
     Path(__file__),
     core / "CMakeLists.txt",
+    core / "tests/signal_targets.c",
     core / "config/targets.json",
     *source.iterdir(),
     *core.glob("src/domain/*.[chS]"),
@@ -214,6 +239,7 @@ inputs = [
     runtime / "manifest.json",
     out / "guest",
     out / "send-control",
+    out / "target-control",
     control_loader,
     out / "host/guest_async_host",
     out / "libgcc_s.so.1",
@@ -248,12 +274,6 @@ command = [
     out / "guest",
     args.notification,
 ]
-control_command = [
-    control_loader,
-    "--library-path",
-    runtime,
-    out / "send-control",
-]
 if args.serial:
     adb = [adb_tool, "-s", args.serial]
     digest = hashlib.sha256(
@@ -265,6 +285,7 @@ if args.serial:
         out / "host/guest_async_host",
         out / "guest",
         out / "send-control",
+        out / "target-control",
         control_loader,
         out / "libgcc_s.so.1",
         loader,
@@ -297,44 +318,62 @@ if args.serial:
         str(args.notification),
     ]
     command = [*adb, "shell", shlex.join(invocation)]
-    control_command = [
-        *adb,
-        "shell",
-        shlex.join(
-            [
-                "/system/bin/timeout",
-                "-s",
-                "KILL",
-                "10",
-                remote + "/control-loader",
-                "--library-path",
-                remote,
-                remote + "/send-control",
-            ]
-        ),
-    ]
+
+
+def native_command(binary):
+    if args.serial:
+        return [
+            *adb,
+            "shell",
+            shlex.join(
+                [
+                    "/system/bin/timeout",
+                    "-s",
+                    "KILL",
+                    "10",
+                    remote + "/control-loader",
+                    "--library-path",
+                    remote,
+                    remote + "/" + binary,
+                ]
+            ),
+        ]
+    return list(
+        map(str, [control_loader, "--library-path", runtime, out / binary])
+    )
+
+
 command = list(map(str, command))
-control_command = list(map(str, control_command))
-commands.append(control_command)
+controls = [
+    (
+        "control",
+        native_command("send-control"),
+        {"result": "PASS", "native_handler_errno": True, "cases": 6},
+    ),
+    (
+        "targets",
+        native_command("target-control"),
+        {"result": "PASS", "targets": 2048, "concurrent_senders": 4},
+    ),
+]
+commands.extend(item[1] for item in controls)
 commands.append(command)
 (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-capture_prefix = "control-"
+capture_prefix = ""
 try:
-    native = subprocess.run(
-        control_command, capture_output=True, text=True, timeout=15
-    )
-    (out / "control-stdout.log").write_text(native.stdout)
-    (out / "control-stderr.log").write_text(native.stderr)
-    native.check_returncode()
-    native_data = json.loads(native.stdout)
-    assert native_data == {
-        "result": "PASS",
-        "native_handler_errno": True,
-        "cases": 6,
-    }, native_data
-    (out / "control-summary.json").write_text(
-        json.dumps(native_data, indent=2) + "\n"
-    )
+    for name, invocation, expected in controls:
+        capture_prefix = name + "-"
+        native = subprocess.run(
+            invocation, capture_output=True, text=True, timeout=15
+        )
+        (out / (capture_prefix + "stdout.log")).write_text(native.stdout)
+        (out / (capture_prefix + "stderr.log")).write_text(native.stderr)
+        native.check_returncode()
+        native_data = json.loads(native.stdout)
+        assert native_data == expected, native_data
+        (out / (capture_prefix + "summary.json")).write_text(
+            json.dumps(native_data, indent=2) + "\n"
+        )
 
     capture_prefix = ""
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
@@ -366,6 +405,7 @@ except Exception as error:
 summary = json.loads(result.stdout)
 summary.update(
     native_handler_errno_control=True,
+    native_targets_control=True,
     guest_public_signal_abi=False,
     jni_vm_validated=False,
     nonlocal_async_entry_validated=False,

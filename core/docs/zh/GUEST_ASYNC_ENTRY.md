@@ -20,6 +20,7 @@ Host errno。对该预留路由的公开注册、替换和查询返回 `EBUSY`�
 相同的 `SIGRTMIN` 偏移推断两个 libc 使用同一编号：各 libc 独立报告公开信号下界。
 原生夹具传递明确的内核编号，并检查实际 Host 注册，不假定某段编号可用。
 
+[目标注册表](SIGNAL_TARGETS.md)在真实 TCB 绑定后管理准入、共享选择和入口 pin。
 目标是已登记的 Host 载体，包括其正在执行 Guest 域的情况。此路由不是供真正 GNU
 pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命周期和处置接入。
 

@@ -26,8 +26,10 @@ and logical Guest signal numbers. Do not infer equal signal numbers from equal
 independently. The native fixture passes one explicit kernel number and checks
 the actual Host registration instead of assuming an available range.
 
-Targets are registered Host carriers, including while their Guest domain is
-executing. This route is not a Host callback entry for genuine GNU pthreads.
+The [target registry](SIGNAL_TARGETS.md) owns admission after actual TCB bind,
+shared selection and entry pins. Targets are registered Host carriers, including
+while their Guest domain is executing. This route is not a Host callback entry
+for genuine GNU pthreads.
 That path still requires its own Guest-native lifecycle/disposition integration.
 
 The callback can call `domain_guest_signal_stack_call` with a valid Guest TCB,

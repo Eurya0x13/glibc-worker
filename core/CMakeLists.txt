@@ -14,7 +14,7 @@ add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-call.c
   src/domain/signal-pending.c
   src/domain/signal-deferred.c src/domain/signal-relay.c
-  src/domain/signal-inbox.c)
+  src/domain/signal-inbox.c src/domain/signal-targets.c)
 add_library(glibc_worker::domains ALIAS domains)
 target_compile_definitions(domains PRIVATE GW_DOMAIN_CHAIN)
 target_include_directories(domains PUBLIC
@@ -108,6 +108,11 @@ if(BUILD_TESTING)
   target_link_libraries(signal_inbox_test PRIVATE domains)
   target_compile_options(signal_inbox_test PRIVATE -UNDEBUG)
   add_test(NAME signal_inbox COMMAND signal_inbox_test)
+  add_executable(signal_targets_test tests/signal_targets.c)
+  target_link_libraries(signal_targets_test PRIVATE domains)
+  target_compile_options(signal_targets_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_targets COMMAND signal_targets_test)
+  set_tests_properties(signal_targets PROPERTIES TIMEOUT 20)
   set_tests_properties(signal_inbox PROPERTIES TIMEOUT 20)
   add_executable(signal_deferred_test tests/signal_deferred.c)
   target_link_libraries(signal_deferred_test PRIVATE domains)
@@ -190,7 +195,7 @@ install(DIRECTORY src/domain/ DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/core/internal
         FILES_MATCHING PATTERN "*.h")
 install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
-        src/domain/signal-inbox.c DESTINATION
+        src/domain/signal-inbox.c src/domain/signal-targets.c DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/core/internal)
 install(TARGETS core domains signal_interpose nonlocal_interpose EXPORT GlibcWorkerCoreTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

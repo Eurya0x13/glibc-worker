@@ -35,11 +35,12 @@ static __attribute__((noinline, noclone)) void guest_busy(
                        : "memory");
 }
 
-static int notify(void *argument, struct gw_signal_receiver *receiver) {
-  struct async_carrier *carrier = argument;
-  assert(!receiver || receiver == &carrier->receiver);
-  return syscall(SYS_tgkill, getpid(), carrier->exchange.host_tid,
-                 control->notification)
+static int notify(void *argument, struct gw_signal_target *target) {
+  assert(argument == control);
+  struct async_carrier *carrier = target->context;
+  assert(target == carrier->target &&
+         target->tid == carrier->exchange.host_tid);
+  return syscall(SYS_tgkill, getpid(), target->tid, control->notification)
              ? errno
              : 0;
 }
@@ -55,52 +56,28 @@ static int send_signal(void *thread, int tid, const siginfo_t *information,
     return 0;
   }
   *handled = 1;
-  struct async_carrier *carrier = current;
-  if (thread) {
-    carrier = NULL;
-    for (int i = 0; i < TEST_CARRIERS; ++i) {
-      if (recipients[i] && recipients[i]->token == thread &&
-          recipients[i]->exchange.host_tid == tid) {
-        carrier = recipients[i];
-        break;
-      }
-    }
-  } else if (!carrier) {
-    /* Fixture-only shared selection: the serialized owner explicitly names
-     * its eligible target. A production registry must select under admission
-     * and mask transactions rather than use this test command slot. */
-    carrier = control->carrier;
-  }
-
-  int result;
-  if (!carrier ||
-      atomic_load_explicit(&carrier->closed, memory_order_acquire)) {
-    result = ESRCH;
-  } else if (!information->si_signo) {
-    result = 0;
-  } else {
-    /* Deliberately select one process recipient in this fixture. All shared
-     * send commands/self-test phases are serialized; ordinary process sends
-     * otherwise permit any eligible receiver to consume the shared packet. */
-    for (int i = 0; i < TEST_CARRIERS; ++i) {
-      if (recipients[i] && !atomic_load(&recipients[i]->closed) &&
-          (!thread || recipients[i] == carrier)) {
-        assert(!gw_signal_receiver_mask(
-            &recipients[i]->receiver,
-            recipients[i] == carrier ? 0 : UINT64_C(1) << 55, NULL, NULL));
-      }
-    }
-    struct gw_signal_publication sent =
-        gw_signal_inbox_put(&control->inbox, thread ? &carrier->receiver : NULL,
-                            information, notify, carrier);
-    result = sent.status;
-    /* Accepted-but-unnotified work cannot be reported as an unsent packet.
-     * This fixture has live pinned carriers; fail evidence on a failed wake. */
-    assert(!sent.wake_error);
-  }
+  struct gw_signal_publication sent = gw_signal_targets_send(
+      &control->targets, (uintptr_t)thread, tid, information);
+  /* Accepted-but-unnotified work is distinct from an unsent packet. */
+  assert(!sent.wake_error);
 
   errno = ERANGE; /* Owning libc must preserve pthread callers' errno. */
-  return result;
+  return sent.status;
+}
+
+static void select_carrier(struct async_carrier *carrier) {
+  uint64_t previous = gw_nonlocal_mask_block();
+  /* Only the oracle chooses one particular recipient. The runtime callback
+   * itself uses the dynamic registry's native shared-target selection. */
+  for (int i = 0; i < TEST_CARRIERS; ++i) {
+    struct async_carrier *other = recipients[i];
+    if (other && other->target && !atomic_load(&other->closed)) {
+      struct gw_signal_publication result = gw_signal_target_mask(
+          other->target, other == carrier ? 0 : UINT64_MAX);
+      assert(!result.status && !result.wake_error);
+    }
+  }
+  gw_nonlocal_mask_restore(previous);
 }
 
 /* This is the internal, normally returning entry under test, not a public
@@ -117,11 +94,12 @@ static int receive(int number, void *information, void *context) {
   assert((uintptr_t)&local >= (uintptr_t)carrier->entry_stack &&
          (uintptr_t)&local < (uintptr_t)carrier->entry_stack + 65536);
   assert(fegetround() == FE_UPWARD);
+  assert(!gw_signal_target_pin(carrier->target));
 
   siginfo_t packet;
   enum gw_signal_queue_source source;
   int selected = 0;
-  while (gw_signal_inbox_deliver(&carrier->receiver, &packet, &source)) {
+  while (gw_signal_target_deliver(carrier->target, &packet, &source)) {
     assert(packet.si_signo == TEST_LOGICAL_SIGNAL);
     assert(packet.si_pid == getpid());
     assert(packet.si_uid == getuid());
@@ -167,11 +145,13 @@ static int receive(int number, void *information, void *context) {
   /* Deliberately perturb only Guest state; both return domains must retain
    * their own errno and FP control after the entry gateway returns. */
   assert(!fesetround(FE_TONEAREST));
+  assert(!gw_signal_target_unpin(carrier->target));
   errno = carrier->self_errno ? EILSEQ : saved_errno;
   return 0;
 }
 
 static void self_sends(struct async_carrier *carrier) {
+  select_carrier(carrier);
   union sigval value = {.sival_int = 9917};
   carrier->self_phase = 1;
   assert(!raise(TEST_LOGICAL_SIGNAL) && carrier->self_received == 1);
@@ -227,6 +207,9 @@ static void serve(void *argument) {
   __asm__ volatile("mrs %0, fpsr" : "=r"(carrier->entry.control[1]));
   __asm__ volatile("mov %0, x18" : "=r"(carrier->entry.x18));
 #endif
+  assert(!gw_signal_target_open(&control->targets, (uintptr_t)carrier->token,
+                                exchange->host_tid, UINT64_MAX, carrier,
+                                &carrier->target));
   errno = EBADF;
   exchange->swap(&exchange->guest, &exchange->host);
   /* Host has not polled or entered Guest during PHASE_BUSY/PHASE_WAIT. This
@@ -281,6 +264,9 @@ static void resolve(void) {
 }
 
 static int owner_send(struct async_carrier *carrier, int value) {
+  if (!atomic_load(&carrier->closed)) {
+    select_carrier(carrier);
+  }
   int packet = value - carrier->index * 1000;
   int result;
   errno = ECHILD;
@@ -309,7 +295,8 @@ int main(int argc, char **argv) {
   }
   resolve();
   assert(TEST_LOGICAL_SIGNAL >= SIGRTMIN && TEST_LOGICAL_SIGNAL <= SIGRTMAX);
-  gw_signal_inbox_init(&control->inbox, UINT64_C(1) << 49, 128);
+  gw_signal_targets_init(&control->targets, UINT64_C(1) << 49, 128, notify,
+                         control);
   control->entry = adopted_entry;
   atomic_store_explicit(&control->ready, 1, memory_order_release);
   wake(&control->ready);
@@ -334,8 +321,6 @@ int main(int argc, char **argv) {
         assert(!control->error);
         exchange->guest.tp = (uintptr_t)tp;
         exchange->guest.sp = (uintptr_t)top;
-        assert(
-            !gw_signal_receiver_open(&control->inbox, &carrier->receiver, 0));
         recipients[carrier->index % TEST_CARRIERS] = carrier;
         break;
       }
@@ -344,17 +329,17 @@ int main(int argc, char **argv) {
         break;
       }
       case OWNER_CLOSE:
-        gw_signal_receiver_close(&carrier->receiver);
+        gw_signal_target_close(carrier->target);
         atomic_store_explicit(&carrier->closed, 1, memory_order_release);
         control->error = 0;
         break;
       case OWNER_EMPTY:
         control->error = atomic_load(&carrier->closed)
                              ? ESRCH
-                             : notify(carrier, &carrier->receiver);
+                             : notify(control, carrier->target);
         break;
       case OWNER_FREE:
-        assert(!gw_signal_receiver_destroy(&carrier->receiver));
+        assert(!gw_signal_target_release(carrier->target));
         control->error = free_domain(carrier->token);
         break;
       default:

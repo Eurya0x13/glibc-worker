@@ -81,6 +81,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   `kill` to the cross-libc fixture. Exit-lock races, synchronous self-delivery
   and errno checks are included; production recipient/disposition integration
   remains unfinished.
+  The [core target registry](core/docs/en/SIGNAL_TARGETS.md) now supplies dynamic
+  lookup, shared eligibility and pinned retirement in that cross-libc fixture;
+  installed JNI service wiring and saved-frame integration remain required.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM

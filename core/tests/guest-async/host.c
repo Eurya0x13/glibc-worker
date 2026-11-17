@@ -313,6 +313,7 @@ static void send_wait_packets(void) {
       assert(!owner_command(
           &carriers[i], OWNER_SEND,
           carriers[i].index * 1000 + TEST_PACKETS + 1 + polling));
+      wait_value(&carriers[i].received, TEST_PACKETS + 1 + polling);
     }
   }
 }
@@ -387,6 +388,7 @@ int main(int argc, char **argv) {
       "\"public_send_hooks\":true,\"send_exit_serialization\":true,"
       "\"self_sends_before_return\":true,\"send_errno_contract\":true,"
       "\"handler_errno_visible\":true,"
+      "\"runtime_target_registry\":true,\"entry_pins_balanced\":true,"
       "\"recipient_close\":true,\"production_ready\":false}\n",
       sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,
       sum.self_entries);
