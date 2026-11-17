@@ -11,8 +11,7 @@ int gw_signal_contract_validate(const struct gw_signal_contract *contract) {
       contract->size != sizeof *contract) {
     return EINVAL;
   }
-  uint64_t unavailable = signal_bit(SIGKILL) | signal_bit(SIGSTOP) |
-                         signal_bit(32) | signal_bit(33);
+  uint64_t unavailable = signal_bit(SIGKILL) | signal_bit(SIGSTOP);
   return contract->host_reserved & unavailable ? EINVAL : 0;
 }
 

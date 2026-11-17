@@ -125,5 +125,5 @@ int __gw_domain_free(void *token) {
 /* Private ABI negotiated by the matching service before creating a domain.
  * Bump this whenever allocation, callback or lifecycle semantics change. */
 unsigned long __gw_domain_capabilities(void) {
-  return 0x4757440100000006UL;
+  return 0x4757440100000007UL;
 }

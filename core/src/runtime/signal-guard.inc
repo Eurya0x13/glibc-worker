@@ -3,7 +3,9 @@
    callable Guest handler. Ownership can only grow during runtime lifetime. */
 #include <stdint.h>
 
-static uint64_t gw_host_signals;
+/* These numbers remain unavailable to public Guest registration after NPTL
+ * moves to 63/64. They belong to the other libc's private implementation. */
+static uint64_t gw_host_signals = (UINT64_C(1) << 31) | (UINT64_C(1) << 32);
 static int (*gw_guest_sigaction)(int, const void *, void *, int *);
 
 int __gw_domain_sigaction_hook(int (*hook)(int, const void *, void *, int *)) {
@@ -17,7 +19,7 @@ int __gw_domain_sigaction_hook(int (*hook)(int, const void *, void *, int *)) {
 int __gw_domain_reserve_signals(uint64_t mask) {
   const uint64_t forbidden = (UINT64_C(1) << (SIGKILL - 1)) |
                              (UINT64_C(1) << (SIGSTOP - 1)) |
-                             (UINT64_C(1) << 31) | (UINT64_C(1) << 32);
+                             (UINT64_C(1) << 62) | (UINT64_C(1) << 63);
   if (mask & forbidden) {
     return EINVAL;
   }

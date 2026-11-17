@@ -11,6 +11,8 @@ int main(void) {
       .host_reserved =
           (UINT64_C(1) << (SIGSEGV - 1)) | (UINT64_C(1) << (SIGUSR2 - 1))};
   assert(!gw_signal_contract_validate(&c));
+  c.host_reserved |= (UINT64_C(1) << 31) | (UINT64_C(1) << 32);
+  assert(!gw_signal_contract_validate(&c));
   unsigned checks = 0;
   for (int signal = 1; signal <= 64; ++signal) {
     enum gw_signal_domain owner = 0;

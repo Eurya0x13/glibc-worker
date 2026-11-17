@@ -20,6 +20,14 @@ int signal_router_adopt(void);
 /* Only after a reviewed outer chain's bottom registration/query pointers
  * have been routed. NULL keeps the conservative standalone policy. */
 int signal_router_adopt_chain(void *reviewed_chain_base);
+/* Matching adoption libc ABI 7 uses these process-private kernel numbers.
+ * Lease before starting its loader; EBUSY preserves any existing Host owner.
+ * The lease is permanent: the GNU owner, timer helpers and images are pinned
+ * until process exit, including after logical bridge/router shutdown. Host
+ * registration and queries remain rejected after restore. Raw syscalls and
+ * Host sends to leased channels are outside the signal ownership contract. */
+#define GW_GUEST_NPTL_SIGNALS ((UINT64_C(1) << 62) | (UINT64_C(1) << 63))
+int signal_router_lease_guest_nptl(void);
 #ifdef __ANDROID__
 int signal_router_action64(int, const struct sigaction64 *,
                            struct sigaction64 *);

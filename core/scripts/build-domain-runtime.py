@@ -10,6 +10,7 @@ from pathlib import Path
 from context_mask import patch_context_masks
 from wait_mask import patch_wait_masks
 from signal_send import patch_signal_sends
+from private_signals import patch_private_signals
 
 source = Path(__file__).resolve().parent
 core = source.parent
@@ -39,6 +40,7 @@ inputs = [
     core / "scripts/context_mask.py",
     core / "scripts/wait_mask.py",
     core / "scripts/signal_send.py",
+    core / "scripts/private_signals.py",
     base / "patch-hashes.txt",
     base / "source-sha256.txt",
     core / "config/targets.json",
@@ -61,6 +63,7 @@ if not (root / "patched").exists():
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(base_source, src)
+    patch_private_signals(src, replace)
     create = src / "nptl/pthread_create.c"
     replace(
         create,
@@ -296,6 +299,7 @@ for origin, name in [
                 "guest-sigaction-hook",
                 "guest-native-jump-hook",
                 "optional-guest-signal-send-v1",
+                "private-nptl-signals-63-64",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

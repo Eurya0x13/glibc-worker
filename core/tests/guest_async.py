@@ -39,7 +39,7 @@ if (
     }[args.abi]
 ):
     parser.error("Native execution requires a matching host architecture")
-if not 34 <= args.notification <= 64 or args.notification in [
+if not 34 <= args.notification <= 62 or args.notification in [
     56,
     *range(50, 54),
 ]:
@@ -160,6 +160,7 @@ run(
         "-I" + str(core / "include"),
         source / "guest.c",
         source / "send-lifetime.c",
+        source / "private-threads.c",
         core / "src/domain/signal-pending.c",
         core / "src/domain/signal-inbox.c",
         core / "src/domain/signal-targets.c",

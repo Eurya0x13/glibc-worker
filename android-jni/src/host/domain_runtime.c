@@ -211,6 +211,11 @@ int owner_command(struct jni_domain_context *context, int operation) {
 
 int domain_owner_start(const char *loader, const char *libraries,
                        const char *service) {
+  int lease_error = signal_router_lease_guest_nptl();
+  if (lease_error) {
+    return lease_error;
+  }
+
   session.handshake = (struct jni_domain_handshake){
       .magic = GW_DOMAIN_TRANSPORT_MAGIC,
       .version = GW_DOMAIN_TRANSPORT_VERSION,

@@ -2,6 +2,7 @@
 #include "common.h"
 #include "nonlocal-mask.h"
 #include "send-lifetime.h"
+#include "private-threads.h"
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -246,7 +247,7 @@ static void resolve(void) {
   } while (0)
   unsigned long (*capabilities)(void);
   RESOLVE(capabilities, "__gw_domain_capabilities");
-  assert(capabilities() == 0x4757440100000006UL);
+  assert(capabilities() == 0x4757440100000007UL);
   RESOLVE(allocate_domain, "__gw_domain_alloc");
   RESOLVE(bind_domain, "__gw_domain_bind");
   RESOLVE(run_domain, "__gw_domain_run");
@@ -256,6 +257,7 @@ static void resolve(void) {
   int (*thread_hook)(void (*)(int));
   RESOLVE(send_hook, "__gw_domain_signal_send_hook");
   RESOLVE(thread_hook, "__gw_domain_thread_hook");
+  test_private_threads();
   assert(!pthread_kill(pthread_self(), 0));
   assert(!kill(getpid(), 0));
   test_send_lifetimes(send_hook, thread_hook, send_signal);

@@ -59,6 +59,7 @@ static struct sigaction original[NSIG];
 static struct disposition *initial;
 static unsigned char managed[NSIG];
 static uint64_t host_reservations;
+static _Atomic uint64_t guest_private;
 static _Atomic unsigned records, retained;
 static struct disposition *allocations;
 static atomic_flag writer = ATOMIC_FLAG_INIT;
@@ -398,11 +399,22 @@ int signal_router_init_with_backend(signal_router_backend backend) {
   errno = saved_errno;
   const int reserved[] = {SIGSEGV, SIGBUS,  SIGILL,  SIGFPE, SIGTRAP, SIGSYS,
                           SIGPIPE, SIGXFSZ, SIGUSR2, SIGHUP, SIGINT,  SIGTERM,
-                          SIGQUIT, 50,      51,      52,     53};
+                          SIGQUIT, 50,      51,      52,     53,      62};
+  /* Linux JRE networking reserves kernel 62 (Host SIGRTMAX - 2), separately
+   * from HotSpot's USR2 suspend/resume channel. Guest's dynamic SIGRTMAX must
+   * not be used to calculate this Host-owned number.
+   * https://github.com/openjdk/jdk17u/blob/master/src/java.base/linux/native/libnet/linux_close.c
+   * https://github.com/openjdk/jdk17u/blob/master/src/java.base/unix/native/libnio/ch/NativeThread.c
+   */
   host_reservations = 0;
   for (unsigned i = 0; i < sizeof reserved / sizeof reserved[0]; ++i) {
     host_reservations |= UINT64_C(1) << (reserved[i] - 1);
   }
+#ifdef __ANDROID__
+  for (int number = 32; number < SIGRTMIN; ++number) {
+    host_reservations |= UINT64_C(1) << (number - 1);
+  }
+#endif
   /* Routing a Host registration is not an exclusive VM reservation. Untagged
    * external packets belong to Host on every public signal, including USR1,
    * ALRM, CHLD and unreserved RT numbers. Keep native libc's private numbers
@@ -411,7 +423,8 @@ int signal_router_init_with_backend(signal_router_backend backend) {
   memset(managed, 0, sizeof managed);
   for (int number = 1; number < NSIG; ++number) {
     if (number == SIGKILL || number == SIGSTOP ||
-        (number >= 32 && number < SIGRTMIN)) {
+        (number >= 32 && number < SIGRTMIN) ||
+        (atomic_load(&guest_private) & (UINT64_C(1) << (number - 1)))) {
       continue;
     }
     if (system_action(number, NULL, &original[number])) {
@@ -436,6 +449,49 @@ int signal_router_init_with_backend(signal_router_backend backend) {
 
 int signal_router_init(void) {
   return signal_router_init_with_backend(dlsym(RTLD_NEXT, "sigaction"));
+}
+
+int signal_router_lease_guest_nptl(void) {
+  if (!signal_router_enabled() || signal_router_error()) {
+    return signal_router_error() ? EIO : EINVAL;
+  }
+
+  uint64_t mask;
+  lock_writer(&mask);
+  if (atomic_load_explicit(&guest_private, memory_order_acquire)) {
+    unlock_writer(mask);
+    return 0;
+  }
+
+  const int numbers[] = {63, 64};
+  int error = 0;
+  for (unsigned i = 0; i < sizeof numbers / sizeof numbers[0]; ++i) {
+    int number = numbers[i];
+    struct sigaction actual;
+    if (!managed[number] || atomic_load(&current[number]) ||
+        (signal_router_reserved() & (UINT64_C(1) << (number - 1)))) {
+      error = EBUSY;
+      break;
+    }
+    if (system_action(number, NULL, &actual)) {
+      error = errno;
+      break;
+    }
+    if (original[number].sa_handler != SIG_DFL ||
+        actual.sa_handler != SIG_DFL) {
+      error = EBUSY;
+      break;
+    }
+  }
+  if (!error) {
+    for (unsigned i = 0; i < sizeof numbers / sizeof numbers[0]; ++i) {
+      managed[numbers[i]] = 0;
+    }
+    atomic_store_explicit(&guest_private, GW_GUEST_NPTL_SIGNALS,
+                          memory_order_release);
+  }
+  unlock_writer(mask);
+  return error;
 }
 
 static int same_action(const struct sigaction *left,
@@ -553,6 +609,12 @@ static int router_action(int number, const struct sigaction *action,
 
   if (!system_action) {
     errno = ENOSYS;
+    return -1;
+  }
+  if (number > 0 && number < NSIG &&
+      (atomic_load_explicit(&guest_private, memory_order_acquire) &
+       (UINT64_C(1) << (number - 1)))) {
+    errno = EBUSY;
     return -1;
   }
   const int *notifications = signal_router_fault_notifications();

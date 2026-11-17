@@ -14,6 +14,7 @@
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <ucontext.h>
@@ -23,6 +24,23 @@ static struct async_control control;
 static struct async_carrier carriers[TEST_CARRIERS];
 static _Thread_local struct async_carrier *current;
 static _Thread_local int host_tls = 17;
+
+/* LP64 kernel ABI, not either libc's public struct sigaction. Public GNU
+ * queries intentionally reject 32/33; inspect the actual shared dispositions.
+ * https://github.com/torvalds/linux/blob/v6.12/include/uapi/asm-generic/signal.h
+ */
+struct kernel_action {
+  uintptr_t handler, flags, restorer;
+  uint64_t mask;
+};
+
+static void snapshot_private(struct kernel_action actions[9]) {
+  for (int number = 32; number <= 40; ++number) {
+    actions[number - 32] = (struct kernel_action){0};
+    assert(!syscall(SYS_rt_sigaction, number, NULL, &actions[number - 32],
+                    sizeof(uint64_t)));
+  }
+}
 
 static void *stack_alloc(size_t size) {
   size_t page = (size_t)sysconf(_SC_PAGESIZE);
@@ -360,7 +378,20 @@ int main(int argc, char **argv) {
   control.notification = atoi(argv[4]);
   test_layout(control.layout);
   prepare_routes();
+  assert(!signal_router_lease_guest_nptl());
+  struct kernel_action before[9], after[9];
+  snapshot_private(before);
   start_owner(argv);
+  snapshot_private(after);
+  assert(!memcmp(before, after, sizeof before));
+  for (int number = 63; number <= 64; ++number) {
+    struct sigaction action;
+    errno = 0;
+    assert(sigaction(number, NULL, &action) == -1 && errno == EBUSY);
+    struct kernel_action native = {0};
+    assert(!syscall(SYS_rt_sigaction, number, NULL, &native, sizeof(uint64_t)));
+    assert(native.handler > 1);
+  }
   assert(control.send_lifecycle);
 
   struct totals sum = {0};
@@ -389,6 +420,7 @@ int main(int argc, char **argv) {
       "\"self_sends_before_return\":true,\"send_errno_contract\":true,"
       "\"handler_errno_visible\":true,"
       "\"runtime_target_registry\":true,\"entry_pins_balanced\":true,"
+      "\"nptl_signal_isolation\":true,\"guest_cancel_timer\":true,"
       "\"recipient_close\":true,\"production_ready\":false}\n",
       sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,
       sum.self_entries);
