@@ -13,6 +13,7 @@ struct gw_signal_target {
   struct gw_signal_targets *registry;
   uintptr_t key;
   uint64_t real_blocked;
+  uint64_t deliveries;
   int tid;
   void *context;
   size_t index, pins;
@@ -25,12 +26,13 @@ typedef int (*gw_signal_target_notify)(void *, struct gw_signal_target *);
  * runs under both writers: nonblocking notification only, no registry calls. */
 struct gw_signal_targets {
   atomic_flag writer;
+  _Atomic uint32_t wait_sequence;
   struct gw_signal_inbox inbox;
   struct gw_signal_target **slots, **active;
   size_t capacity, occupied, count, active_capacity, retained;
   gw_signal_target_notify notify;
   void *context;
-  int closed, wake_error;
+  int closed, wake_error, waits_enabled;
 };
 
 void gw_signal_targets_init(struct gw_signal_targets *, uint64_t, uint64_t,
@@ -66,6 +68,20 @@ int gw_signal_target_deliver(struct gw_signal_target *, siginfo_t *,
  * thread-before-shared selection and registry transaction as handler entry. */
 int gw_signal_target_take(struct gw_signal_target *, uint64_t eligible,
                           siginfo_t *, enum gw_signal_queue_source *);
+/* Enable consuming waits before admission. The domain futex sequence changes
+ * on accepted publication, recipient closure and actual handler entry.
+ * Waiters own their recipient for the duration of the native call. */
+int gw_signal_targets_enable_waits(struct gw_signal_targets *);
+
+struct gw_signal_wait_sample {
+  uint32_t sequence;
+  uint64_t deliveries;
+};
+
+int gw_signal_target_wait_take(struct gw_signal_target *, uint64_t, siginfo_t *,
+                               struct gw_signal_wait_sample *);
+void gw_signal_target_note_delivery(struct gw_signal_target *);
+uint64_t gw_signal_target_blocked_pending(struct gw_signal_target *);
 /* Flush all pending instances of one signal under the registry writer,
  * releasing aggregate quota. Disposition owners must also serialize the new
  * action and future sends; this operation does not install SIG_IGN itself. */
@@ -81,8 +97,14 @@ void gw_signal_target_close(struct gw_signal_target *);
  * entry frames have gone. EBUSY retains storage while a continuation is pinned.
  */
 int gw_signal_target_release(struct gw_signal_target *);
+/* Drop one owner pin and release only if this is the last pin on a closed
+ * recipient. This combines parent/child retirement in one writer transaction.
+ * Close in this protocol requires established recipient/frame quiescence. */
+int gw_signal_target_retire(struct gw_signal_target *);
 int gw_signal_targets_retry(struct gw_signal_targets *);
 int gw_signal_targets_error(struct gw_signal_targets *);
+int gw_signal_targets_only(struct gw_signal_targets *,
+                           struct gw_signal_target *);
 void gw_signal_targets_close(struct gw_signal_targets *);
 int gw_signal_targets_destroy(struct gw_signal_targets *);
 #endif

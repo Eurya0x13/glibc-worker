@@ -86,6 +86,9 @@ for name in (
     "actions-summary.json",
     "actions-stdout.log",
     "actions-stderr.log",
+    "consume-summary.json",
+    "consume-stdout.log",
+    "consume-stderr.log",
     "targets-summary.json",
     "targets-stdout.log",
     "targets-stderr.log",
@@ -287,6 +290,31 @@ run(
         out / "actions-control",
     ]
 )
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        "-I" + str(core / "src/domain"),
+        "-I" + str(core / "src/runtime"),
+        source / "consume-control.c",
+        core / "src/domain/signal-consuming.c",
+        core / "src/domain/signal-user-copy.c",
+        core / "src/domain/signal-actions.c",
+        core / "src/domain/signal-pending.c",
+        core / "src/domain/signal-inbox.c",
+        core / "src/domain/signal-targets.c",
+        "-ldl",
+        "-pthread",
+        "-o",
+        out / "consume-control",
+    ]
+)
 unwind = Path(
     subprocess.check_output(
         [compiler, "-print-file-name=libgcc_s.so.1"], text=True
@@ -322,8 +350,10 @@ inputs = [
     out / "mask-control",
     out / "create-control",
     core / "src/runtime/thread-create.h",
+    core / "src/runtime/signal-consume-hook.h",
     out / "target-control",
     out / "actions-control",
+    out / "consume-control",
     control_loader,
     out / "host/guest_async_host",
     out / "host/guest_async_no_anchor",
@@ -375,6 +405,7 @@ if args.serial:
         out / "create-control",
         out / "target-control",
         out / "actions-control",
+        out / "consume-control",
         control_loader,
         out / "libgcc_s.so.1",
         loader,
@@ -493,6 +524,20 @@ controls = [
         },
     ),
     (
+        "consume",
+        native_command("consume-control"),
+        {
+            "result": "PASS",
+            "public_waits": True,
+            "host_pending_separate": True,
+            "timeout_and_copyout": True,
+            "blocked_publication": True,
+            "guest_eintr": True,
+            "host_eintr_hidden": True,
+            "native_cancel": True,
+        },
+    ),
+    (
         "creation",
         native_command("create-control"),
         {
@@ -585,6 +630,7 @@ summary.update(
     native_handler_errno_control=True,
     native_targets_control=True,
     native_actions_control=True,
+    native_consuming_waits_control=True,
     missing_host_anchor_control=True,
     native_mask_lifecycle_control=True,
     native_creation_lifecycle_control=True,

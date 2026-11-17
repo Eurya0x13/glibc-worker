@@ -3,7 +3,10 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include <linux/futex.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #define TOMBSTONE ((struct gw_signal_target *)(uintptr_t)1)
 
@@ -15,6 +18,23 @@ static void lock(struct gw_signal_targets *registry) {
 
 static void unlock(struct gw_signal_targets *registry) {
   atomic_flag_clear_explicit(&registry->writer, memory_order_release);
+}
+
+static int wake_waiters(struct gw_signal_targets *registry) {
+  if (!registry->waits_enabled) {
+    return 0;
+  }
+  atomic_fetch_add_explicit(&registry->wait_sequence, 1, memory_order_release);
+  int saved = errno;
+  int error = syscall(SYS_futex, &registry->wait_sequence, FUTEX_WAKE_PRIVATE,
+                      INT_MAX, NULL, NULL, 0) < 0
+                  ? errno
+                  : 0;
+  if (error && !registry->wake_error) {
+    registry->wake_error = error;
+  }
+  errno = saved;
+  return error;
 }
 
 static size_t hash(uintptr_t key) {
@@ -145,9 +165,27 @@ void gw_signal_targets_init(struct gw_signal_targets *registry,
                             gw_signal_target_notify callback, void *context) {
   memset(registry, 0, sizeof *registry);
   atomic_flag_clear(&registry->writer);
+  atomic_init(&registry->wait_sequence, 0);
   gw_signal_inbox_init(&registry->inbox, reserved, limit);
   registry->notify = callback;
   registry->context = context;
+}
+
+int gw_signal_targets_enable_waits(struct gw_signal_targets *registry) {
+  lock(registry);
+  int error = registry->closed                        ? ESRCH
+              : registry->waits_enabled               ? EALREADY
+              : registry->count || registry->retained ? EBUSY
+                                                      : 0;
+  if (!error) {
+    registry->waits_enabled = 1;
+    error = wake_waiters(registry);
+    if (error) {
+      registry->waits_enabled = 0;
+    }
+  }
+  unlock(registry);
+  return error;
 }
 
 /* The outer writer spans allocation, publication and initial notification.
@@ -302,6 +340,12 @@ static struct gw_signal_publication send_filtered(
       result = gw_signal_inbox_put(&registry->inbox,
                                    target ? &target->receiver : NULL,
                                    information, notify, registry);
+      if (!result.status) {
+        int error = wake_waiters(registry);
+        if (!result.wake_error) {
+          result.wake_error = error;
+        }
+      }
     }
   }
   unlock(registry);
@@ -377,6 +421,45 @@ int gw_signal_target_take(struct gw_signal_target *target, uint64_t eligible,
   return result;
 }
 
+int gw_signal_target_wait_take(struct gw_signal_target *target,
+                               uint64_t eligible, siginfo_t *information,
+                               struct gw_signal_wait_sample *sample) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int result = -ENOTSUP;
+  if (registry->waits_enabled) {
+    if (registry->closed || target->receiver.closed || !target->tid) {
+      result = -ESRCH;
+    } else {
+      enum gw_signal_queue_source source;
+      result = gw_signal_inbox_take(&target->receiver, eligible, information,
+                                    &source);
+      sample->sequence =
+          atomic_load_explicit(&registry->wait_sequence, memory_order_relaxed);
+      sample->deliveries = target->deliveries;
+    }
+  }
+  unlock(registry);
+  return result;
+}
+
+void gw_signal_target_note_delivery(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  ++target->deliveries;
+  wake_waiters(registry);
+  unlock(registry);
+}
+
+uint64_t gw_signal_target_blocked_pending(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  uint64_t result =
+      gw_signal_inbox_pending(&target->receiver) & target->receiver.blocked;
+  unlock(registry);
+  return result;
+}
+
 int gw_signal_targets_discard(struct gw_signal_targets *registry, int number) {
   lock(registry);
   int error = discard_pending(registry, number);
@@ -443,12 +526,12 @@ void gw_signal_target_close(struct gw_signal_target *target) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
   close_target(target);
+  wake_waiters(registry);
   unlock(registry);
 }
 
-int gw_signal_target_release(struct gw_signal_target *target) {
+static int release(struct gw_signal_target *target) {
   struct gw_signal_targets *registry = target->registry;
-  lock(registry);
   int error = !target->receiver.closed || target->pins ? EBUSY : 0;
   if (!error) {
     error = gw_signal_receiver_destroy(&target->receiver);
@@ -456,6 +539,24 @@ int gw_signal_target_release(struct gw_signal_target *target) {
   if (!error) {
     --registry->retained;
     munmap(target, sizeof *target);
+  }
+  return error;
+}
+
+int gw_signal_target_release(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int error = release(target);
+  unlock(registry);
+  return error;
+}
+
+int gw_signal_target_retire(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int error = !target->pins ? EINVAL : 0;
+  if (!error && !--target->pins && target->receiver.closed) {
+    error = release(target);
   }
   unlock(registry);
   return error;
@@ -484,6 +585,15 @@ int gw_signal_targets_error(struct gw_signal_targets *registry) {
   return error;
 }
 
+int gw_signal_targets_only(struct gw_signal_targets *registry,
+                           struct gw_signal_target *target) {
+  lock(registry);
+  int alone = registry->retained == 1 && registry->count == 1 &&
+              registry->active[0] == target;
+  unlock(registry);
+  return alone;
+}
+
 void gw_signal_targets_close(struct gw_signal_targets *registry) {
   lock(registry);
   registry->closed = 1;
@@ -491,6 +601,7 @@ void gw_signal_targets_close(struct gw_signal_targets *registry) {
     close_target(registry->active[registry->count - 1]);
   }
   gw_signal_inbox_close(&registry->inbox);
+  wake_waiters(registry);
   unlock(registry);
 }
 

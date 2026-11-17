@@ -31,6 +31,21 @@ def patch_wait_masks(source: Path):
             text[:index] + "\n#include <gw-wait-mask.h>" + text[index:]
         )
 
+    replace(
+        "sigtimedwait",
+        "#include <sysdep.h>\n",
+        "#include <sysdep.h>\n#include <futex-internal.h>\n\n"
+        "#if __TIMESIZE == 64\n"
+        "static int\n"
+        "gw_wait_event (void *word, uint32_t sequence,\n"
+        "               const struct timespec *deadline)\n"
+        "{\n"
+        "  return -__futex_abstimed_wait_cancelable64 (word, sequence,\n"
+        "                                             CLOCK_MONOTONIC, deadline,\n"
+        "                                             FUTEX_PRIVATE);\n"
+        "}\n"
+        "#endif\n",
+    )
     # These are the LP64 time64 branches used by both supported architectures.
     # Leave all native time32 fallback code in place for reviewability.
     for name, old, new in (
@@ -79,6 +94,13 @@ def patch_wait_masks(source: Path):
         (
             "sigtimedwait",
             "  int result;",
+            "#if __TIMESIZE == 64\n"
+            "  int handled;\n"
+            "  int consumed = __gw_domain_consume_wait (set, info, timeout,\n"
+            "                                            gw_wait_event, &handled);\n"
+            "  if (handled)\n"
+            "    return consumed;\n"
+            "#endif\n"
             "  sigset_t filtered;\n"
             "  if (set && __gw_domain_wait_filter (set, &filtered))\n"
             "    set = &filtered;\n"
@@ -95,6 +117,10 @@ def patch_wait_masks(source: Path):
         (
             "sigpending",
             "  return INLINE_SYSCALL_CALL (rt_sigpending, set, __NSIG_BYTES);",
+            "  int handled;\n"
+            "  int consumed = __gw_domain_consume_pending (set, &handled);\n"
+            "  if (handled)\n"
+            "    return consumed;\n"
             "  int result = INLINE_SYSCALL_CALL (rt_sigpending, set, __NSIG_BYTES);\n"
             "  if (result == 0)\n"
             "    __gw_domain_wait_filter (set, set);\n"

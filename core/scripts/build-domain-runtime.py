@@ -38,6 +38,8 @@ inputs = [
     fragments / "context-mask.inc",
     fragments / "wait-mask.inc",
     fragments / "wait-mask.h",
+    fragments / "signal-consume-hook.h",
+    fragments / "signal-consume-hook.inc",
     fragments / "jump-hook.inc",
     fragments / "thread-create.h",
     fragments / "thread-create.inc",
@@ -122,12 +124,26 @@ if not (root / "patched").exists():
     )
     shutil.copyfile(fragments / "wait-mask.inc", src / "nptl/gw-wait-mask.inc")
     shutil.copyfile(fragments / "wait-mask.h", src / "include/gw-wait-mask.h")
+    shutil.copyfile(
+        fragments / "signal-consume-hook.h",
+        src / "include/gw-signal-consume-hook.h",
+    )
+    shutil.copyfile(
+        fragments / "signal-consume-hook.inc", src / "nptl/gw-consume-hook.inc"
+    )
+    replace(
+        versions,
+        "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;",
+        "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;\n"
+        "    __gw_domain_signal_consume_hook;",
+    )
     mask = src / "nptl/pthread_sigmask.c"
     replace(
         mask,
         "#include <shlib-compat.h>",
         '#include <shlib-compat.h>\n#include "gw-signal-mask.inc"\n'
-        '#include "gw-context-mask.inc"\n#include "gw-wait-mask.inc"',
+        '#include "gw-context-mask.inc"\n#include "gw-wait-mask.inc"\n'
+        '#include "gw-consume-hook.inc"',
     )
     replace(
         mask,
@@ -310,6 +326,7 @@ for origin, name in [
                 "private-nptl-signals-63-64",
                 "logical-mask-inheritance-and-notify-v1",
                 "pre-clone-recipient-admission-v1",
+                "optional-logical-consuming-waits-v1",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

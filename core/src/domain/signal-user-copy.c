@@ -9,8 +9,8 @@
 #include <sys/stat.h>
 #include <time.h>
 
-/* A kernel-mediated copy is needed only at the explicit sleep adapter's user
- * boundary. Pre-validating a remainder on success changes nanosleep semantics;
+/* Kernel-mediated copies preserve wait API pointer error behavior.
+ * Pre-validating a remainder on success changes nanosleep semantics;
  * a C store on interruption changes EFAULT into SIGSEGV. One preallocated OFD
  * avoids per-signal allocation and does not depend on process_vm_* permissions.
  * https://github.com/torvalds/linux/blob/v6.12/fs/read_write.c
@@ -29,9 +29,9 @@ int gw_signal_user_copy_prepare(void) {
   if (fd < 0) {
     return errno;
   }
-  struct timespec zero = {0};
+  unsigned char zero[sizeof(siginfo_t)] = {0};
   int error = 0;
-  if (syscall(SYS_pwrite64, fd, &zero, sizeof zero, 0) != (long)sizeof zero ||
+  if (syscall(SYS_pwrite64, fd, zero, sizeof zero, 0) != (long)sizeof zero ||
       fstat(fd, &identity)) {
     error = errno ? errno : EIO;
   }
@@ -45,7 +45,7 @@ int gw_signal_user_copy_prepare(void) {
 }
 
 static int copy(void *destination, const void *source, size_t length, int out) {
-  if (length > sizeof(struct timespec)) {
+  if (length > sizeof(siginfo_t)) {
     return EINVAL;
   }
 
