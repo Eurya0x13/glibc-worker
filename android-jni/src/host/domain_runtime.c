@@ -205,6 +205,10 @@ int owner_command(struct jni_domain_context *context, int operation) {
     wait_word(&session.response, observed);
   }
   int error = session.error;
+  if (!error && operation == JNI_DOMAIN_STOP &&
+      session.owner_stopped_mask != GW_DOMAIN_STOP_MASK) {
+    error = EPROTO;
+  }
   pthread_mutex_unlock(&owner_lock);
   return error;
 }
@@ -226,7 +230,7 @@ int domain_owner_start(const char *loader, const char *libraries,
       .ucontext_size = sizeof(ucontext_t),
       .sigmask_offset = offsetof(ucontext_t, uc_sigmask),
       .mcontext_offset = offsetof(ucontext_t, uc_mcontext),
-      .required = GW_DOMAIN_CAP_ADOPTION};
+      .required = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT};
 #ifdef GW_DOMAIN_NONLOCAL
   session.handshake.required |= GW_DOMAIN_CAP_NATIVE_UNWIND;
 #endif

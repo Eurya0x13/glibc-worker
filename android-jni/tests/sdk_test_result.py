@@ -85,6 +85,8 @@ def valid_relay_lifecycle(rows, mode):
             "borrowed": "borrowed-relay" in mode,
             "shutdown_preserved_owner": True,
             "masks_preserved": True,
+            "stopped_owner_masked": True,
+            "stopped_owner_parked": True,
         }
     ]
 

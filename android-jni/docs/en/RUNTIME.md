@@ -57,6 +57,16 @@ before restoring the router. External senders must already be quiescent.
 Shutdown requires the lifecycle owner, stopped producers, quiesced native work
 and closed modules. It does not cancel native calls, destroy the VM or unload
 saved stacks/TLS/code. Idle VM bindings and the GNU supervisor remain pinned.
+Before acknowledging STOP, the supervisor joins its workers, blocks every
+catchable signal through the native kernel mask and revokes its Host signal
+registry entry. It then parks permanently in a native futex and never polls
+application commands again. Host checks the acknowledged mask before stopping
+its dispatcher. This prevents an idle GNU supervisor from entering a native
+Host handler after router restoration. `SIGKILL`/`SIGSTOP` retain native kernel
+semantics; this is not complete VM/ART recipient quiescence or permission to
+unmap the GNU runtime. The diagnostic thread name is `gw-guest-owner`.
+The private transport requires the matching quiescent-STOP capability;
+an older service is rejected before activation.
 The bridge's [lifecycle contract](LIFECYCLE.md) applies to both backends.
 
 `build-guest.sh` builds the matching service, and `scripts/package-runtime.sh`
@@ -69,7 +79,10 @@ their own worker bootstrap; it does not silently create a runtime.
 `tests/runtime_sdk.py` builds a consumer using only installed CMake packages and
 headers. It checks default/worker selection, JNI load/callback/array/TLS paths,
 lifecycle and rejection of an ordinary libc. All dependency paths are explicit
-command-line arguments. Its build logs, manifest and structured results live in
+command-line arguments. Shutdown tests inspect the supervisor's actual kernel
+signal mask and futex wait through `/proc/self/task`, in addition to the API
+result. No production runtime path depends on these `/proc` observations.
+Its build logs, manifest and structured results live in
 `android-jni/build/tests/runtime-sdk/`. `tests/runtime_sdk_android.py` repeats the
 installed-package checks on ARM64 with an explicitly supplied reviewed JRE
 startup fixture/profile; this test does not move VM creation into android-jni.

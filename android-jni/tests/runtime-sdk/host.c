@@ -11,11 +11,14 @@
 #endif
 #include <assert.h>
 #include <dlfcn.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fenv.h>
 #include <fcntl.h>
+#include <linux/futex.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <setjmp.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -24,6 +27,7 @@
 #include <sys/syscall.h>
 #include <sys/signalfd.h>
 #include <sys/uio.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include "nonlocal_probe.h"
@@ -40,6 +44,83 @@ struct application {
   const struct gw_loader_api_v1 *loader;
   uint64_t module;
 };
+
+static long guest_owner_tid(void) {
+  DIR *tasks = opendir("/proc/self/task");
+  assert(tasks);
+  long owner = 0;
+  struct dirent *task;
+  while ((task = readdir(tasks))) {
+    char *end;
+    long tid = strtol(task->d_name, &end, 10);
+    if (*end || tid <= 0) {
+      continue;
+    }
+    char path[96], name[64];
+    assert(snprintf(path, sizeof path, "/proc/self/task/%ld/comm", tid) > 0);
+    FILE *file = fopen(path, "re");
+    if (!file) {
+      continue; /* An unrelated VM thread can exit during enumeration. */
+    }
+    int matches =
+        fgets(name, sizeof name, file) && !strcmp(name, "gw-guest-owner\n");
+    assert(!fclose(file));
+    if (matches) {
+      assert(!owner);
+      owner = tid;
+    }
+  }
+  assert(!closedir(tasks));
+  return owner;
+}
+
+static void check_owner_mask(long tid) {
+  char path[96];
+  assert(snprintf(path, sizeof path, "/proc/self/task/%ld/status", tid) > 0);
+  FILE *file = fopen(path, "re");
+  assert(file);
+  char *line = NULL;
+  size_t capacity = 0;
+  unsigned long long blocked = 0;
+  int found = 0;
+  while (getline(&line, &capacity, file) != -1) {
+    if (sscanf(line, "SigBlk: %llx", &blocked) == 1) {
+      found = 1;
+      break;
+    }
+  }
+  free(line);
+  assert(!fclose(file) && found);
+  uint64_t expected = UINT64_MAX & ~((UINT64_C(1) << (SIGKILL - 1)) |
+                                     (UINT64_C(1) << (SIGSTOP - 1)));
+  assert(blocked == expected);
+}
+
+static void check_owner_quiescent(long tid) {
+  assert(tid > 0 && guest_owner_tid() == tid);
+  check_owner_mask(tid);
+  struct timespec start, now;
+  assert(!clock_gettime(CLOCK_MONOTONIC, &start));
+  for (;;) {
+    char path[96], line[512];
+    assert(snprintf(path, sizeof path, "/proc/self/task/%ld/syscall", tid) > 0);
+    FILE *file = fopen(path, "re");
+    assert(file);
+    assert(fgets(line, sizeof line, file));
+    assert(!fclose(file));
+    long number;
+    unsigned long long address, operation, expected;
+    if (sscanf(line, "%ld %llx %llx %llx", &number, &address, &operation,
+               &expected) == 4 &&
+        number == SYS_futex && operation == FUTEX_WAIT_PRIVATE && !expected) {
+      break;
+    }
+    assert(!clock_gettime(CLOCK_MONOTONIC, &now));
+    assert(now.tv_sec - start.tv_sec < 3);
+    sched_yield();
+  }
+  check_owner_mask(tid);
+}
 
 static _Thread_local sigjmp_buf escape;
 static _Thread_local volatile sig_atomic_t escaped;
@@ -1368,6 +1449,8 @@ int main(int argc, char **argv) {
   }
   assert(!result);
   assert(full_host_state() == GW_HOST_READY);
+  long owner_tid = guest_owner_tid();
+  assert(owner_tid > 0);
   const struct gw_loader_api_v1 *loader =
       gw_loader_query(GW_LOADER_ABI_V1, sizeof *loader);
   assert(loader);
@@ -1391,6 +1474,7 @@ int main(int argc, char **argv) {
   }
   assert(!(*env)->ExceptionCheck(env));
   assert(!gw_host_runtime_shutdown());
+  check_owner_quiescent(owner_tid);
   assert(full_host_state() == GW_HOST_STOPPED);
   assert(signal_host_relay_running() == borrowed_relay);
   if (borrowed_relay) {
@@ -1399,7 +1483,8 @@ int main(int argc, char **argv) {
   printf(
       "{\"stage\":\"runtime-relay-lifecycle\",\"preclaim_failures\":2,"
       "\"retry\":true,\"borrowed\":%s,\"shutdown_preserved_owner\":true,"
-      "\"masks_preserved\":true}\n",
+      "\"masks_preserved\":true,\"stopped_owner_masked\":true,"
+      "\"stopped_owner_parked\":true}\n",
       borrowed_relay ? "true" : "false");
 
   assert((*vm)->DestroyJavaVM(vm) == JNI_OK);

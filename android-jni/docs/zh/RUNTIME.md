@@ -34,8 +34,18 @@ join。两种情况都在请求未完成时拒绝关闭。外部所有者在 run
 
 shutdown 要求生命周期所有者、停止生产者、native 工作静止且模块已关闭。它不取消调用、不销毁 VM，也不卸载已保存栈/TLS/代码。空闲 VM 绑定和 GNU 监督线程保持固定。两个后端均遵守 [生命周期契约](LIFECYCLE.md)。
 
+确认 STOP 前，监督线程 join 自己的 worker，通过原生内核掩码屏蔽所有可捕获
+信号，并撤销自己的 Host 信号注册表入口。随后永久停在原生 futex 中，不再轮询
+应用命令。Host 在停止自己的分派线程前核对已确认的掩码，避免恢复路由器后，
+空闲 GNU 监督线程进入原生 Host 处理器。`SIGKILL`/`SIGSTOP` 保留原生内核语义；
+这不代表完整的 VM/ART 接收者静默，也不允许解除 GNU runtime 映射。诊断线程名
+为 `gw-guest-owner`。私有传输要求匹配的静默 STOP 能力，旧服务在激活前被拒绝。
+
 `build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及 domain-runtime.json 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI 或收养版本错误的清单。低层 full_host_start 仍供自备 worker 启动机制的宿主使用，不会静默创建 runtime。
 
 `tests/runtime_sdk.py` 仅通过安装的 CMake 包和头构建消费者，检查默认/worker 选择、JNI 装载/回调/数组/TLS、生命周期与普通 libc 拒绝。依赖路径均由命令行显式提供；日志、清单与结构化结果在 android-jni/build/tests/runtime-sdk/。`tests/runtime_sdk_android.py` 使用显式审阅的 JRE 启动夹具/profile 在 ARM64 重复检查，并未把 VM 创建移入 android-jni；结果在 android-jni/build/tests/runtime-sdk-android/。
+
+关闭测试除 API 返回值外，还通过 `/proc/self/task` 检查监督线程实际的内核
+信号掩码与 futex 等待。生产运行时不依赖这些 `/proc` 观测。
 
 所有权分类已实现，但完整独立 Guest 信号语义仍待完成；见 [core 域边界](../../../core/docs/zh/DOMAINS.md)。默认同线程不取消这些限制。

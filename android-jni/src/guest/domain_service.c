@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include <sys/prctl.h>
 #ifdef GW_DOMAIN_NONLOCAL
 #include "domain_unwind.h"
 #include "domain_signals.h"
@@ -209,6 +210,38 @@ static int resolve(void) {
   return 0;
 }
 
+static int quiesce_owner(void) {
+  uint64_t all = UINT64_MAX, applied;
+  if (syscall(SYS_rt_sigprocmask, SIG_SETMASK, &all, NULL, sizeof all) ||
+      syscall(SYS_rt_sigprocmask, SIG_SETMASK, NULL, &applied,
+              sizeof applied)) {
+    return errno;
+  }
+  if (applied != GW_DOMAIN_STOP_MASK) {
+    return EIO;
+  }
+  session->note_guest(0, 0, 0);
+  session->owner_stopped_mask = applied;
+  return 0;
+}
+
+static _Noreturn void park_owner(void) {
+  /* Do not resume full_guest_poll or invoke application code after STOP's
+   * response. Host can stop its relay and restore its kernel handlers only
+   * because this GNU thread can no longer receive catchable Host signals.
+   * SIGKILL/SIGSTOP retain the kernel's process-wide semantics.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
+   * See sigprocmask(), including sigdelsetmask(SIGKILL/SIGSTOP).
+   *
+   * The root TCB, loader and stack remain process-pinned. pthread_exit here
+   * could treat the GNU root as the last pthread and exit the Host process.
+   * No automatic process exit or speculative reclamation belongs here. */
+  int parked = 0;
+  for (;;) {
+    syscall(SYS_futex, &parked, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) {
     _exit(124);
@@ -217,7 +250,7 @@ int main(int argc, char **argv) {
   session->note_guest(0, syscall(SYS_gettid),
                       (uintptr_t)__builtin_thread_pointer());
   struct jni_domain_handshake *hello = &session->handshake;
-  uint64_t supported = GW_DOMAIN_CAP_ADOPTION;
+  uint64_t supported = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT;
 #ifdef GW_DOMAIN_NONLOCAL
   supported |= GW_DOMAIN_CAP_NATIVE_UNWIND;
 #endif
@@ -236,6 +269,10 @@ int main(int argc, char **argv) {
   }
   session->error = resolve();
   if (session->error) {
+    goto reject;
+  }
+  if (syscall(SYS_prctl, PR_SET_NAME, GW_DOMAIN_OWNER_NAME, 0, 0, 0)) {
+    session->error = errno;
     goto reject;
   }
   hello->accepted = supported;
@@ -273,8 +310,9 @@ int main(int argc, char **argv) {
     int request = atomic_load_explicit(&session->request, memory_order_acquire);
     if (request != sequence) {
       struct jni_domain_context *c = session->context;
+      int operation = session->operation;
       session->error = 0;
-      if (session->operation == JNI_DOMAIN_ALLOC) {
+      if (operation == JNI_DOMAIN_ALLOC) {
         void *tp, *top;
         session->error = c->fail_allocate
                              ? ENOMEM
@@ -286,16 +324,20 @@ int main(int argc, char **argv) {
           c->exchange.guest.tp = (uintptr_t)tp;
           c->exchange.guest.sp = (uintptr_t)top & ~(uintptr_t)15;
         }
-      } else if (session->operation == JNI_DOMAIN_FREE) {
+      } else if (operation == JNI_DOMAIN_FREE) {
         session->error = free_domain(c->token);
-      } else if (session->operation == JNI_DOMAIN_STOP) {
+      } else if (operation == JNI_DOMAIN_STOP) {
         full_guest_shutdown();
+        session->error = quiesce_owner();
       } else {
         session->error = EINVAL;
       }
       sequence = request;
       atomic_store_explicit(&session->response, sequence, memory_order_release);
       wake_word(&session->response);
+      if (operation == JNI_DOMAIN_STOP) {
+        park_owner();
+      }
     }
     full_guest_poll();
     fb_event_wait(event, observed);
