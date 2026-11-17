@@ -70,7 +70,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
 - Complete independent asynchronous dispositions/masks, pending queues, default
   actions and targets; keep overlapping registrations from replacing VM handlers.
   Thread/shared queue selection, aggregate RT accounting and notification/close
-  transactions are implemented; connect the inbox to actual Guest recipient
+  transactions are implemented. The [action table](core/docs/en/SIGNAL_ACTIONS.md)
+  now serializes ignored-disposition flush, subsequent sends and action selection,
+  and the synchronous JNI service uses by-value snapshots; connect the inbox to actual Guest recipient
   admission, disposition generations, tagged libc send/wait hooks and timely
   entry during Host execution. Retain kernel restart/EINTR semantics when the
   logical action changes or a notification has no deliverable Guest packet.

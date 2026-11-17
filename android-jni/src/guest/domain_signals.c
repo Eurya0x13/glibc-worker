@@ -4,20 +4,17 @@
 #include "domain_signals.h"
 #include "nonlocal-mask.h"
 #include "signal-stack.h"
+#include "signal-actions.h"
 #include <errno.h>
 #include <signal.h>
-#include <stdatomic.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <ucontext.h>
 
-struct guest_action {
-  struct sigaction action;
-  _Atomic int fired;
-};
+static struct gw_signal_actions actions;
 
-static _Atomic(struct guest_action *) actions[65];
-static atomic_flag writer = ATOMIC_FLAG_INIT;
+void gw_guest_signals_init(void) {
+  gw_signal_actions_init(&actions, NULL, 0);
+}
 
 static _Noreturn void guest_default(int number) {
   /* Linux LP64 kernel sigaction ABI, independent of either libc's public
@@ -51,42 +48,12 @@ int gw_guest_sigaction(int number, const void *input, void *output,
     return 0;
   }
   *handled = 1;
-  const struct sigaction *action = input;
-  struct sigaction *previous = output;
+  int saved = errno;
   uint64_t mask = gw_nonlocal_mask_block();
-  while (atomic_flag_test_and_set_explicit(&writer, memory_order_acquire)) {
-  }
-  struct guest_action *old =
-      atomic_load_explicit(&actions[number], memory_order_acquire);
-  struct guest_action *next = NULL;
-  if (action) {
-    next = (void *)syscall(SYS_mmap, NULL, sizeof *next, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (next == MAP_FAILED) {
-      int error = errno;
-      atomic_flag_clear_explicit(&writer, memory_order_release);
-      gw_nonlocal_mask_restore(mask);
-      errno = error;
-      return -1;
-    }
-    next->action = *action;
-    atomic_init(&next->fired, 0);
-  }
-  if (previous) {
-    *previous = old ? old->action : (struct sigaction){.sa_handler = SIG_DFL};
-    if (old && (previous->sa_flags & SA_RESETHAND) &&
-        atomic_load_explicit(&old->fired, memory_order_acquire)) {
-      previous->sa_handler = SIG_DFL;
-    }
-  }
-  if (action) {
-    /* Immutable generations remain pinned until recipient/continuation
-     * quiescence is implemented. An old delivery may already hold old. */
-    atomic_store_explicit(&actions[number], next, memory_order_release);
-  }
-  atomic_flag_clear_explicit(&writer, memory_order_release);
+  int error = gw_signal_actions_change(&actions, number, input, output);
+  errno = error ? error : saved;
   gw_nonlocal_mask_restore(mask);
-  return 0;
+  return error ? -1 : 0;
 }
 
 struct guest_delivery {
@@ -123,37 +90,29 @@ int gw_guest_signal_dispatch(int number, void *information, void *frame,
       (interrupted & bit)) {
     guest_default(number);
   }
-  struct guest_action *record =
-      atomic_load_explicit(&actions[number], memory_order_acquire);
-  if (!record || record->action.sa_handler == SIG_DFL) {
+  struct gw_signal_action selected;
+  if (gw_signal_actions_select(&actions, number, &selected)) {
+    _exit(126);
+  }
+  if (selected.action.sa_handler == SIG_DFL) {
     guest_default(number);
   }
-  if (record->action.sa_handler == SIG_IGN) {
-    /* Linux force_sig_info_to_task resets an ignored synchronous hardware
-     * fault to SIG_DFL. The outer kernel route hides Guest SIG_IGN, so apply
-     * the same rule here instead of retrying the fault forever.
+  if (selected.action.sa_handler == SIG_IGN) {
+    /* Linux forces an ignored synchronous hardware fault back to default.
      * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
     if (synchronous_number(number) && ((siginfo_t *)information)->si_code > 0) {
       guest_default(number);
     }
     return 0;
   }
-  /* Native reset-on-delivery changes the handler only. Retain this immutable
-   * generation's flags/mask for queries, and consume only this generation if
-   * a registration races with delivery on another recipient.
-   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
-  if ((record->action.sa_flags & SA_RESETHAND) &&
-      atomic_exchange_explicit(&record->fired, 1, memory_order_acq_rel)) {
-    guest_default(number);
-  }
   /* A Guest handler may inspect/modify this mask, or pass this frame to its
    * native setcontext. Expose the interrupted logical mask, then translate
    * only the mask back for the kernel's eventual sigreturn.
    * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c */
   memcpy(&context->uc_sigmask, &interrupted, sizeof interrupted);
-  memcpy(&action_mask, &record->action.sa_mask, sizeof action_mask);
+  memcpy(&action_mask, &selected.action.sa_mask, sizeof action_mask);
   uint64_t effective = interrupted | action_mask;
-  if (!(record->action.sa_flags & SA_NODEFER)) {
+  if (!(selected.action.sa_flags & SA_NODEFER)) {
     effective |= bit;
   }
   uint64_t kernel = (effective & ~reserved) | (carrier & reserved);
@@ -161,7 +120,7 @@ int gw_guest_signal_dispatch(int number, void *information, void *frame,
   uint64_t physical = gw_nonlocal_mask_block();
   *logical = effective;
   uintptr_t top = 0, interrupted_sp = gw_signal_interrupted_sp(context);
-  if (!(record->action.sa_flags & SA_ONSTACK) &&
+  if (!(selected.action.sa_flags & SA_ONSTACK) &&
       gw_stack_contains(&context->uc_stack, (uintptr_t)&physical) &&
       !gw_stack_contains(&context->uc_stack, interrupted_sp)) {
     /* Kernel SA_ONSTACK belongs to the outer route, while this logical Guest
@@ -169,8 +128,8 @@ int gw_guest_signal_dispatch(int number, void *information, void *frame,
      * stack, and invoke the handler below the interrupted stack's red zone. */
     top = gw_signal_stack_top(interrupted_sp);
   }
-  struct guest_delivery delivery = {&record->action, number, information, frame,
-                                    kernel};
+  struct guest_delivery delivery = {&selected.action, number, information,
+                                    frame, kernel};
   domain_stack_call(guest_delivery_run, &delivery, top);
   memcpy(&interrupted, &context->uc_sigmask, sizeof interrupted);
   *logical = interrupted;

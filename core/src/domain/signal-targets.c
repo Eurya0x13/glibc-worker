@@ -248,9 +248,40 @@ int gw_signal_target_activate(struct gw_signal_target *target, int tid) {
   return error;
 }
 
-struct gw_signal_publication gw_signal_targets_send(
+static int discard_pending(struct gw_signal_targets *registry, int number) {
+  int error = gw_signal_inbox_discard(&registry->inbox, NULL, number);
+  if (!error) {
+    /* Closed identities already discarded their private queues. */
+    for (size_t i = 0; i < registry->count; ++i) {
+      error = gw_signal_inbox_discard(&registry->inbox,
+                                      &registry->active[i]->receiver, number);
+      if (error) {
+        break;
+      }
+    }
+  }
+  return error;
+}
+
+static void cancel_opposite_pending(struct gw_signal_targets *registry,
+                                    int number) {
+  /* Linux prepare_signal cancels opposing pending job-control signals at
+   * generation time, before checking masks or ignored dispositions. Kernel
+   * process stop/resume effects still belong to the integration, not inboxes.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
+  if (number == SIGCONT) {
+    discard_pending(registry, SIGTSTP);
+    discard_pending(registry, SIGTTIN);
+    discard_pending(registry, SIGTTOU);
+  } else if (number == SIGTSTP || number == SIGTTIN || number == SIGTTOU) {
+    discard_pending(registry, SIGCONT);
+  }
+}
+
+static struct gw_signal_publication send_filtered(
     struct gw_signal_targets *registry, uintptr_t key, int tid,
-    const siginfo_t *information) {
+    const siginfo_t *information, int ignored,
+    struct gw_signal_target *representative, int dispositions) {
   if ((key && tid <= 0) || (!key && tid)) {
     return (struct gw_signal_publication){.status = EINVAL};
   }
@@ -262,22 +293,54 @@ struct gw_signal_publication gw_signal_targets_send(
       (key && (!target || target == TOMBSTONE || target->tid != tid))) {
     result.status = ESRCH;
   } else if (information->si_signo) {
-    result =
-        gw_signal_inbox_put(&registry->inbox, target ? &target->receiver : NULL,
-                            information, notify, registry);
+    if (dispositions) {
+      cancel_opposite_pending(registry, information->si_signo);
+    }
+    struct gw_signal_target *filter = target ? target : representative;
+    if (!ignored || ((filter->receiver.blocked | filter->real_blocked) &
+                     (UINT64_C(1) << (information->si_signo - 1)))) {
+      result = gw_signal_inbox_put(&registry->inbox,
+                                   target ? &target->receiver : NULL,
+                                   information, notify, registry);
+    }
   }
   unlock(registry);
   return result;
 }
 
+struct gw_signal_publication gw_signal_targets_send(
+    struct gw_signal_targets *registry, uintptr_t key, int tid,
+    const siginfo_t *information) {
+  return send_filtered(registry, key, tid, information, 0, NULL, 0);
+}
+
+struct gw_signal_publication gw_signal_targets_send_filtered(
+    struct gw_signal_targets *registry, uintptr_t key, int tid,
+    const siginfo_t *information, int ignored,
+    struct gw_signal_target *representative) {
+  if (!information || information->si_signo < 0 || information->si_signo > 64 ||
+      (ignored && !key &&
+       (!representative || representative->registry != registry))) {
+    return (struct gw_signal_publication){.status = EINVAL};
+  }
+  return send_filtered(registry, key, tid, information, ignored, representative,
+                       1);
+}
+
 struct gw_signal_publication gw_signal_target_mask(
     struct gw_signal_target *target, uint64_t mask) {
+  return gw_signal_target_masks(target, mask, 0);
+}
+
+struct gw_signal_publication gw_signal_target_masks(
+    struct gw_signal_target *target, uint64_t mask, uint64_t real) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
   struct gw_signal_publication result = {0};
   if (registry->closed || target->receiver.closed) {
     result.status = ESRCH;
   } else {
+    target->real_blocked = real;
     result.wake_error =
         gw_signal_receiver_mask(&target->receiver, mask, notify, registry);
   }
@@ -316,18 +379,7 @@ int gw_signal_target_take(struct gw_signal_target *target, uint64_t eligible,
 
 int gw_signal_targets_discard(struct gw_signal_targets *registry, int number) {
   lock(registry);
-  int error = gw_signal_inbox_discard(&registry->inbox, NULL, number);
-  if (!error) {
-    /* Closed identities have already discarded their private queues. Dense
-     * active membership stays stable under this outer transaction. */
-    for (size_t i = 0; i < registry->count; ++i) {
-      error = gw_signal_inbox_discard(&registry->inbox,
-                                      &registry->active[i]->receiver, number);
-      if (error) {
-        break;
-      }
-    }
-  }
+  int error = discard_pending(registry, number);
   unlock(registry);
   return error;
 }

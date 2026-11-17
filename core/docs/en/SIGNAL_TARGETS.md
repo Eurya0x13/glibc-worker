@@ -109,3 +109,7 @@ These are recipient/queue lifetime guarantees. The installed JNI service still
 needs public asynchronous dispositions, complete logical mask/wait hooks and
 general saved-frame coordination. The normally returning entry test does not
 make arbitrary asynchronous nonlocal exits or VM integration complete.
+
+The [action table](SIGNAL_ACTIONS.md) combines disposition replacement, ignore
+flush, sending and delivery selection under one transaction. Selected actions
+are copied into recipient-owned storage.

@@ -291,6 +291,7 @@ int main(int argc, char **argv) {
     goto reject;
   }
 #ifdef GW_DOMAIN_NONLOCAL
+  gw_guest_signals_init();
   if (install_sigaction_hook(gw_guest_sigaction)) {
     session->error = EINVAL;
     goto reject;

@@ -49,3 +49,7 @@ shutdown 要求生命周期所有者、停止生产者、native 工作静止且�
 信号掩码与 futex 等待。生产运行时不依赖这些 `/proc` 观测。
 
 所有权分类已实现，但完整独立 Guest 信号语义仍待完成；见 [core 域边界](../../../core/docs/zh/DOMAINS.md)。默认同线程不取消这些限制。
+
+可选 unwind 服务为同步故障使用所属 Guest 的
+[处置快照](../../../core/docs/zh/SIGNAL_ACTIONS.md)。重新注册不再分配固定的记录，
+正在执行的投递保留自己的完整处置副本。这不代表公开异步 Guest 服务已完成接入。

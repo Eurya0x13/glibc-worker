@@ -83,6 +83,9 @@ for name in (
     "control-summary.json",
     "control-stdout.log",
     "control-stderr.log",
+    "actions-summary.json",
+    "actions-stdout.log",
+    "actions-stderr.log",
     "targets-summary.json",
     "targets-stdout.log",
     "targets-stderr.log",
@@ -261,6 +264,27 @@ run(
         out / "target-control",
     ]
 )
+run(
+    [
+        compiler,
+        "-std=gnu17",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-UNDEBUG",
+        "-I" + str(core / "src/domain"),
+        core / "tests/signal_actions.c",
+        core / "src/domain/signal-actions.c",
+        core / "src/domain/signal-pending.c",
+        core / "src/domain/signal-inbox.c",
+        core / "src/domain/signal-targets.c",
+        "-pthread",
+        "-o",
+        out / "actions-control",
+    ]
+)
 unwind = Path(
     subprocess.check_output(
         [compiler, "-print-file-name=libgcc_s.so.1"], text=True
@@ -277,6 +301,7 @@ inputs = [
     Path(__file__),
     core / "CMakeLists.txt",
     core / "tests/signal_targets.c",
+    core / "tests/signal_actions.c",
     core / "config/targets.json",
     *source.iterdir(),
     *core.glob("src/domain/*.[chS]"),
@@ -296,6 +321,7 @@ inputs = [
     out / "create-control",
     core / "src/runtime/thread-create.h",
     out / "target-control",
+    out / "actions-control",
     control_loader,
     out / "host/guest_async_host",
     out / "host/guest_async_no_anchor",
@@ -346,6 +372,7 @@ if args.serial:
         out / "mask-control",
         out / "create-control",
         out / "target-control",
+        out / "actions-control",
         control_loader,
         out / "libgcc_s.so.1",
         loader,
@@ -449,6 +476,21 @@ controls = [
         },
     ),
     (
+        "actions",
+        native_command("actions-control"),
+        {
+            "result": "PASS",
+            "snapshots": True,
+            "one_shot": True,
+            "ignore_flush": True,
+            "quota_recovered": True,
+            "blocked_ignored": True,
+            "native_ignored_control": True,
+            "job_control_pending": True,
+            "concurrent_senders": 4,
+        },
+    ),
+    (
         "creation",
         native_command("create-control"),
         {
@@ -539,6 +581,7 @@ summary = json.loads(result.stdout)
 summary.update(
     native_handler_errno_control=True,
     native_targets_control=True,
+    native_actions_control=True,
     missing_host_anchor_control=True,
     native_mask_lifecycle_control=True,
     native_creation_lifecycle_control=True,

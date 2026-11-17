@@ -92,3 +92,8 @@ The ownership classifier is implemented, but full independent Guest signal
 semantics are still pending; [core domains](../../../core/docs/en/DOMAINS.md) lists the
 current supported boundary. Default same-thread selection does not remove that
 boundary.
+
+The opt-in unwind service uses owning-Guest [action snapshots](../../../core/docs/en/SIGNAL_ACTIONS.md)
+for synchronous faults. Re-registering a handler no longer allocates a pinned
+record; an in-flight delivery retains its own complete action copy. This does
+not complete public asynchronous Guest service integration.

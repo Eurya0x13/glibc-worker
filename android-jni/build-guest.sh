@@ -14,6 +14,12 @@ flags=(-O1 -g -fPIC -Wall -Wextra -Werror -DGW_DOMAIN_JNI)
 if [[ ${GW_NATIVE_UNWIND_INTEGRATION:-0} == 1 ]]; then
   flags+=(-DGW_DOMAIN_NONLOCAL)
   unwind_sources=("$project_root/src/guest/domain_jump.c")
+  unwind_sources+=(
+    "$GW_CORE_INCLUDE/internal/signal-actions.c"
+    "$GW_CORE_INCLUDE/internal/signal-targets.c"
+    "$GW_CORE_INCLUDE/internal/signal-inbox.c"
+    "$GW_CORE_INCLUDE/internal/signal-pending.c"
+  )
 else
   unwind_sources=()
 fi

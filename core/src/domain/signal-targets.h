@@ -12,6 +12,7 @@ struct gw_signal_target {
   struct gw_signal_receiver receiver;
   struct gw_signal_targets *registry;
   uintptr_t key;
+  uint64_t real_blocked;
   int tid;
   void *context;
   size_t index, pins;
@@ -48,8 +49,17 @@ int gw_signal_target_activate(struct gw_signal_target *, int);
 struct gw_signal_publication gw_signal_targets_send(struct gw_signal_targets *,
                                                     uintptr_t, int,
                                                     const siginfo_t *);
+/* Disposition owner has already validated the packet. Ignored signals still
+ * queue when the directed target (or explicit process representative) blocks
+ * them, including a temporary wait's saved real mask. The representative must
+ * remain pinned, even after native thread exit, until sends are revoked. */
+struct gw_signal_publication gw_signal_targets_send_filtered(
+    struct gw_signal_targets *, uintptr_t, int, const siginfo_t *, int ignored,
+    struct gw_signal_target *representative);
 struct gw_signal_publication gw_signal_target_mask(struct gw_signal_target *,
                                                    uint64_t);
+struct gw_signal_publication gw_signal_target_masks(struct gw_signal_target *,
+                                                    uint64_t, uint64_t);
 int gw_signal_target_deliver(struct gw_signal_target *, siginfo_t *,
                              enum gw_signal_queue_source *);
 /* A consuming wait may take logically blocked signals. Retain the same
