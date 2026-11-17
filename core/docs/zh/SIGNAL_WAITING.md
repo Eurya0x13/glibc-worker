@@ -71,7 +71,7 @@ epoll 则直接传递临时掩码。掩码查询不临时改写掩码；BLOCK/UN
 
 启用启动拦截后，`sigsuspend`、`ppoll`、`pselect`、`epoll_pwait`、
 `epoll_pwait2` 及其 Bionic LP64 别名、允许 NULL 掩码的形式，都会隐藏仅由
-空通知或被忽略的内部通知造成的 `EINTR`。`poll` 和 `epoll_wait` 共用受保护
+空通知或被忽略的内部通知造成的 `EINTR`。`poll`、`epoll_wait` 和 `select` 共用受保护
 实现。真正的 Host 处理器仍保留原生中断，包括在隐藏工作期间或重试间隙进入
 的情况。透明重试成功时保留调用者的 errno。
 
@@ -88,12 +88,18 @@ epoll 则直接传递临时掩码。掩码查询不临时改写掩码；BLOCK/UN
 非法原生超时参数仍原样交给内核校验。参见 Linux
 [`ppoll` 与超时处理](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。
 
+`select` 还通过可变的 `timeval` 回写最后一次系统调用的剩余超时，包括真正
+Host 中断之后的余量。输入转换遵循载体的 LP64 libc：GNU 会规范化微秒字段并
+在秒数溢出时饱和，Bionic 则拒绝越界微秒。fd 集合仍由内核处理；Linux 在
+`EINTR` 时保留输入集合，因此隐藏重试仍等待同一组描述符。管道用例验证六个
+基本等待接口重试后的就绪结果及 fd 集合/事件输出。
+
 回归夹具在原子入口前注入空通知，将通知工作延迟到截止时间之后，进入嵌套
 等待，并在隐藏工作期间和重试发布后投递真正的 Host 信号。单独的纯原生对照
 证明仅设置 `SA_RESTART` 仍会暴露 `EINTR`。夹具验证 Host TLS 下的通知恢复，
 不等于生产 Guest 处理器在 Java 执行期间进入的验收。
 
-这不是通用 Host 系统调用虚拟化。普通 `select`、睡眠接口、一般阻塞 I/O、
+这不是通用 Host 系统调用虚拟化。睡眠接口、一般阻塞 I/O、
 libc 私有调用和原始系统调用尚未取得这项恢复保护。通用可保存/恢复的原生
 延续状态以及实际 Guest 异步入口仍需完成接入和生命周期工作。
 

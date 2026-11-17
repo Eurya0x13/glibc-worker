@@ -87,9 +87,9 @@ have private libc bits blocked.
 
 Active bootstrap `sigsuspend`, `ppoll`, `pselect`, `epoll_pwait` and
 `epoll_pwait2`, including Bionic LP64 aliases and nullable masks, suppress
-`EINTR` caused only by an empty/ignored internal notification. `poll` and
-`epoll_wait` share the guarded implementation. A real Host handler keeps its
-native interruption, including when delivered during hidden work or between
+`EINTR` caused only by an empty/ignored internal notification. `poll`,
+`epoll_wait` and `select` share the guarded implementation. A real Host handler
+keeps its native interruption, including during hidden work or between
 retry attempts. A successful transparent retry preserves the caller's errno.
 
 A hidden wait stays published until the retry decision. Actual Host handler
@@ -109,6 +109,14 @@ round their remaining duration upward; negative millisecond timeouts remain
 infinite. Invalid native timeout inputs still reach the kernel unchanged.
 See Linux [`ppoll` and timeout handling](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
 
+`select` additionally returns the final syscall's remaining timeout through its
+mutable `timeval`, including after visible interruption. Its input conversion
+follows the carrier's LP64 libc: GNU normalizes its microsecond field with
+overflow saturation, while Bionic rejects out-of-range microseconds. Kernel
+fd-set handling remains native; Linux leaves input sets intact on `EINTR`, so
+a hidden retry observes the same requested descriptors. Pipe-based fixtures
+verify readiness and output sets/events after retry for all six basic wait APIs.
+
 The regression fixture injects empty notifications before atomic entry, delays
 notification work past the deadline, enters a nested wait, and delivers real
 Host signals both during hidden work and after retry publication. A separate
@@ -116,7 +124,7 @@ native-only control demonstrates that `SA_RESTART` alone still exposes `EINTR`.
 The fixture exercises notification recovery under Host TLS; it is not acceptance
 of a production Guest handler entered while Java executes.
 
-This is not general Host syscall virtualization. Plain `select`, sleep APIs,
+This is not general Host syscall virtualization. Sleep APIs,
 ordinary blocking I/O, private libc calls and raw syscalls do not acquire this
 recovery scope. General saved/resumable native continuations and actual Guest
 asynchronous entry still require the remaining integration/lifetime work.

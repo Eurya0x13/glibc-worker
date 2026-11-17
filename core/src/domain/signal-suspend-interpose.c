@@ -149,7 +149,7 @@ static int remaining_budget(const struct retry_budget *budget,
 
 static int transparent_wait(void *record, long number, long arguments[6],
                             const struct timespec *duration, int timeout_index,
-                            int milliseconds) {
+                            int milliseconds, struct timespec *remaining) {
   int saved_errno = errno;
   struct retry_budget budget;
   if (begin_budget(&budget, duration)) {
@@ -188,6 +188,9 @@ static int transparent_wait(void *record, long number, long arguments[6],
     }
   }
 
+  if (remaining) {
+    *remaining = *(struct timespec *)arguments[timeout_index];
+  }
   if (result >= 0) {
     errno = saved_errno;
   }
@@ -259,7 +262,8 @@ int sigsuspend(const sigset_t *mask) {
   }
   uint64_t bits = gw_signal_mask_wait_execution(record);
   long arguments[] = {(long)&bits, sizeof bits, 0, 0, 0, 0};
-  return transparent_wait(record, SYS_rt_sigsuspend, arguments, NULL, -1, 0);
+  return transparent_wait(record, SYS_rt_sigsuspend, arguments, NULL, -1, 0,
+                          NULL);
 }
 
 int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
@@ -284,7 +288,7 @@ int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
   uint64_t bits = gw_signal_mask_wait_execution(record);
   long arguments[] = {(long)fds,   count,       (long)timeout,
                       (long)&bits, sizeof bits, 0};
-  return transparent_wait(record, SYS_ppoll, arguments, timeout, 2, 0);
+  return transparent_wait(record, SYS_ppoll, arguments, timeout, 2, 0, NULL);
 }
 
 int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
@@ -315,7 +319,7 @@ int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
 
   long arguments[] = {count,        (long)read,    (long)write,
                       (long)except, (long)timeout, (long)&data};
-  return transparent_wait(record, SYS_pselect6, arguments, timeout, 4, 0);
+  return transparent_wait(record, SYS_pselect6, arguments, timeout, 4, 0, NULL);
 }
 
 int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
@@ -341,7 +345,7 @@ int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
   long arguments[] = {fd,      (long)events, count,
                       timeout, (long)&bits,  sizeof bits};
   return transparent_wait(record, SYS_epoll_pwait, arguments,
-                          timeout < 0 ? NULL : &duration, 3, 1);
+                          timeout < 0 ? NULL : &duration, 3, 1, NULL);
 }
 
 int epoll_pwait2(int fd, struct epoll_event *events, int count,
@@ -373,7 +377,8 @@ int epoll_pwait2(int fd, struct epoll_event *events, int count,
 #ifdef SYS_epoll_pwait2
   long arguments[] = {fd,          (long)events, count, (long)timeout,
                       (long)&bits, sizeof bits};
-  return transparent_wait(record, SYS_epoll_pwait2, arguments, timeout, 3, 0);
+  return transparent_wait(record, SYS_epoll_pwait2, arguments, timeout, 3, 0,
+                          NULL);
 #else
   errno = ENOSYS;
   return end_wait(record, -1);
@@ -394,6 +399,42 @@ int poll(struct pollfd *fds, nfds_t count, int timeout) {
   return function(fds, count, timeout);
 }
 
+/* Match the LP64 carrier's conversion before entering its underlying pselect6
+ * syscall. GNU select normalizes an int32_t microsecond field and saturates
+ * overflowing seconds; Bionic rejects an out-of-range microsecond field.
+ * Invalid inputs delegate to libc, retaining its conversion/error side effects.
+ * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/unix/sysv/linux/select.c
+ * https://github.com/aosp-mirror/platform_bionic/blob/main/libc/bionic/poll.cpp
+ * https://github.com/aosp-mirror/platform_bionic/blob/main/libc/bionic/bionic_time_conversions.cpp
+ */
+static int select_duration(const struct timeval *timeout,
+                           struct timespec *duration) {
+  if (!timeout) {
+    return 1;
+  }
+
+#ifdef __GLIBC__
+  int32_t microseconds = timeout->tv_usec;
+  if (timeout->tv_sec < 0 || microseconds < 0) {
+    return 0;
+  }
+  time_t extra = microseconds / 1000000;
+  if (extra > INT64_MAX - timeout->tv_sec) {
+    *duration = (struct timespec){INT64_MAX, 999999999};
+  } else {
+    *duration = (struct timespec){timeout->tv_sec + extra,
+                                  (microseconds % 1000000) * 1000L};
+  }
+#else
+  if (timeout->tv_sec < 0 || timeout->tv_usec < 0 ||
+      timeout->tv_usec >= 1000000) {
+    return 0;
+  }
+  *duration = (struct timespec){timeout->tv_sec, timeout->tv_usec * 1000L};
+#endif
+  return 1;
+}
+
 int select(int count, fd_set *read, fd_set *write, fd_set *except,
            struct timeval *timeout) {
   typedef int (*function_type)(int, fd_set *, fd_set *, fd_set *,
@@ -402,8 +443,38 @@ int select(int count, fd_set *read, fd_set *write, fd_set *except,
   if (!function) {
     return -1;
   }
-  signal_host_prune_notifications();
-  return function(count, read, write, except, timeout);
+  struct timespec duration = {0};
+  if (!mask_wait_enabled() || !select_duration(timeout, &duration)) {
+    signal_host_prune_notifications();
+    return function(count, read, write, except, timeout);
+  }
+
+  void *record = begin_wait(NULL, 1);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+
+  struct {
+    const uint64_t *mask;
+    size_t size;
+  } data = {&bits, sizeof bits};
+
+  long arguments[] = {count,
+                      (long)read,
+                      (long)write,
+                      (long)except,
+                      timeout ? (long)&duration : 0,
+                      (long)&data};
+  struct timespec remaining = duration;
+  int result = transparent_wait(record, SYS_pselect6, arguments,
+                                timeout ? &duration : NULL, 4, 0,
+                                timeout ? &remaining : NULL);
+  if (timeout) {
+    timeout->tv_sec = remaining.tv_sec;
+    timeout->tv_usec = remaining.tv_nsec / 1000;
+  }
+  return result;
 }
 
 int epoll_wait(int fd, struct epoll_event *events, int count, int timeout) {

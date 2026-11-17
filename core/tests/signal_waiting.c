@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <time.h>
 #include <ucontext.h>
 
 static struct signal_slot *recipient;
@@ -22,6 +23,7 @@ static uint64_t private_bits;
 static int hidden_mode, inject_hidden, retry_seen, delayed, plain_deliveries;
 static int nested_hidden;
 static int consume_hidden;
+static int ready_pipe[2];
 
 static uint64_t bits(const sigset_t *mask) {
   uint64_t result;
@@ -105,6 +107,8 @@ void gw_signal_mask_wait_retry_observe(long number,
   }
   if (hidden_mode == 2) {
     assert(!syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), SIGUSR1));
+  } else if (hidden_mode == 6) {
+    assert(write(ready_pipe[1], "x", 1) == 1);
   }
 }
 
@@ -177,6 +181,16 @@ static int wait_call(int mode, const sigset_t *mask,
       return poll(NULL, 0, 100);
     case 105:
       return epoll_wait(epoll_fd, &event, 1, 100);
+    case 106: {
+      struct timeval duration = {.tv_usec = 100000};
+      int result = select(0, NULL, NULL, NULL, &duration);
+      assert(!duration.tv_sec && duration.tv_usec >= 0 &&
+             duration.tv_usec <= 100000);
+      if (!result) {
+        assert(!duration.tv_usec);
+      }
+      return result;
+    }
     case 0:
       return sigsuspend(mask);
     case 1:
@@ -271,7 +285,7 @@ static void wait_jumps(void) {
 }
 
 static void transparent_waits(int count) {
-  for (int variant = 0; variant < count + 6; ++variant) {
+  for (int variant = 0; variant < count + 7; ++variant) {
     int mode = variant < count ? variant : 100 + variant - count;
     for (int scenario = 1; scenario <= 5; ++scenario) {
       if ((mode == 0 || mode == 5) && scenario != 2 && scenario != 4) {
@@ -333,6 +347,126 @@ static void transparent_waits(int count) {
 
   struct timespec invalid = {.tv_nsec = 1000000000};
   assert(ppoll(NULL, 0, &invalid, &temporary) == -1 && errno == EINVAL);
+}
+
+static int ready_wait(int mode, struct timespec *timeout) {
+  struct pollfd poll_fd = {.fd = ready_pipe[0], .events = POLLIN};
+  struct epoll_event event;
+  fd_set readers;
+  FD_ZERO(&readers);
+  FD_SET(ready_pipe[0], &readers);
+  int result;
+  switch (mode) {
+    case 0:
+      result = ppoll(&poll_fd, 1, timeout, &temporary);
+      break;
+    case 1:
+      result = poll(&poll_fd, 1, 1000);
+      break;
+    case 2:
+      result =
+          pselect(ready_pipe[0] + 1, &readers, NULL, NULL, timeout, &temporary);
+      break;
+    case 3: {
+      struct timeval duration = {.tv_sec = 1};
+      result = select(ready_pipe[0] + 1, &readers, NULL, NULL, &duration);
+      assert(!duration.tv_sec && duration.tv_usec > 0);
+      break;
+    }
+    case 4:
+      result = epoll_pwait(epoll_fd, &event, 1, 1000, &temporary);
+      break;
+    case 5:
+      result = epoll_wait(epoll_fd, &event, 1, 1000);
+      break;
+    default:
+      assert(0);
+      return -1;
+  }
+
+  assert(result == 1);
+  if (mode < 2) {
+    assert(poll_fd.revents == POLLIN);
+  } else if (mode < 4) {
+    assert(FD_ISSET(ready_pipe[0], &readers));
+  } else {
+    assert(event.events == EPOLLIN && event.data.u64 == 7519);
+  }
+  return result;
+}
+
+static void readiness_after_retry(void) {
+  assert(!pipe(ready_pipe) && ready_pipe[0] < FD_SETSIZE);
+  struct epoll_event event = {.events = EPOLLIN, .data.u64 = 7519};
+  assert(!epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ready_pipe[0], &event));
+
+  for (int mode = 0; mode < 6; ++mode) {
+    hidden_mode = 6;
+    inject_hidden = 1;
+    retry_seen = 0;
+    struct timespec timeout = {.tv_sec = 1}, saved = timeout;
+    errno = EDOM;
+    assert(ready_wait(mode, &timeout) == 1 && errno == EDOM);
+    assert(!inject_hidden && retry_seen == 1);
+    assert(!memcmp(&timeout, &saved, sizeof timeout));
+    char byte;
+    assert(read(ready_pipe[0], &byte, 1) == 1 && byte == 'x');
+    hidden_mode = 0;
+    check_mask(1);
+  }
+
+  assert(!epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ready_pipe[0], NULL));
+  assert(!close(ready_pipe[0]) && !close(ready_pipe[1]));
+}
+
+static void select_native_comparison(void) {
+  typedef int (*function_type)(int, fd_set *, fd_set *, fd_set *,
+                               struct timeval *);
+  function_type native = (function_type)dlsym(RTLD_NEXT, "select");
+  assert(native);
+  const struct timeval inputs[] = {{0, 0},
+                                   {0, -1},
+                                   {-1, 0},
+                                   {0, 1000000},
+                                   {INT64_MAX, 1000000},
+                                   {0, INT64_C(1) << 32}};
+  for (unsigned i = 0; i < sizeof inputs / sizeof inputs[0]; ++i) {
+    struct timeval expected = inputs[i], observed = expected;
+    struct timespec start, finish;
+    assert(!clock_gettime(CLOCK_MONOTONIC, &start));
+    errno = 0;
+    int baseline = native(-1, NULL, NULL, NULL, &expected), error = errno;
+    errno = 0;
+    assert(select(-1, NULL, NULL, NULL, &observed) == baseline &&
+           errno == error);
+    assert(!clock_gettime(CLOCK_MONOTONIC, &finish));
+
+    /* Both calls may decrease the remaining timeout, including on EINVAL.
+     * Their difference is bounded by the measured enclosing interval rather
+     * than an arbitrary timing tolerance or exact sub-microsecond equality. */
+    struct timeval larger = expected, smaller = observed;
+    if (expected.tv_sec < observed.tv_sec ||
+        (expected.tv_sec == observed.tv_sec &&
+         expected.tv_usec < observed.tv_usec)) {
+      larger = observed;
+      smaller = expected;
+    }
+    time_t seconds = larger.tv_sec - smaller.tv_sec;
+    long microseconds = larger.tv_usec - smaller.tv_usec;
+    if (microseconds < 0) {
+      --seconds;
+      microseconds += 1000000;
+    }
+    finish.tv_sec -= start.tv_sec;
+    finish.tv_nsec -= start.tv_nsec;
+    if (finish.tv_nsec < 0) {
+      --finish.tv_sec;
+      finish.tv_nsec += 1000000000;
+    }
+    assert(seconds < finish.tv_sec ||
+           (seconds == finish.tv_sec &&
+            microseconds <= (finish.tv_nsec + 999) / 1000));
+  }
 }
 
 int main(int argc, char **argv) {
@@ -400,6 +534,8 @@ int main(int argc, char **argv) {
   }
   if (!native) {
     transparent_waits(count);
+    readiness_after_retry();
+    select_native_comparison();
   }
   wait_jumps();
   assert(!close(epoll_fd));
@@ -421,7 +557,8 @@ int main(int argc, char **argv) {
              : ",\"hidden_notification_retry\":true,"
                "\"original_deadline\":true,\"host_delivery_interrupts\":true,"
                "\"null_and_plain_wait_retry\":true,"
-               "\"hidden_nested_wait\":true");
+               "\"hidden_nested_wait\":true,\"select_timeout_semantics\":true,"
+               "\"readiness_after_retry\":true");
   fprintf(stderr, "waits_exercised=%u waits_skipped=%u jumps=%d\n", exercised,
           skipped, jumps);
 }
