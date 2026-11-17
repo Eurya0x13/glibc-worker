@@ -191,9 +191,26 @@ def execute_case(
                 "worker",
                 "borrowed-relay",
                 "worker-borrowed-relay",
+                "worker-signals",
                 "nonlocal",
             )
             and not valid_relay_lifecycle(rows, mode)
+        )
+        or (
+            mode == "worker-signals"
+            and [r for r in rows if r.get("stage") == "worker-signals"]
+            != [
+                {
+                    "stage": "worker-signals",
+                    "native_children": 32,
+                    "cancelled_children": 64,
+                    "alternate_stack": True,
+                    "one_shot": True,
+                    "consuming_waits": True,
+                    "host_parallel_disposition": True,
+                    "native_cancel": True,
+                }
+            ]
         )
         or (
             require_host_fault_mask

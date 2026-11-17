@@ -10,6 +10,7 @@
 #ifdef GW_DOMAIN_NONLOCAL
 #include "domain_unwind.h"
 #include "domain_signals.h"
+#include "domain_signal_workers.h"
 #include "domain_jump.h"
 #include "nonlocal-mask.h"
 #include "signal-stack.h"
@@ -78,19 +79,30 @@ static void abort_native(void *argument) {
 }
 
 static int guest_fault(int number, void *info, void *context) {
+  if (session->guest_notification) {
+    return gw_guest_workers_fault(number, info, context);
+  }
   if (!current) {
     /* Genuine GNU pthreads use their native mask, stack, errno and TCB. They
      * have no suspended Host frame and therefore no Host logical mask. */
     uint64_t logical;
     memcpy(&logical, &((ucontext_t *)context)->uc_sigmask, sizeof logical);
-    return gw_guest_signal_dispatch(number, info, context, &logical, 0, 0);
+    return gw_guest_signal_dispatch(
+        number, info, context,
+        (struct gw_guest_signal_state){.logical = &logical});
   }
-  return gw_guest_signal_dispatch(number, info, context, &current->guest_mask,
-                                  current->exchange.guest_execution_mask,
-                                  session->reserved_signals);
+  struct gw_guest_signal_state state = {
+      .logical = &current->guest_mask,
+      .carrier = current->exchange.guest_execution_mask,
+      .virtual_mask = session->reserved_signals};
+  return gw_guest_signal_dispatch(number, info, context, state);
 }
 
 static void guest_kernel_entry(int number, void *info, void *context) {
+  if (number == session->guest_notification) {
+    gw_guest_workers_notify(info, context);
+    return;
+  }
   if (guest_fault(number, info, context)) {
     _exit(126);
   }
@@ -231,6 +243,18 @@ static int quiesce_owner(void) {
   return 0;
 }
 
+static int stop_service(void) {
+  full_guest_shutdown();
+  int error = 0;
+#ifdef GW_DOMAIN_NONLOCAL
+  if (session->guest_notification) {
+    error = gw_guest_workers_stop();
+  }
+#endif
+  int stopped = quiesce_owner();
+  return error ? error : stopped;
+}
+
 static _Noreturn void park_owner(void) {
   /* Do not resume full_guest_poll or invoke application code after STOP's
    * response. Host can stop its relay and restore its kernel handlers only
@@ -258,7 +282,7 @@ int main(int argc, char **argv) {
   struct jni_domain_handshake *hello = &session->handshake;
   uint64_t supported = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT;
 #ifdef GW_DOMAIN_NONLOCAL
-  supported |= GW_DOMAIN_CAP_NATIVE_UNWIND;
+  supported |= GW_DOMAIN_CAP_NATIVE_UNWIND | GW_DOMAIN_CAP_WORKER_ASYNC;
 #endif
   if (hello->magic != GW_DOMAIN_TRANSPORT_MAGIC ||
       hello->version != GW_DOMAIN_TRANSPORT_VERSION ||
@@ -291,7 +315,19 @@ int main(int argc, char **argv) {
     goto reject;
   }
 #ifdef GW_DOMAIN_NONLOCAL
-  gw_guest_signals_init();
+  if (session->guest_notification) {
+    int helper = session->guest_notification;
+    session->error =
+        session->domain || helper < SIGRTMIN || helper > SIGRTMAX
+            ? EINVAL
+            : gw_guest_workers_start(helper, session->reserved_signals,
+                                     session->quarantine_signals);
+    if (session->error) {
+      goto reject;
+    }
+  } else {
+    gw_guest_signals_init(NULL, 0);
+  }
   if (install_sigaction_hook(gw_guest_sigaction)) {
     session->error = EINVAL;
     goto reject;
@@ -307,6 +343,11 @@ int main(int argc, char **argv) {
   }
 #endif
   full_guest_start(&session->shared);
+#ifdef GW_DOMAIN_NONLOCAL
+  if (session->guest_notification) {
+    gw_guest_workers_unmask();
+  }
+#endif
   session->entry = adopted_entry;
   atomic_store_explicit(&session->shared.phase, 2, memory_order_release);
   atomic_store_explicit(&session->ready, 1, memory_order_release);
@@ -335,8 +376,7 @@ int main(int argc, char **argv) {
       } else if (operation == JNI_DOMAIN_FREE) {
         session->error = free_domain(c->token);
       } else if (operation == JNI_DOMAIN_STOP) {
-        full_guest_shutdown();
-        session->error = quiesce_owner();
+        session->error = stop_service();
       } else {
         session->error = EINVAL;
       }

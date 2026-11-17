@@ -398,9 +398,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   if (!cls) {
     return JNI_ERR;
   }
-  JNINativeMethod methods[] = {{"probe", "(I[B)I", (void *)probe},
-                               {"tid", "()J", (void *)tid}};
-  int result = (*env)->RegisterNatives(env, cls, methods, 2);
+  extern jint sdk_worker_signal_probe(JNIEnv *, jclass);
+  JNINativeMethod methods[] = {
+      {"probe", "(I[B)I", (void *)probe},
+      {"tid", "()J", (void *)tid},
+      {"workerSignals", "()I", (void *)sdk_worker_signal_probe}};
+  int result = (*env)->RegisterNatives(env, cls, methods,
+                                       sizeof methods / sizeof *methods);
   (*env)->DeleteLocalRef(env, cls);
   return result ? JNI_ERR : JNI_VERSION_1_6;
 }

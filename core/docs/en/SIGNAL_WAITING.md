@@ -369,3 +369,32 @@ selection is covered only within the explicitly configured bootstrap contract.
 Upstream: [Linux signal selection](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c),
 [native signalfd copying](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c),
 [atomic poll masks](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
+
+## Consuming logical Guest signals
+
+The owning GNU libc provides the optional version 1 consuming hook through
+`__gw_domain_signal_consume_hook`. Installed consumers compile
+`signal-consuming.c` and `signal-user-copy.c` with Guest libc. They bind the
+hook to a live logical recipient and enable wait notification before admitting
+targets.
+
+`sigpending` exposes the recipient's blocked private and shared pending bits.
+`sigwait`, `sigwaitinfo` and `sigtimedwait` consume the requested blocked set
+using private pending before shared pending, then Linux ordering within that
+queue. GNU's public wait API normalizes `SI_TKILL` to `SI_USER`. Kernel
+copyout retains `EFAULT` and a packet selected before an invalid output is
+consumed. An invalid input or timeout fails before selection.
+
+The registry samples pending work and its futex generation together. Accepted
+publication, recipient close and handler entry advance the generation. A
+publisher can therefore arrive between the last sample and the native wait
+without losing a wake. The owning GNU libc performs the cancellation point.
+A user Guest handler can interrupt an unmatched wait, while an unrelated
+kernel delivery leaves it waiting against the same monotonic deadline.
+Selection that finds a matching packet wins over a concurrent interruption.
+
+The GNU-only control through `core/tests/guest_async.py` checks public wait
+entrypoints, pointer faults, real kernel pending isolation, blocking producer
+wake, cancellation and visible Guest interruption. The installed JNI worker
+can opt in to the same consuming hook. Guest signalfd and the adopted
+carrier's consuming integration remain separate work.

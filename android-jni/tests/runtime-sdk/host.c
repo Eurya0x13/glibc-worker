@@ -39,11 +39,19 @@
 struct application {
   JavaVM *vm;
   int worker;
+  int worker_signals;
   int nonlocal;
   int router_quarantine;
   const struct gw_loader_api_v1 *loader;
   uint64_t module;
 };
+
+static _Atomic int worker_host_signal_count;
+
+static void worker_host_signal(int number) {
+  assert(number == SIGUSR1 && signal_host_relay_running());
+  atomic_fetch_add_explicit(&worker_host_signal_count, 1, memory_order_relaxed);
+}
 
 static long guest_owner_tid(void) {
   DIR *tasks = opendir("/proc/self/task");
@@ -1318,6 +1326,20 @@ static void *application_run(void *argument) {
     assert((*vm)->DetachCurrentThread(vm) == JNI_OK);
     return NULL;
   }
+  if (app->worker_signals) {
+    jmethodID signals =
+        (*env)->GetStaticMethodID(env, cls, "workerSignals", "()I");
+    assert(signals);
+    int children = (*env)->CallStaticIntMethod(env, cls, signals);
+    assert(children >= 0 && !(*env)->ExceptionCheck(env));
+    assert(atomic_load(&worker_host_signal_count) == 1);
+    printf(
+        "{\"stage\":\"worker-signals\",\"native_children\":%d,"
+        "\"cancelled_children\":%d,"
+        "\"alternate_stack\":true,\"one_shot\":true,\"consuming_waits\":true,"
+        "\"host_parallel_disposition\":true,\"native_cancel\":true}\n",
+        children >> 16, children & UINT16_MAX);
+  }
   jmethodID probe = (*env)->GetStaticMethodID(env, cls, "probe", "(I[B)I");
   jmethodID tid = (*env)->GetStaticMethodID(env, cls, "tid", "()J");
   assert(probe && tid);
@@ -1438,10 +1460,18 @@ int main(int argc, char **argv) {
                                           .service_path = argv[5],
                                           .bridge = &bridge,
                                           .signals = &signals};
-  int worker =
-      !strcmp(argv[8], "worker") || !strcmp(argv[8], "worker-borrowed-relay");
+  int worker_signals = !strcmp(argv[8], "worker-signals");
+  int worker = worker_signals || !strcmp(argv[8], "worker") ||
+               !strcmp(argv[8], "worker-borrowed-relay");
   if (worker) {
     config.backend = GW_EXECUTION_WORKER;
+  }
+  if (worker_signals) {
+    config.version = GW_HOST_RUNTIME_CONFIG_V2;
+    config.guest_notification = 54;
+    struct sigaction action = {.sa_handler = worker_host_signal};
+    sigemptyset(&action.sa_mask);
+    assert(!signal_router_action(SIGUSR1, &action, NULL));
   }
 
   int borrowed_relay = strstr(argv[8], "borrowed-relay") != NULL;
@@ -1478,6 +1508,7 @@ int main(int argc, char **argv) {
   struct application app = {
       .vm = vm,
       .worker = worker,
+      .worker_signals = worker_signals,
       .nonlocal = nonlocal,
       .router_quarantine = !strcmp(argv[8], "router-quarantine"),
       .loader = loader,

@@ -4,6 +4,7 @@
 #include "signal_contract.h"
 
 #define GW_HOST_RUNTIME_CONFIG_V1 1u
+#define GW_HOST_RUNTIME_CONFIG_V2 2u
 
 enum gw_execution_backend {
   GW_EXECUTION_SAME_THREAD = 0,
@@ -14,7 +15,12 @@ struct gw_host_runtime_config {
   uint32_t version;
   uint32_t size;
   enum gw_execution_backend backend;
-  uint32_t reserved;
+
+  union {
+    uint32_t reserved;           /* V1: required zero. */
+    uint32_t guest_notification; /* V2: explicit unused kernel RT number. */
+  };
+
   const char *loader_path;
   const char *library_path;
   const char *service_path;

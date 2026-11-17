@@ -97,7 +97,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   installed JNI service wiring and saved-frame integration remain required.
   Optional [NPTL creation callbacks](core/docs/en/THREAD_LIFECYCLE.md) now
   reserve identity before clone and complete admission before creation returns;
-  production recipient wiring must use them rather than child entry alone.
+  The installed, opt-in GNU worker connects these creation callbacks and the
+  disposition table to tagged delivery, mask changes and consuming waits.
+  The adopted-carrier path and its saved-frame accounting remain required.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM

@@ -107,7 +107,7 @@ uint64_t signal_router_token_ignore_generation(void *token) {
   return ((struct disposition *)token)->ignore_generation;
 }
 
-int signal_router_quarantine(void) {
+__attribute__((no_stack_protector)) int signal_router_quarantine(void) {
   atomic_store_explicit(&damaged, 1, memory_order_release);
   return EIO;
 }

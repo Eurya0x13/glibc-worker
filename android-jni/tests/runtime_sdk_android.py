@@ -35,6 +35,7 @@ parser.add_argument("--late-signals", action="store_true")
 parser.add_argument("--expect-unconfigured-profile", action="store_true")
 parser.add_argument("--nonlocal", dest="nonlocal_test", action="store_true")
 parser.add_argument("--native-unwind", action="store_true")
+parser.add_argument("--worker-signals", action="store_true")
 parser.add_argument(
     "--unwind-windows",
     action="store_true",
@@ -51,6 +52,8 @@ parser.add_argument(
     help="Require Guest fault recovery while Host blocks the same signal",
 )
 args = parser.parse_args()
+if args.worker_signals and (not args.native_unwind or args.nonlocal_test):
+    parser.error("--worker-signals requires --native-unwind without --nonlocal")
 if args.host_fault_mask and not (args.nonlocal_test and args.native_unwind):
     parser.error("--host-fault-mask requires --nonlocal --native-unwind")
 if args.signal_pending and not (args.nonlocal_test and args.native_unwind):
@@ -87,6 +90,8 @@ if args.signal_pending:
     out = out.with_name(out.name + "-pending")
 if args.host_fault_mask:
     out = out.with_name(out.name + "-host-mask")
+if args.worker_signals:
+    out = out.with_name(out.name + "-worker-signals")
 out.mkdir(parents=True, exist_ok=True)
 (out / "summary.json").unlink(missing_ok=True)
 (out / "failure.json").unlink(missing_ok=True)
@@ -191,6 +196,7 @@ run(
         source / "guest-waits.c",
         source / "guest-registrations.c",
         source / "guest-signal-unwind.c",
+        source / "guest-worker-signals.c",
         "-o",
         out / "module.so",
         "-lm",
@@ -320,6 +326,8 @@ if args.nonlocal_test:
         ]
 if args.host_fault_mask:
     cases += [("router-quarantine", False)]
+if args.worker_signals:
+    cases = [("worker-signals", False)]
 for mode, reject in cases:
     fatal = (
         int(mode.rsplit("-", 1)[1])

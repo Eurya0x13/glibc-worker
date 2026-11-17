@@ -233,6 +233,9 @@ int domain_owner_start(const char *loader, const char *libraries,
       .required = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT};
 #ifdef GW_DOMAIN_NONLOCAL
   session.handshake.required |= GW_DOMAIN_CAP_NATIVE_UNWIND;
+  if (session.guest_notification) {
+    session.handshake.required |= GW_DOMAIN_CAP_WORKER_ASYNC;
+  }
 #endif
   char pointer[32];
   snprintf(pointer, sizeof pointer, "%lx", (unsigned long)(uintptr_t)&session);

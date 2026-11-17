@@ -8,10 +8,14 @@
 static int owned_runtime, owned_relay;
 
 int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
-  if (!env || !c || c->version != GW_HOST_RUNTIME_CONFIG_V1 ||
-      c->size != sizeof *c || c->reserved || !c->loader_path ||
-      !*c->loader_path || !c->library_path || !*c->library_path ||
-      !c->service_path || !*c->service_path || !c->bridge ||
+  if (!env || !c ||
+      (c->version != GW_HOST_RUNTIME_CONFIG_V1 &&
+       c->version != GW_HOST_RUNTIME_CONFIG_V2) ||
+      c->size != sizeof *c ||
+      (c->version == GW_HOST_RUNTIME_CONFIG_V1 && c->reserved) ||
+      !c->loader_path || !*c->loader_path || !c->library_path ||
+      !*c->library_path || !c->service_path || !*c->service_path ||
+      !c->bridge ||
       (c->backend != GW_EXECUTION_SAME_THREAD &&
        c->backend != GW_EXECUTION_WORKER)) {
     return EINVAL;
@@ -20,6 +24,21 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
   int error = gw_signal_contract_validate(c->signals);
   if (error) {
     return error;
+  }
+  if (c->guest_notification) {
+    if (c->guest_notification < (unsigned)SIGRTMIN ||
+        c->guest_notification > 62 ||
+        (c->signals->host_reserved &
+         (UINT64_C(1) << (c->guest_notification - 1)))) {
+      return EINVAL;
+    }
+#ifdef GW_DOMAIN_NONLOCAL
+    if (c->backend != GW_EXECUTION_WORKER) {
+      return ENOTSUP;
+    }
+#else
+    return ENOTSUP;
+#endif
   }
 
   /* Preparing a VM's existing signal chain belongs to its integration layer.
@@ -38,11 +57,13 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
 
   session.shared.magic = MAGIC;
   session.domain = c->backend == GW_EXECUTION_SAME_THREAD;
+  session.guest_notification = (int)c->guest_notification;
   session.reserved_signals = c->signals->host_reserved;
   session.note_guest = signal_note_guest_thread;
   session.guest_thread = signal_guest_lifecycle;
 #ifdef GW_DOMAIN_NONLOCAL
   session.bind_guest_kernel = signal_guest_kernel_bind;
+  session.quarantine_signals = signal_router_quarantine;
 #endif
   /* Claim bridge ownership before creating helpers or changing Guest fault
    * routing. A validation failure leaves NEW and permits a corrected retry;
@@ -59,6 +80,9 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
 #ifdef GW_DOMAIN_NONLOCAL
   if (!error) {
     error = signal_router_guest_faults();
+  }
+  if (!error && session.guest_notification) {
+    error = signal_guest_kernel_notify_enable(session.guest_notification);
   }
 #endif
 

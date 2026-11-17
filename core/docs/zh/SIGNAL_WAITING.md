@@ -281,3 +281,24 @@ Guest 独立队列与标记发送、通用保存 continuation 生命周期，以
 上游实现：[Linux 信号选择](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c)、
 [原生 signalfd 复制](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)、
 [原子 poll 掩码](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。
+
+## 消费逻辑 Guest 信号
+
+所属 GNU libc 通过 `__gw_domain_signal_consume_hook` 提供可选的 version 1
+消费等待钩子。安装后的使用方以 Guest libc 编译 `signal-consuming.c` 和
+`signal-user-copy.c`，绑定有效逻辑接收者，并在准入前启用等待通知。
+
+`sigpending` 返回该接收者已屏蔽的私有与共享待决位。
+`sigwait`、`sigwaitinfo`、`sigtimedwait` 从传入的屏蔽集合中消费，先选择
+私有队列，再选择共享队列，各队列内遵循 Linux 顺序。GNU 的公开等待将
+`SI_TKILL` 转换为 `SI_USER`。内核复制保留 `EFAULT`，输出地址无效时，
+已选择的消息仍被消费；输入或超时无效则在选择前失败。
+
+注册表在同一事务中读取待决消息及 futex 代次。接受发布、关闭接收者、进入实际
+处理器都会推进代次。发送落在取样与原生等待之间时也不会丢失唤醒。所属 GNU
+libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等待，其他内核投递
+则继续使用同一单调时钟截止时间；同时有匹配消息时优先消费该消息。
+
+`core/tests/guest_async.py` 的 GNU 原生对照检查公开等待入口、指针错误、与
+真实内核待决队列隔离、发布唤醒阻塞者、取消及 Guest 可见中断。已安装 JNI worker
+可以启用同一钩子。Guest signalfd 与收养载体的消费接入仍需另行实现。

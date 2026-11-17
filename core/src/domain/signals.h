@@ -48,6 +48,9 @@ void signal_guest_lifecycle(int);
 /* GNU pthread signals tail-enter this Guest-owned kernel handler, with no
  * Host C/assembly frame left underneath native forced unwind. */
 int signal_guest_kernel_bind(void (*)(int, void *, void *));
+/* Reserve an internal notifier for native GNU recipients. Install before
+ * their loader starts. The number stays leased until router shutdown. */
+int signal_guest_kernel_notify_enable(int);
 uint64_t signal_carrier_mask(struct signal_slot *, uint64_t, int guest);
 uint64_t signal_host_physical_mask(uint64_t);
 uint64_t signal_host_logical_mask(uint64_t);

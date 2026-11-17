@@ -2,6 +2,7 @@
 #ifdef GW_DOMAIN_NONLOCAL
 #define _GNU_SOURCE
 #include "domain_signals.h"
+#include "domain_signal_workers.h"
 #include "nonlocal-mask.h"
 #include "signal-stack.h"
 #include "signal-actions.h"
@@ -10,10 +11,11 @@
 #include <string.h>
 #include <ucontext.h>
 
-static struct gw_signal_actions actions;
+struct gw_signal_actions gw_guest_actions;
 
-void gw_guest_signals_init(void) {
-  gw_signal_actions_init(&actions, NULL, 0);
+void gw_guest_signals_init(struct gw_signal_targets *targets,
+                           uint64_t reserved) {
+  gw_signal_actions_init(&gw_guest_actions, targets, reserved);
 }
 
 static _Noreturn void guest_default(int number) {
@@ -43,14 +45,18 @@ static int synchronous_number(int number) {
 
 int gw_guest_sigaction(int number, const void *input, void *output,
                        int *handled) {
-  if (!synchronous_number(number)) {
+  /* Public GNU sigaction rejects its private 63/64 channels. The internal
+   * registration entry still owns their real cancellation and setxid state. */
+  if (number == SIGKILL || number == SIGSTOP || number == 63 || number == 64 ||
+      (!synchronous_number(number) && !gw_guest_actions.targets)) {
     *handled = 0;
     return 0;
   }
   *handled = 1;
   int saved = errno;
   uint64_t mask = gw_nonlocal_mask_block();
-  int error = gw_signal_actions_change(&actions, number, input, output);
+  int error =
+      gw_signal_actions_change(&gw_guest_actions, number, input, output);
   errno = error ? error : saved;
   gw_nonlocal_mask_restore(mask);
   return error ? -1 : 0;
@@ -61,10 +67,14 @@ struct guest_delivery {
   int number;
   void *information, *frame;
   uint64_t mask;
+  int disarm;
 };
 
 static void guest_delivery_run(void *argument) {
   struct guest_delivery *delivery = argument;
+  if (delivery->disarm) {
+    gw_signal_stack_set(&(stack_t){.ss_flags = SS_DISABLE});
+  }
   gw_nonlocal_mask_restore(delivery->mask);
   if (delivery->action->sa_flags & SA_SIGINFO) {
     delivery->action->sa_sigaction(delivery->number, delivery->information,
@@ -75,67 +85,132 @@ static void guest_delivery_run(void *argument) {
   gw_nonlocal_mask_block();
 }
 
-int gw_guest_signal_dispatch(int number, void *information, void *frame,
-                             uint64_t *logical, uint64_t carrier,
-                             uint64_t reserved) {
-  ucontext_t *context = frame;
+static uint64_t logical_mask(const ucontext_t *context,
+                             struct gw_guest_signal_state state) {
+  uint64_t physical;
+  memcpy(&physical, &context->uc_sigmask, sizeof physical);
+  return (physical & ~state.virtual_mask) |
+         (*state.logical & state.virtual_mask);
+}
+
+static uint64_t physical_mask(uint64_t logical,
+                              struct gw_guest_signal_state state) {
+  return (logical & ~state.virtual_mask) | (state.carrier & state.virtual_mask);
+}
+
+static void publish_mask(uint64_t logical, struct gw_guest_signal_state state) {
+  *state.logical = logical;
+  if (state.target) {
+    struct gw_signal_publication result =
+        gw_signal_target_mask(state.target, logical);
+    if (result.status || result.wake_error) {
+      /* A live worker owns its target until its NPTL exit callback. Wake
+       * failure is observed at the owning runtime boundary. */
+      gw_guest_workers_wake_error(result.status ? result.status
+                                                : result.wake_error);
+    }
+  }
+}
+
+static uintptr_t delivery_top(const struct sigaction *action,
+                              const ucontext_t *context, uintptr_t current_sp,
+                              int *disarm) {
+  uintptr_t interrupted_sp = gw_signal_interrupted_sp(context);
+  const stack_t *alternate = &context->uc_stack;
+  if (gw_stack_contains(alternate, interrupted_sp)) {
+    return 0;
+  }
+  int on_alternate = gw_stack_contains(alternate, current_sp);
+  if (action->sa_flags & SA_ONSTACK) {
+    if (!on_alternate && !(alternate->ss_flags & SS_DISABLE)) {
+      *disarm = !!((unsigned)alternate->ss_flags & GW_SS_AUTODISARM);
+      return (uintptr_t)alternate->ss_sp + alternate->ss_size;
+    }
+  } else if (on_alternate) {
+    /* The outer synchronous route may already have put the kernel frame on
+     * the alternate stack. Respect an ordinary-stack Guest action. */
+    return gw_signal_stack_top(interrupted_sp);
+  }
+  return 0;
+}
+
+static void dispatch_action(int number, void *information, ucontext_t *context,
+                            struct gw_guest_signal_state state,
+                            const struct sigaction *action, int synchronous) {
   uint64_t interrupted, action_mask;
-  memcpy(&interrupted, &context->uc_sigmask, sizeof interrupted);
-  interrupted = (interrupted & ~reserved) | (*logical & reserved);
+  interrupted = logical_mask(context, state);
   uint64_t bit = UINT64_C(1) << (number - 1);
-  /* Forced hardware faults also reset a blocked disposition. A suspended
-   * Host may have this signal unblocked physically while Guest blocks it
-   * logically, so the kernel alone cannot enforce this Guest rule. */
-  if (synchronous_number(number) && ((siginfo_t *)information)->si_code > 0 &&
-      (interrupted & bit)) {
+  if (action->sa_handler == SIG_DFL) {
+    if (!synchronous && (number == SIGCHLD || number == SIGURG ||
+                         number == SIGWINCH || number == SIGCONT)) {
+      return;
+    }
     guest_default(number);
   }
-  struct gw_signal_action selected;
-  if (gw_signal_actions_select(&actions, number, &selected)) {
-    _exit(126);
-  }
-  if (selected.action.sa_handler == SIG_DFL) {
-    guest_default(number);
-  }
-  if (selected.action.sa_handler == SIG_IGN) {
+  if (action->sa_handler == SIG_IGN) {
     /* Linux forces an ignored synchronous hardware fault back to default.
      * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
-    if (synchronous_number(number) && ((siginfo_t *)information)->si_code > 0) {
+    if (synchronous) {
       guest_default(number);
     }
-    return 0;
+    return;
   }
   /* A Guest handler may inspect/modify this mask, or pass this frame to its
    * native setcontext. Expose the interrupted logical mask, then translate
    * only the mask back for the kernel's eventual sigreturn.
    * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c */
   memcpy(&context->uc_sigmask, &interrupted, sizeof interrupted);
-  memcpy(&action_mask, &selected.action.sa_mask, sizeof action_mask);
+  memcpy(&action_mask, &action->sa_mask, sizeof action_mask);
   uint64_t effective = interrupted | action_mask;
-  if (!(selected.action.sa_flags & SA_NODEFER)) {
+  if (!(action->sa_flags & SA_NODEFER)) {
     effective |= bit;
   }
-  uint64_t kernel = (effective & ~reserved) | (carrier & reserved);
-  kernel = (kernel & ~bit) | (effective & bit);
-  uint64_t physical = gw_nonlocal_mask_block();
-  *logical = effective;
-  uintptr_t top = 0, interrupted_sp = gw_signal_interrupted_sp(context);
-  if (!(selected.action.sa_flags & SA_ONSTACK) &&
-      gw_stack_contains(&context->uc_stack, (uintptr_t)&physical) &&
-      !gw_stack_contains(&context->uc_stack, interrupted_sp)) {
-    /* Kernel SA_ONSTACK belongs to the outer route, while this logical Guest
-     * action chose the ordinary stack. Keep its kernel frame on the alternate
-     * stack, and invoke the handler below the interrupted stack's red zone. */
-    top = gw_signal_stack_top(interrupted_sp);
+  uint64_t kernel = physical_mask(effective, state);
+  if (synchronous) {
+    kernel = (kernel & ~bit) | (effective & bit);
   }
-  struct guest_delivery delivery = {&selected.action, number, information,
-                                    frame, kernel};
+  uint64_t physical = gw_nonlocal_mask_block();
+  publish_mask(effective, state);
+  if (state.target) {
+    gw_signal_target_note_delivery(state.target);
+  }
+
+  struct guest_delivery delivery = {action,  number, information,
+                                    context, kernel, 0};
+  uintptr_t top =
+      delivery_top(action, context, (uintptr_t)&physical, &delivery.disarm);
   domain_stack_call(guest_delivery_run, &delivery, top);
+
   memcpy(&interrupted, &context->uc_sigmask, sizeof interrupted);
-  *logical = interrupted;
-  kernel = (interrupted & ~reserved) | (carrier & reserved);
+  publish_mask(interrupted, state);
+  kernel = physical_mask(interrupted, state);
   memcpy(&context->uc_sigmask, &kernel, sizeof kernel);
   gw_nonlocal_mask_restore(physical);
+}
+
+int gw_guest_signal_dispatch(int number, void *information, void *frame,
+                             struct gw_guest_signal_state state) {
+  int synchronous =
+      synchronous_number(number) && ((siginfo_t *)information)->si_code > 0;
+  /* The physical mask can leave a logically blocked hardware fault enabled.
+   * Preserve the fault's native forced default action in that case. */
+  if (synchronous &&
+      (logical_mask(frame, state) & (UINT64_C(1) << (number - 1)))) {
+    guest_default(number);
+  }
+  struct gw_signal_action selected;
+  if (gw_signal_actions_select(&gw_guest_actions, number, &selected)) {
+    return EINVAL;
+  }
+  dispatch_action(number, information, frame, state, &selected.action,
+                  synchronous);
   return 0;
+}
+
+void gw_guest_signal_deliver(const struct gw_signal_delivery *delivery,
+                             void *frame, struct gw_guest_signal_state state) {
+  siginfo_t information = delivery->information;
+  dispatch_action(information.si_signo, &information, frame, state,
+                  &delivery->selected.action, 0);
 }
 #endif

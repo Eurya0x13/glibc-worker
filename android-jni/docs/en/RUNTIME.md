@@ -97,3 +97,20 @@ The opt-in unwind service uses owning-Guest [action snapshots](../../../core/doc
 for synchronous faults. Re-registering a handler no longer allocates a pinned
 record; an in-flight delivery retains its own complete action copy. This does
 not complete public asynchronous Guest service integration.
+
+With the opt-in native unwind build, a V2 config can set `guest_notification`
+to an explicitly unused public RT number for the worker backend. An occupied
+number fails admission. The matching Guest service reserves real pthread
+identities before clone, publishes their TID before returning from create,
+and routes tagged packets to the owning GNU signal entry. Ordinary Host
+packets still use the Host dispatcher. Cancellation and credential handlers
+for GNU channels 63/64 keep their native registration. STOP checks that all
+application recipients have retired before releasing the Guest registry.
+
+The worker path exercises tagged sends, independent dispositions and blocked
+set consumption without requiring module recompilation. This preview uses
+process-wide kernel policy for unsupported job-control signals by rejecting
+logical registration/sending with `EBUSY`. Guest signalfd, hidden/restart
+semantics for the full set of Guest I/O waits, and delivery to an adopted
+carrier while in Host/Java remain open. A nonzero V2 notification on
+same-thread currently returns `ENOTSUP`.

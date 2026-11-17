@@ -206,6 +206,31 @@ _Atomic int domain_sr_guest_deliveries;
 static _Atomic long guest_tids[DOMAIN_FIXTURE_CARRIERS + 1];
 static _Atomic uintptr_t guest_tps[DOMAIN_FIXTURE_CARRIERS + 1];
 static _Atomic(uintptr_t) guest_kernel_entry;
+static _Atomic int guest_kernel_notification;
+
+static void ignore_guest_notification(int number, siginfo_t *info,
+                                      void *context) {
+  (void)number;
+  (void)info;
+  /* Ordinary Host recipients cannot consume a native GNU queue. Treat an
+   * unexpected helper as hidden, including during an interposed Host wait. */
+  if (gw_signal_selection_hidden) {
+    uint64_t unused;
+    gw_signal_selection_hidden(context, &unused);
+  }
+}
+
+int signal_guest_kernel_notify_enable(int number) {
+  if (atomic_load_explicit(&guest_kernel_notification, memory_order_acquire)) {
+    return EALREADY;
+  }
+  int error = signal_router_internal_action(number, ignore_guest_notification);
+  if (!error) {
+    atomic_store_explicit(&guest_kernel_notification, number,
+                          memory_order_release);
+  }
+  return error;
+}
 
 /* The pinned GNU service installs this before admitting module constructors
  * or pthreads. Called with Guest TP; no Host libc, TLS or errno access. */
@@ -227,9 +252,11 @@ __attribute__((no_stack_protector)) int signal_guest_kernel_bind(
  */
 __attribute__((no_stack_protector)) uintptr_t
 domain_guest_thread_select(int number, const siginfo_t *information) {
-  if (information->si_code > 0 &&
-      (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
-       number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
+  if (number == atomic_load_explicit(&guest_kernel_notification,
+                                     memory_order_acquire) ||
+      (information->si_code > 0 &&
+       (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
+        number == SIGFPE || number == SIGTRAP || number == SIGSYS))) {
     return atomic_load_explicit(&guest_kernel_entry, memory_order_acquire);
   }
   return 0;
@@ -239,6 +266,10 @@ domain_guest_thread_select(int number, const siginfo_t *information) {
  * asynchronous Host handlers explicitly run on the real Host dispatcher. */
 __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
     int number, siginfo_t *info, void *context, void *token, uint64_t mask) {
+  if (number ==
+      atomic_load_explicit(&guest_kernel_notification, memory_order_acquire)) {
+    return; /* Native entry is not yet bound. No Guest sender is admitted. */
+  }
   if (info->si_code > 0 &&
       (number == SIGSEGV || number == SIGBUS || number == SIGILL ||
        number == SIGFPE || number == SIGTRAP || number == SIGSYS)) {
