@@ -99,14 +99,14 @@ Host 中断之后的余量。输入转换遵循载体的 LP64 libc：GNU 会规�
 证明仅设置 `SA_RESTART` 仍会暴露 `EINTR`。夹具验证 Host TLS 下的通知恢复，
 不等于生产 Guest 处理器在 Java 执行期间进入的验收。
 
-这不是通用 Host 系统调用虚拟化。睡眠接口、一般阻塞 I/O、
+这不是通用 Host 系统调用虚拟化。一般阻塞 I/O、
 libc 私有调用和原始系统调用尚未取得这项恢复保护。通用可保存/恢复的原生
 延续状态以及实际 Guest 异步入口仍需完成接入和生命周期工作。
 
 ### 睡眠接口的原生对照
 
 `signal_sleep_control` 只链接原生线程库，输出 `CONTROL_ONLY`，用于建立睡眠
-适配的验收条件，没有启用不完整的实现。Linux 和 Android ARM64 均确认以下差异：
+适配的独立验收条件，不依赖可选的恢复实现。Linux 和 Android ARM64 均确认以下差异：
 
 - `nanosleep` 与相对形式的 `clock_nanosleep` 成功结束时不访问不可写的剩余
   时间指针；中断后需要回写余量时则返回 `EFAULT`。提前校验输出，或用未经
@@ -122,7 +122,41 @@ libc 私有调用和原始系统调用尚未取得这项恢复保护。通用可
 切换。参见 Linux 的
 [`do_nanosleep`、`nanosleep_copyout` 及定时器初始化](https://github.com/torvalds/linux/blob/v6.12/kernel/time/hrtimer.c)
 和 [`poll_select_finish`](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。
-睡眠恢复除了隐藏通知重试，还必须保留原生输出拷贝、饱和、取消和中断语义。
+
+### 原生睡眠的透明恢复
+
+启用启动期通道后，公开 LP64 `nanosleep`、`clock_nanosleep`、`usleep` 和
+`sleep` 已支持只有隐藏通知时的重试。它们保留原生 `clock_nanosleep` 系统调用，
+不替换成 `ppoll`。相对睡眠使用同一截止时间和内核实际饱和后的余量，计入隐藏
+工作耗时；绝对睡眠使用原来的时钟和截止时间重试，保留时钟调整规则，并且
+不访问余量指针。真正的 Host 处理器保留原生中断。系统调用开始前执行的可见
+处理器不会缩短尚未开始的睡眠，即使其后立即发生隐藏通知。
+`clock_nanosleep` 保留 errno 并返回错误码；其他入口遵循载体的 LP64 约定。
+
+可识别的汇编解除屏蔽/入口窗口修复了过早通知竞态：在此窗口选中的通知跳过
+尚未进入的系统调用，重新计算预算，避免处理通知后反而进入无限等待。
+返回掩码捕获保留 Host 处理器的合法修改。对外只发布进程持有的稳定记录。
+
+只有相对睡眠被可见信号中断时才回写余量。内核通过启动期创建并填充的私有
+memfd 校验输出，保留 `EFAULT` 和部分拷贝行为，不使用未经检查的 C 写入。
+串行拷贝事务屏蔽可捕获信号，不在每次信号中分配资源。该描述符及一页存储
+随进程运行时保留，恢复路由器后也不释放。应用不得关闭或替换该描述符；
+描述符缺失或身份不符时返回 `ENOTSUP`。无法创建所需 memfd 时启动失败。
+这不是通用指针校验接口。
+
+GNU 延迟取消在原生系统调用窗口内生效，进入用户处理器或隐藏工作前恢复原模式。
+编译器强制展开清理负责退休等待、恢复掩码，不向 pthread 取消链发布可能被
+原生跳转遗弃的自动栈记录。Bionic 没有 `pthread_cancel` 或公开 get/setcontext
+API，Android 夹具明确报告这些用例不可用。参见 glibc 的
+[取消信号入口](https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_cancel.c)
+及 [取消类型发布](https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_setcanceltype.c)。
+
+`signal_sleep_test` 验证原生对照契约，并覆盖隐藏工作、嵌套/可见中断和相对/
+绝对时钟。`signal_sleep_lifecycle_test` 通过 `/proc/self/task/TID/syscall`
+确认真正进入阻塞系统调用，再验证通知、取消、原生 `siglongjmp`/`setcontext`、
+后续睡眠及接收者退出；还在入口重装窗口排入通知。这些是 Linux x86_64 和
+Android ARM64 上的 Host 侧验收，不代表 Java 执行期间独立 Guest 处理器入口，
+也不代表通用可保存延续状态的回收已经完成。
 
 ## Linux 消费顺序与原子提交
 

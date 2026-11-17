@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/signalfd.h>
+#include <time.h>
 #include <ucontext.h>
 
 extern void gw_signal_selection_test_point(void) __attribute__((weak));
@@ -285,12 +286,31 @@ struct sleep_record {
   uintptr_t syscall_stack;
   struct sleep_record *next, *previous;
   uint64_t return_mask, execution_mask;
+  uint64_t native_return_mask;
+  int native_mask_valid, native_attempted;
   volatile sig_atomic_t interrupted, restart, hidden, retired, pinned;
+  clockid_t native_clock;
+  int native_clock_set, native_hidden_valid, native_visible_valid;
+  int native_cancel_active, native_cancel_type, native_cancel_managed;
+  int native_preentry_pending, native_host_depth, native_host_begin_valid;
+  struct timespec native_host_begin;
+  __int128 native_host_shift;
+  struct timespec native_hidden_at, native_visible_at;
 };
 
 _Static_assert(offsetof(struct sleep_record, syscall_stack) == 0,
                "atomic wait assembly ABI");
+_Static_assert(offsetof(struct sleep_record, execution_mask) == 32,
+               "native wait assembly ABI");
+_Static_assert(offsetof(struct sleep_record, native_return_mask) == 40,
+               "native wait assembly ABI");
+_Static_assert(offsetof(struct sleep_record, native_mask_valid) == 48,
+               "native wait assembly ABI");
+_Static_assert(offsetof(struct sleep_record, native_attempted) == 52,
+               "native wait assembly ABI");
 extern char gw_signal_wait_resume[];
+extern char gw_signal_native_unmasked[], gw_signal_native_resume[];
+extern char gw_signal_native_rearm[], gw_signal_native_rearm_blocked[];
 
 int gw_signal_wait_result(long result) {
   if (result < 0 && result >= -4095) {
@@ -363,6 +383,13 @@ static struct sleep_record *sleep_record(void) {
   record->syscall_stack = 0;
   record->interrupted = record->restart = record->retired = record->pinned = 0;
   record->hidden = 0;
+  record->native_mask_valid = record->native_attempted = 0;
+  record->native_clock_set = record->native_hidden_valid = 0;
+  record->native_visible_valid = 0;
+  record->native_cancel_active = 0;
+  record->native_cancel_managed = record->native_preentry_pending = 0;
+  record->native_host_depth = record->native_host_begin_valid = 0;
+  record->native_host_shift = 0;
   return record;
 }
 
@@ -417,7 +444,9 @@ int gw_signal_mask_wait_end(void *argument, int result, int error) {
   atomic_compare_exchange_strong_explicit(&waiting, &expected, record->previous,
                                           memory_order_acq_rel,
                                           memory_order_acquire);
-  uint64_t mask = record->interrupted ? returned : record->return_mask;
+  uint64_t mask = record->native_mask_valid ? record->native_return_mask
+                  : record->interrupted     ? returned
+                                            : record->return_mask;
   release_sleep_record(record);
   gw_nonlocal_mask_restore(mask);
   errno = error;
@@ -462,14 +491,19 @@ void gw_signal_mask_wait_cancel_check(void *record) {
   cancellation_check(record, test_cancel, NULL);
 }
 
-static struct sleep_record *interrupted_wait(void *context) {
+static struct sleep_record *interrupted_wait(void *context, int hidden) {
   ucontext_t *frame = context;
 #if defined(__x86_64__)
   uintptr_t pc = frame->uc_mcontext.gregs[REG_RIP];
 #else
   uintptr_t pc = frame->uc_mcontext.pc;
 #endif
-  if (pc != (uintptr_t)gw_signal_wait_resume) {
+  int native_setup = (pc >= (uintptr_t)gw_signal_native_unmasked &&
+                      pc < (uintptr_t)gw_signal_native_resume) ||
+                     (pc >= (uintptr_t)gw_signal_native_rearm &&
+                      pc < (uintptr_t)gw_signal_native_rearm_blocked);
+  if (pc != (uintptr_t)gw_signal_wait_resume &&
+      pc != (uintptr_t)gw_signal_native_resume && !native_setup) {
     return NULL;
   }
 
@@ -479,15 +513,124 @@ static struct sleep_record *interrupted_wait(void *context) {
   while (record && (record->retired || record->syscall_stack != stack)) {
     record = record->previous;
   }
+  if (native_setup && !hidden) {
+    /* A visible handler before native entry must leave an unstarted sleep
+     * intact. It restores the caller's cancellation mode before user code;
+     * rearm under a full mask before exposing the next syscall entry. */
+    if (record && record->native_cancel_managed) {
+      record->native_preentry_pending = 1;
+#if defined(__x86_64__)
+      frame->uc_mcontext.gregs[REG_RIP] = (uintptr_t)gw_signal_native_rearm;
+#else
+      frame->uc_mcontext.pc = (uintptr_t)gw_signal_native_rearm;
+#endif
+    }
+    return NULL;
+  }
+  if (record && native_setup) {
+    /* A notification can arrive when rt_sigprocmask returns, before the
+     * blocking syscall starts. Skip that not-yet-entered syscall, then let
+     * the stable record's ordinary retry/visible-interruption path decide.
+     * Otherwise an early wake could be followed by an indefinite sleep. */
+    record->native_attempted = 0;
+#if defined(__x86_64__)
+    frame->uc_mcontext.gregs[REG_RIP] = (uintptr_t)gw_signal_native_resume;
+    frame->uc_mcontext.gregs[REG_RAX] = -EINTR;
+#else
+    frame->uc_mcontext.pc = (uintptr_t)gw_signal_native_resume;
+    frame->uc_mcontext.regs[0] = -EINTR;
+#endif
+  }
   return record;
+}
+
+int gw_signal_native_wait_attempted(void *argument) {
+  return ((struct sleep_record *)argument)->native_attempted;
+}
+
+void gw_signal_native_wait_clock(void *argument, clockid_t clock) {
+  struct sleep_record *record = argument;
+  record->native_clock = clock;
+  record->native_clock_set = 1;
+}
+
+int gw_signal_native_wait_interval(void *argument, struct timespec *begin,
+                                   struct timespec *end) {
+  struct sleep_record *record = argument;
+  if (!record->hidden) {
+    return ENOENT;
+  }
+  if (!record->native_hidden_valid) {
+    return EIO;
+  }
+  *begin = record->native_hidden_at;
+  if (record->interrupted) {
+    if (!record->native_visible_valid) {
+      return EIO;
+    }
+    *end = record->native_visible_at;
+    return 0;
+  }
+  return clock_gettime(record->native_clock, end) ? errno : 0;
+}
+
+void gw_signal_native_wait_cancel_begin(void *argument) {
+  struct sleep_record *record = argument;
+  record->native_cancel_managed = 1;
+#ifndef __ANDROID__
+  record->native_cancel_active = 1;
+  /* The owning libc publishes oldtype before acting on pending cancellation.
+   * The caller has already installed its compiler unwind-only cleanup. No
+   * pthread cleanup-buffer pointer is published into a signal-visible stack.
+   * https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_setcanceltype.c
+   */
+  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,
+                        &record->native_cancel_type);
+#else
+  (void)argument;
+#endif
+}
+
+void gw_signal_native_wait_cancel_end(void *argument) {
+#ifndef __ANDROID__
+  struct sleep_record *record = argument;
+  if (record->native_cancel_active) {
+    record->native_cancel_active = 0;
+    pthread_setcanceltype(record->native_cancel_type, NULL);
+  }
+#else
+  (void)argument;
+#endif
+}
+
+void gw_signal_native_wait_rearm(void *argument) {
+  struct sleep_record *record = argument;
+  record->return_mask = record->execution_mask;
+  gw_signal_native_wait_cancel_begin(record);
+}
+
+__int128 gw_signal_native_wait_host_shift(void *argument) {
+  struct sleep_record *record = argument;
+  __int128 shift = record->native_host_shift;
+  record->native_host_shift = 0;
+  return shift;
+}
+
+static void note_visible(struct sleep_record *record) {
+  if (record->hidden && !record->interrupted && record->native_clock_set) {
+    record->native_visible_valid =
+        !clock_gettime(record->native_clock, &record->native_visible_at);
+  }
+  record->interrupted = 1;
 }
 
 int gw_signal_selection_interrupt(void *token, void *context,
                                   uint64_t *execution) {
-  struct sleep_record *record = interrupted_wait(context);
+  struct sleep_record *record = interrupted_wait(context, 0);
   if (!record) {
     return 0;
   }
+  gw_signal_native_wait_cancel_end(record);
   ucontext_t *frame = context;
 
   /* A kernel may construct several frames before the first user instruction.
@@ -496,7 +639,7 @@ int gw_signal_selection_interrupt(void *token, void *context,
    * Parent rows referenced by saved waits stay pinned, never recycled through
    * a nonlocal exit or a later stack resume. */
   atomic_store_explicit(&waiting, record->previous, memory_order_release);
-  record->interrupted = 1;
+  note_visible(record);
   record->restart = signal_router_token_restart(token);
   memcpy(&frame->uc_sigmask, &record->return_mask, sizeof record->return_mask);
   *execution = record->execution_mask;
@@ -504,16 +647,21 @@ int gw_signal_selection_interrupt(void *token, void *context,
 }
 
 int gw_signal_selection_hidden(void *context, uint64_t *execution) {
-  struct sleep_record *record = interrupted_wait(context);
+  struct sleep_record *record = interrupted_wait(context, 1);
   if (!record) {
     return 0;
   }
+  gw_signal_native_wait_cancel_end(record);
 
   /* Keep a hidden wait published until the retry decision. A real Host
    * handler may run after this frame, or during future Guest handler work;
    * that visible delivery must prevent transparent EINTR retry. Nested waits
    * retain their own rows and restore this row when they retire. */
   record->hidden = 1;
+  if (record->native_clock_set) {
+    record->native_hidden_valid =
+        !clock_gettime(record->native_clock, &record->native_hidden_at);
+  }
   ucontext_t *frame = context;
   memcpy(&frame->uc_sigmask, &record->return_mask, sizeof record->return_mask);
   *execution = record->execution_mask;
@@ -528,13 +676,39 @@ void gw_signal_wait_host_delivery(void) {
   struct sleep_record *record =
       atomic_load_explicit(&waiting, memory_order_acquire);
   for (; record; record = record->previous) {
+    gw_signal_native_wait_cancel_end(record);
+    if (!record->retired && record->native_preentry_pending &&
+        record->native_clock_set && !record->native_host_depth++) {
+      record->native_host_begin_valid =
+          !clock_gettime(record->native_clock, &record->native_host_begin);
+    }
     if (!record->retired && record->hidden) {
-      record->interrupted = 1;
+      note_visible(record);
     }
   }
 }
 
-int gw_signal_mask_wait_retry(void *argument, int result, int error) {
+void gw_signal_wait_host_return(void) {
+  struct sleep_record *record =
+      atomic_load_explicit(&waiting, memory_order_acquire);
+  for (; record; record = record->previous) {
+    if (record->retired || !record->native_host_depth ||
+        --record->native_host_depth) {
+      continue;
+    }
+    struct timespec now;
+    if (record->native_host_begin_valid &&
+        !clock_gettime(record->native_clock, &now)) {
+      record->native_host_shift +=
+          ((__int128)now.tv_sec - record->native_host_begin.tv_sec) *
+              1000000000 +
+          now.tv_nsec - record->native_host_begin.tv_nsec;
+    }
+    record->native_preentry_pending = 0;
+  }
+}
+
+static int retry_wait(void *argument, int result, int error, int native) {
   struct sleep_record *record = argument;
   if (result >= 0 || error != EINTR || !record->hidden) {
     return 0;
@@ -546,10 +720,24 @@ int gw_signal_mask_wait_retry(void *argument, int result, int error) {
     return 0;
   }
   record->hidden = 0;
+  record->native_mask_valid = 0;
+  record->native_hidden_valid = record->native_visible_valid = 0;
   record->syscall_stack = 0;
   atomic_store_explicit(&waiting, record, memory_order_release);
-  gw_signal_mask_wait_cancel_check(record);
+  if (native) {
+    test_cancel(NULL); /* The caller owns a compiler unwind-only cleanup. */
+  } else {
+    gw_signal_mask_wait_cancel_check(record);
+  }
   return 1;
+}
+
+int gw_signal_mask_wait_retry(void *argument, int result, int error) {
+  return retry_wait(argument, result, error, 0);
+}
+
+int gw_signal_native_wait_retry(void *argument, int result, int error) {
+  return retry_wait(argument, result, error, 1);
 }
 
 int gw_signal_selection_sleep(int descriptor, uint64_t wanted,

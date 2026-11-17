@@ -30,8 +30,14 @@ add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-suspend-interpose.c src/domain/signal-fd-interpose.c
   src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S
   src/domain/signal-stdio.c src/domain/signal-select.c
+  src/domain/signal-user-copy.c src/domain/signal-sleep-interpose.c
   src/domain/signal-mask-wait.S)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
+if(NOT ANDROID)
+  # C forced-unwind cleanup, without publishing a pthread cleanup stack record.
+  set_source_files_properties(src/domain/signal-sleep-interpose.c PROPERTIES
+    COMPILE_OPTIONS -fexceptions)
+endif()
 target_link_libraries(signal_interpose PUBLIC domains)
 # Libc and sanitizer runtimes can already satisfy a libc-named undefined
 # symbol. Retain each interposition object through its project-owned entry.
@@ -39,6 +45,7 @@ target_link_options(signal_interpose INTERFACE
   -Wl,-u,gw_signal_registration_interpose_anchor
   -Wl,-u,signal_mask_prepare -Wl,-u,signal_wait_prepare
   -Wl,-u,signal_suspend_prepare -Wl,-u,signal_fd_prepare
+  -Wl,-u,signal_sleep_prepare
   -Wl,-u,signal_stdio_enable)
 set_target_properties(signal_interpose PROPERTIES OUTPUT_NAME glibc_worker_signal_interpose)
 # Native capture/restore interposition stays opt-in during recovery integration.
@@ -118,6 +125,17 @@ if(BUILD_TESTING)
   target_compile_options(signal_sleep_control PRIVATE -UNDEBUG)
   add_test(NAME signal_sleep_control COMMAND signal_sleep_control)
   set_tests_properties(signal_sleep_control PROPERTIES TIMEOUT 15)
+  add_executable(signal_sleep_test tests/signal_sleep_control.c)
+  target_link_libraries(signal_sleep_test PRIVATE signal_interpose)
+  target_compile_definitions(signal_sleep_test PRIVATE GW_ROUTED_SLEEP)
+  target_compile_options(signal_sleep_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_sleep COMMAND signal_sleep_test)
+  set_tests_properties(signal_sleep PROPERTIES TIMEOUT 15)
+  add_executable(signal_sleep_lifecycle_test tests/signal_sleep_lifecycle.c)
+  target_link_libraries(signal_sleep_lifecycle_test PRIVATE signal_interpose)
+  target_compile_options(signal_sleep_lifecycle_test PRIVATE -UNDEBUG)
+  add_test(NAME signal_sleep_lifecycle COMMAND signal_sleep_lifecycle_test)
+  set_tests_properties(signal_sleep_lifecycle PROPERTIES TIMEOUT 15)
   add_executable(signal_fd_test tests/signal_fd.c)
   add_library(signal_close_backend SHARED tests/signal_close_backend.c)
   target_link_libraries(signal_close_backend PRIVATE ${CMAKE_DL_LIBS})

@@ -124,16 +124,16 @@ native-only control demonstrates that `SA_RESTART` alone still exposes `EINTR`.
 The fixture exercises notification recovery under Host TLS; it is not acceptance
 of a production Guest handler entered while Java executes.
 
-This is not general Host syscall virtualization. Sleep APIs,
-ordinary blocking I/O, private libc calls and raw syscalls do not acquire this
+This is not general Host syscall virtualization. Ordinary blocking I/O,
+private libc calls and raw syscalls do not acquire this
 recovery scope. General saved/resumable native continuations and actual Guest
 asynchronous entry still require the remaining integration/lifetime work.
 
 ### Native sleep controls
 
 `signal_sleep_control` links only the native thread library and reports
-`CONTROL_ONLY`. It establishes sleep-adapter requirements without enabling a
-partial implementation. Both Linux and Android ARM64 show these differences:
+`CONTROL_ONLY`. It establishes sleep-adapter requirements independently of the
+opt-in implementation. Both Linux and Android ARM64 show these differences:
 
 - `nanosleep` and relative `clock_nanosleep` ignore an inaccessible remainder
   pointer on successful completion, but return `EFAULT` when interrupted and
@@ -152,8 +152,51 @@ fixed delay that assumes syscall entry. The inaccessible output is a real
 `PROT_NONE` mapping. No Host/Guest switching is involved. See Linux
 [`do_nanosleep`, `nanosleep_copyout` and timer initialization](https://github.com/torvalds/linux/blob/v6.12/kernel/time/hrtimer.c)
 and [`poll_select_finish`](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
-Sleep recovery still needs native copyout, saturation, cancellation and
-interruption semantics in addition to hidden-notification retry.
+
+### Transparent native sleeps
+
+With the bootstrap channel enabled, public LP64 `nanosleep`, `clock_nanosleep`,
+`usleep` and `sleep` now retry hidden-only notifications. They retain the native
+`clock_nanosleep` syscall rather than substituting `ppoll`. Relative sleeps
+count hidden work against one deadline and the kernel's actual saturated
+remainder. Absolute sleeps retry the original clock/deadline, retaining its
+clock adjustment rules; they never access the remainder pointer. Actual Host
+handlers retain native interruption. A visible handler before syscall entry
+does not shorten an unstarted sleep, even if a hidden notification immediately
+follows it. `clock_nanosleep` preserves errno and returns the error number;
+the other entry points retain the carrier's LP64 conventions.
+
+An identifiable assembly unmask/entry window closes the early-notification
+race. A helper selected there skips the unstarted syscall and recomputes the
+budget instead of returning to an indefinite sleep. Return-mask capture retains
+valid Host handler edits. Only stable process-owned rows are published.
+
+Remainder copyout occurs only after a visible relative interruption. The kernel
+validates it through a bootstrap-created, populated, private memfd, preserving
+`EFAULT` and partial-copy behavior without an unchecked C store. The serialized
+copy transaction blocks catchable signals and performs no per-signal allocation.
+Its one descriptor/page remain pinned with the process runtime, even after
+router restoration. Application code must not close/replace that descriptor;
+an absent or mismatched descriptor returns `ENOTSUP`. Bootstrap fails if the
+required memfd cannot be created. This is not general pointer validation.
+
+GNU deferred cancellation is enabled across the native syscall window and
+restored before user handlers or hidden work. Compiler forced-unwind cleanup
+retires the wait and restores its mask. It publishes no automatic pthread
+cleanup-chain pointer that a native signal jump could abandon. Bionic has no
+`pthread_cancel` or public get/setcontext API; the Android fixture reports those
+cases as unavailable. See
+glibc's [cancellation signal entry](https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_cancel.c)
+and [cancel-type publication](https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_setcanceltype.c).
+
+`signal_sleep_test` runs the native control contracts plus hidden work,
+nested/visible interruptions and relative/absolute clock cases.
+`signal_sleep_lifecycle_test` observes actual blocked syscalls through
+`/proc/self/task/TID/syscall`, then tests notification, cancellation, native
+`siglongjmp`/`setcontext`, subsequent sleeps and recipient teardown. It also
+queues a helper in the pre-entry rearm window. These are Host-side acceptance
+tests on Linux x86_64 and Android ARM64, not proof of independent Guest handler
+entry during Java execution or general saved-continuation reclamation.
 
 ## Linux consuming order and atomic commit
 

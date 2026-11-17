@@ -35,12 +35,15 @@ Guest handler execution must also remain transparent to a suspended Host
 blocking wait. Internal notifications do not create Host `EINTR`; preserve its
 original timeout and still expose real Host-owned signal interruptions.
 Active bootstrap atomic mask-waits, nullable masks, `poll`, `select` and `epoll_wait` now
-have hidden-notification retry with one monotonic timeout budget. This is a
-Host-side prerequisite, not a production Guest entry pass. Sleep APIs, ordinary
+have hidden-notification retry with one monotonic timeout budget. Public LP64
+sleep APIs now retain native timers, copyout, errno and cancellation while
+retrying hidden work; see the
+[sleep adapter](core/docs/en/SIGNAL_WAITING.md#transparent-native-sleeps).
+This is a Host-side prerequisite, not a production Guest entry pass. Ordinary
 blocking I/O and private/raw paths still need review.
 The native-only sleep control now reproduces remainder-pointer `EFAULT`, errno
 conventions and differing hrtimer/ppoll saturation on both kernels. A sleep
-adapter must retain those semantics rather than simply reuse a ppoll remainder;
+adapter retains those semantics rather than reusing a ppoll remainder;
 see [sleep controls](core/docs/en/SIGNAL_WAITING.md#native-sleep-controls).
 
 The ordinary service enforces Host signal reservations. The opt-in unwind

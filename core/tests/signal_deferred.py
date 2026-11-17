@@ -51,6 +51,8 @@ targets = [
     "signal_stdio_test",
     "signal_waiting_test",
     "signal_sleep_control",
+    "signal_sleep_test",
+    "signal_sleep_lifecycle_test",
     "signal_fd_test",
     "signal_fd_lifecycle_test",
     "signal_delivery_test",
@@ -71,6 +73,7 @@ inputs = [
     core / "tests/signal_stdio.c",
     core / "tests/signal_waiting.c",
     core / "tests/signal_sleep_control.c",
+    core / "tests/signal_sleep_lifecycle.c",
     core / "tests/signal_fd.c",
     core / "tests/signal_fd_lifecycle.c",
     core / "tests/signal_delivery.c",
@@ -165,7 +168,31 @@ try:
             }, data
             controls.append({"case": case, **data})
             continue
-        if target == "signal_fd_lifecycle_test":
+        if target == "signal_sleep_lifecycle_test":
+            data = json.loads(result.stdout)
+            expected = {
+                "result": "PASS",
+                "sleep_siglongjmp": True,
+                "sleep_after_jump": True,
+                "sleep_actual_block_notification": True,
+                "sleep_preentry_rearm": True,
+            }
+            expected.update(
+                {
+                    "sleep_setcontext": "unavailable",
+                    "pthread_cancel": "unavailable",
+                }
+                if args.ndk
+                else {
+                    "sleep_setcontext": True,
+                    "pthread_cancel": True,
+                    "cancel_before_entry": True,
+                    "cancel_mask_restored": True,
+                }
+            )
+            assert data == expected, data
+            data.pop("result")
+        elif target == "signal_fd_lifecycle_test":
             observations = [
                 json.loads(line) for line in result.stdout.splitlines()
             ]

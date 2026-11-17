@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "signals.h"
 #include "signal-router.h"
+#include "signal-select.h"
 #include "nonlocal-mask.h"
 #include <assert.h>
 #include <dlfcn.h>
@@ -469,6 +470,55 @@ static void select_native_comparison(void) {
   }
 }
 
+static long gateway_sleep(void *record, const struct timespec *duration) {
+  return gw_signal_native_wait_syscall(
+      record, SYS_clock_nanosleep, CLOCK_MONOTONIC, 0, (long)duration, 0, 0, 0);
+}
+
+static void native_wait_gateway(void) {
+  struct timespec short_wait = {.tv_nsec = 1000000};
+  void *record = gw_signal_mask_wait_current_begin();
+  assert(record);
+  gw_signal_mask_wait_cancel_check(record);
+  assert(!gateway_sleep(record, &short_wait));
+  assert(gw_signal_native_wait_attempted(record));
+  uint64_t physical;
+  assert(!syscall(SYS_rt_sigprocmask, SIG_SETMASK, NULL, &physical,
+                  sizeof physical));
+  assert((physical & private_bits) == private_bits);
+  assert(!gw_signal_mask_wait_end(record, 0, EDOM) && errno == EDOM);
+  check_mask(1);
+
+  /* The helper is already pending at unmask. It must skip, rather than enter,
+   * the sixty-second syscall after returning from that notification. */
+  record = gw_signal_mask_wait_current_begin();
+  assert(record);
+  inject_hidden = 1;
+  gw_signal_mask_wait_test_point(2);
+  struct timespec long_wait = {.tv_sec = 60};
+  int result = gw_signal_wait_result(gateway_sleep(record, &long_wait));
+  assert(result == -1 && errno == EINTR);
+  assert(!gw_signal_native_wait_attempted(record));
+  assert(gw_signal_mask_wait_retry(record, result, errno));
+  short_wait = (struct timespec){0};
+  assert(!gateway_sleep(record, &short_wait));
+  assert(gw_signal_native_wait_attempted(record));
+  assert(!gw_signal_mask_wait_end(record, 0, EDOM) && errno == EDOM);
+  check_mask(1);
+
+  record = gw_signal_mask_wait_current_begin();
+  assert(record);
+  frame_edit = 1;
+  assert(!syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), SIGUSR1));
+  result = gw_signal_wait_result(gateway_sleep(record, &short_wait));
+  assert(!result);
+  assert(gw_signal_native_wait_attempted(record));
+  assert(!gw_signal_mask_wait_end(record, result, EDOM));
+  frame_edit = 0;
+  check_mask(0);
+  assert(!pthread_sigmask(SIG_SETMASK, &blocked, NULL));
+}
+
 int main(int argc, char **argv) {
   int native = argc == 2 && !strcmp(argv[1], "--native");
   assert(argc == 1 || native);
@@ -536,6 +586,7 @@ int main(int argc, char **argv) {
     transparent_waits(count);
     readiness_after_retry();
     select_native_comparison();
+    native_wait_gateway();
   }
   wait_jumps();
   assert(!close(epoll_fd));
@@ -558,7 +609,7 @@ int main(int argc, char **argv) {
                "\"original_deadline\":true,\"host_delivery_interrupts\":true,"
                "\"null_and_plain_wait_retry\":true,"
                "\"hidden_nested_wait\":true,\"select_timeout_semantics\":true,"
-               "\"readiness_after_retry\":true");
+               "\"readiness_after_retry\":true,\"native_wait_gateway\":true");
   fprintf(stderr, "waits_exercised=%u waits_skipped=%u jumps=%d\n", exercised,
           skipped, jumps);
 }

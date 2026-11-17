@@ -22,6 +22,8 @@ extern int signal_mask_prepare(void) __attribute__((weak));
 extern int signal_wait_prepare(void) __attribute__((weak));
 extern int signal_suspend_prepare(void) __attribute__((weak));
 extern int signal_fd_prepare(void) __attribute__((weak));
+extern int signal_sleep_prepare(void) __attribute__((weak));
+extern int gw_signal_user_copy_prepare(void) __attribute__((weak));
 extern int signal_fd_channel_ready(void) __attribute__((weak));
 extern int signal_fd_channel_busy(void) __attribute__((weak));
 extern int signal_host_relay_running(void) __attribute__((weak));
@@ -173,6 +175,14 @@ int signal_router_defer_faults(const int *notifications) {
     if (notification_original[i].sa_handler != SIG_DFL) {
       unlock_writer(mask);
       return EBUSY;
+    }
+  }
+
+  if (gw_signal_user_copy_prepare) {
+    int error = gw_signal_user_copy_prepare();
+    if (error) {
+      unlock_writer(mask);
+      return error;
     }
   }
 
@@ -374,7 +384,8 @@ int signal_router_init_with_backend(signal_router_backend backend) {
   /* Resolve optional interposer backends before any route can enter a Host
    * handler. sigprocmask and sigsuspend must not first call dlsym there. */
   int (*prepare[])(void) = {signal_mask_prepare, signal_wait_prepare,
-                            signal_suspend_prepare, signal_fd_prepare};
+                            signal_suspend_prepare, signal_fd_prepare,
+                            signal_sleep_prepare};
   int saved_errno = errno;
   for (unsigned i = 0; i < sizeof prepare / sizeof prepare[0]; ++i) {
     int error = prepare[i] ? prepare[i]() : 0;
@@ -826,6 +837,10 @@ static void host_delivery_run(void *argument) {
   invoke_delivery(delivery->number, delivery->information, delivery->context,
                   delivery->token);
   gw_nonlocal_mask_block();
+  extern void gw_signal_wait_host_return(void) __attribute__((weak));
+  if (gw_signal_wait_host_return) {
+    gw_signal_wait_host_return();
+  }
 }
 
 void signal_router_forward_domain(int number, siginfo_t *info, void *context,
