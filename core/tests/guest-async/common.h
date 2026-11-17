@@ -2,6 +2,7 @@
 #define GW_TEST_GUEST_ASYNC_H
 #include "domain.h"
 #include "signal-targets.h"
+#include "signal-execution.h"
 #include <linux/futex.h>
 #include <stdatomic.h>
 #include <sys/syscall.h>
@@ -14,10 +15,20 @@ enum {
   TEST_TOTAL_PACKETS = TEST_PACKETS + 3,
   TEST_LOGICAL_SIGNAL = 56,
   TEST_NESTED_HOST_SIGNAL = SIGUSR1,
-  TEST_LAYOUT_WORDS = 12
+  TEST_LAYOUT_WORDS = 12,
+  TEST_EXECUTIONS = 19,
+  TEST_RECOVERY_DEPTH = 3,
+  TEST_RECOVERY_VALUE = 17999
 };
 
-enum { OWNER_ALLOC = 1, OWNER_SEND, OWNER_CLOSE, OWNER_FREE, OWNER_EMPTY };
+enum {
+  OWNER_ALLOC = 1,
+  OWNER_SEND,
+  OWNER_CLOSE,
+  OWNER_FREE,
+  OWNER_EMPTY,
+  OWNER_RECOVER
+};
 
 enum {
   PHASE_READY = 1,
@@ -25,14 +36,24 @@ enum {
   PHASE_WAIT,
   PHASE_POLL,
   PHASE_HOST_INTERRUPT,
+  PHASE_RECOVER,
+  PHASE_RECOVER_AFTER,
   PHASE_GUEST,
   PHASE_DONE
+};
+
+struct async_carrier;
+
+struct test_execution {
+  struct gw_signal_execution scope;
+  struct async_carrier *carrier;
+  void *stack, *abort_stack;
+  int pinned, finished, recovery_depth;
 };
 
 struct async_carrier {
   struct exchange exchange;
   struct gw_signal_target *target;
-  struct domain_signal_call entry;
   void *token, *entry_stack;
   void *interrupted_host_frame;
   uintptr_t interrupted_host_pc, interrupted_host_sp;
@@ -49,6 +70,10 @@ struct async_carrier {
   int completed_work, budget_observed;
   _Atomic int nested_host_count;
   int host_alternate, host_onstack, host_autodisarm;
+  struct test_execution *executions;
+  int execution_count;
+  _Atomic int abandoned, recovered;
+  volatile sig_atomic_t recovery_depth;
 };
 
 struct async_control {
@@ -66,15 +91,15 @@ static inline void test_layout(uint32_t words[TEST_LAYOUT_WORDS]) {
       sizeof(struct async_control),
       sizeof(struct async_carrier),
       sizeof(struct exchange),
-      sizeof(struct domain_signal_call),
       sizeof(struct gw_signal_target),
       sizeof(struct gw_signal_targets),
       sizeof(struct gw_signal_pending),
       sizeof(siginfo_t),
       offsetof(struct async_control, targets),
       offsetof(struct async_carrier, target),
-      offsetof(struct async_carrier, entry),
-      offsetof(struct async_carrier, received)};
+      offsetof(struct async_carrier, received),
+      sizeof(struct gw_signal_execution),
+      sizeof(struct test_execution)};
   for (int i = 0; i < TEST_LAYOUT_WORDS; ++i) {
     words[i] = expected[i];
   }

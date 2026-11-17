@@ -170,8 +170,7 @@ the GNU loader to find frame information in Bionic-only images. Host-owned
 asynchronous signals keep the explicit Host dispatcher path. An unconfigured
 GNU hardware-fault entry still fails closed instead of entering a VM handler.
 
-The owning Guest's `domain_stack_call` and `domain_stack_call_record` include
-DWARF rules for their preserved original stack register, including while SP
+The owning Guest's `domain_stack_call` includes DWARF rules for their preserved original stack register, including while SP
 points at another stack. The native GNU unwinder retains its signal-restorer
 recognition on
 [ARM64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/aarch64/linux-unwind.h)

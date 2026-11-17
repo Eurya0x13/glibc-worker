@@ -36,11 +36,6 @@ void signal_unregister(struct signal_slot *);
 void signal_send(void);
 void signal_note_guest_thread(int, long, uintptr_t);
 struct signal_slot *signal_acquire(struct exchange *);
-/* Registered Host carrier, all catchable signals blocked. A non-NULL frame
- * is the actual interrupted Host kernel context; NULL means Guest-origin
- * interruption and retains any outer Host anchor. Normally returning only. */
-int signal_guest_enter(const struct domain_signal_call *, const stack_t *,
-                       void *host_frame);
 void signal_release(struct signal_slot *);
 /* A live thread can retry EBUSY after unblocking/consuming its pending signals.
  * An exiting recipient discards its own notifications, like kernel pending

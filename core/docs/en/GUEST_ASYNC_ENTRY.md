@@ -2,10 +2,10 @@
 
 [English](../en/GUEST_ASYNC_ENTRY.md) | [简体中文](../zh/GUEST_ASYNC_ENTRY.md)
 
-Core supplies a normally returning entry primitive for a runtime-owned Guest
-notification. This is a prerequisite for independent Guest asynchronous signals,
-not a complete `sigaction`/`ucontext` implementation. The installed JNI service
-does not yet enable this entry or consume its independent inbox.
+Core supplies entry and destructive recovery for a runtime-owned Guest
+notification on an adopted carrier. The native fixture exercises normal return
+and Host-target `siglongjmp`. Public Guest dispositions, arbitrary saved
+contexts and installed JNI integration remain separate acceptance work.
 
 ## Entry and ownership
 
@@ -32,41 +32,39 @@ while their Guest domain is executing. This route is not a Host callback entry
 for genuine GNU pthreads.
 That path still requires its own Guest-native lifecycle/disposition integration.
 
-The callback can call `domain_guest_signal_stack_call` with a valid Guest TCB,
-Guest FP/x18 state and a separately owned guarded entry stack. It changes stack
-and thread pointer, invokes Guest-compiled code, and restores Host stack,
-TP/FP/x18 on normal return. Neither domain calls the other libc's allocator.
-The integration must keep catchable signals blocked across these transitions.
-The primitive does not invent a Guest `ucontext` from a Host kernel frame or
-make an uncoordinated nonlocal exit safe.
+Initialize a `gw_signal_execution` from the valid owning Guest TCB with
+`gw_guest_signal_execution_init`. Compile that source and `start.S` with Guest
+libc. Provide guarded stacks for execution, alternate delivery and abort.
+Execution and alternate delivery may use the same mapping. The abort stack
+must be disjoint, and the invocation and its stacks must outlive all active
+frames and any saved continuation.
 
-For a registered carrier, `signal_guest_enter` retains the actual interrupted
-Host kernel context while executing Guest code. Pass that context only for a
-Host-origin entry; a Guest-origin interruption passes NULL and retains any
-outer Host anchor. Nested Host handlers then receive the real Host PC,
-registers and logical mask rather than a Guest PC or a stale cooperative SP.
-Their context-mask edits survive the outer kernel return. The actual Host
-floating-point control and ARM64 x18 are restored before Host dispatch.
+`signal_guest_execute` switches into a Guest checkpoint while delivery is
+blocked. It installs the Guest physical alternate stack after leaving the Host
+stack. A Host-origin entry supplies its actual kernel frame; a Guest-origin
+entry passes NULL and retains the outer Host anchor. Nested Host handlers
+receive the suspended Host PC, registers and logical mask. The saved Host SP
+from the cooperative switch bounds the stack space available to those handlers.
+Current Host FP control and ARM64 x18 are restored before Host dispatch.
 
-Supply a distinct, guarded `stack_t` of at least 16 KiB for each simultaneously
-live entry; zero flags select a normal physical routing stack. The underlying
-`domain_guest_signal_stack_enter` first leaves the Host stack, then configures
-the Guest physical alternate stack. It restores the old physical configuration
-only after returning to the Host stack. Reusing Host's alternate-stack top
-would let a nested kernel frame overwrite the original notification frame.
-The assembly records the lowest suspended Host SP at the actual stack switch;
-nested Host handlers use that boundary when sharing an already occupied Host
-stack. The logical Host alternate-stack configuration remains intact.
+A private notification uses the currently interrupted stack for its kernel
+frame. A Host handler can run on its ordinary stack while an earlier routing
+frame still occupies the Host alternate stack. An extra `SA_ONSTACK` on the
+private helper would instead reuse its occupied top. The application action's
+own `SA_ONSTACK` choice is applied when forwarding the Host handler.
 
-These are normally returning, stack-owned anchors. They do not authorize an
-uncoordinated jump or saving a context past the entry lifetime. Active entries
-make the runtime retirement check busy; zero entries alone does not establish
-recipient, selected-frame or saved-continuation quiescence. These lifetimes
-still require the production continuation coordinator.
+On Host-target `siglongjmp`, the Host native scope walks the abandoned suffix
+from the innermost execution outward. Each scope resumes Guest through a
+separate abort stack and its owning libc's checkpoint. Guest releases its
+bridge-owned resources with signals blocked and switches to a fresh Host
+landing. The landing restores Host stack configuration and unlinks its anchor
+before continuing to the requested Host checkpoint. Active entries prevent
+retirement. A separate quiescence contract covers kernel-selected entries and
+saved contexts.
 
 ## Wait recovery
 
-Before executing hidden work, `signal_guest_enter` calls
+Before executing hidden work, `signal_guest_execute` calls
 `gw_signal_selection_hidden` on the actual interrupted Host kernel frame.
 It therefore retains the existing wait's deadline, native remainder and visible
 Host interruption rules. Work in Guest TLS is charged to that same Host budget.
@@ -126,10 +124,15 @@ native `ppoll`; that wait must return `EINTR`. A separate disposable control
 deliberately omits the Host anchor and must observe the wrong context, proving
 that a successful Guest call alone would miss this failure.
 
-Source/artifact hashes, build/run commands, device identity and structured
-results live under `core/build/tests/guest-async{,-android}/`. The summary keeps
-`production_ready`, `guest_public_signal_abi`, `jni_vm_validated` and
-`nonlocal_async_entry_validated` false. Test-owned stacks and senders establish
-quiescence only for this normally returning native fixture. They do not prove
-independent module signals during Java, saved-frame resumption, genuine GNU
-thread targets or a live VM/ART reclamation provider.
+Twelve Host-target jumps abandon three nested Guest executions each. Each
+Guest finish callback releases its own target pin in reverse entry order. Host
+verifies the original mask, TLS and alternate-stack state, including native
+AUTODISARM behavior. A subsequent notification, ordinary Guest call and
+recipient teardown must succeed. Each invocation is single-use.
+
+Source/artifact hashes, commands, device identity and structured results live
+under `core/build/tests/guest-async{,-android}/`. The native test records
+`host_jump_guest_retirement` and `retired_async_entries` for the covered jump
+path. The broader `nonlocal_async_entry_validated` remains false pending
+Guest-target and saved-context recovery. The test also leaves
+`production_ready`, `guest_public_signal_abi` and `jni_vm_validated` false.

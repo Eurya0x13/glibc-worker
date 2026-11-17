@@ -6,6 +6,7 @@
 #include "signal-select.h"
 #include "signal-stack.h"
 #include "signals.h"
+#include "nonlocal.h"
 #include <assert.h>
 #include <errno.h>
 #include <fenv.h>
@@ -26,6 +27,7 @@ static struct async_control control;
 static struct async_carrier carriers[TEST_CARRIERS];
 static _Thread_local struct async_carrier *current;
 static _Thread_local int host_tls = 17;
+static _Thread_local sigjmp_buf recovery;
 #ifdef __ANDROID__
 static _Atomic int private_callbacks;
 
@@ -143,6 +145,19 @@ static void nested_host_signal(int number, siginfo_t *information,
   assert(frame->uc_mcontext.pc == current->interrupted_host_pc);
 #endif
   assert(gw_signal_interrupted_sp(frame) == current->interrupted_host_sp);
+  if (atomic_load(&current->phase) == PHASE_RECOVER) {
+    assert(!atomic_load(&current->abandoned));
+    if (current->recovery_depth < TEST_RECOVERY_DEPTH) {
+      uint64_t bits = (UINT64_C(1) << (control.notification - 1)) |
+                      (UINT64_C(1) << (TEST_NESTED_HOST_SIGNAL - 1));
+      assert(
+          !syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &bits, NULL, sizeof bits));
+      assert(!syscall(SYS_tgkill, getpid(), syscall(SYS_gettid),
+                      control.notification));
+      assert(!"Nested Guest recovery must leave every Host handler");
+    }
+    siglongjmp(recovery, 71);
+  }
   char local;
   uintptr_t here = (uintptr_t)&local;
   if (current->host_alternate && current->host_onstack) {
@@ -196,13 +211,17 @@ static void notification(int number, siginfo_t *information, void *context) {
   current->interrupted_host_frame = in_guest ? NULL : frame;
   current->interrupted_host_pc = pc;
   current->interrupted_host_sp = gw_signal_interrupted_sp(frame);
-  stack_t entry_stack = {.ss_sp = current->entry_stack, .ss_size = 65536};
 #ifdef GW_TEST_NO_HOST_ANCHOR
   void *host_frame = NULL;
 #else
   void *host_frame = current->interrupted_host_frame;
 #endif
-  assert(!signal_guest_enter(&current->entry, &entry_stack, host_frame));
+  assert(current->execution_count < TEST_EXECUTIONS);
+  struct test_execution *execution =
+      &current->executions[current->execution_count++];
+  current->entry_stack = execution->stack;
+  assert(!signal_guest_execute(&execution->scope, host_frame));
+  assert(signal_guest_execute(&execution->scope, host_frame) == EINVAL);
   current->interrupted_host_frame = NULL;
   assert(host_tls == 17);
   errno = ERANGE; /* The internal route must preserve interrupted Host errno. */
@@ -216,7 +235,12 @@ static void *carrier_main(void *argument) {
   exchange->swap = domain_swap;
   exchange->stack_low = (uintptr_t)stack_alloc(1024 * 1024);
   exchange->stack_high = exchange->stack_low + 1024 * 1024;
-  carrier->entry_stack = stack_alloc(65536);
+  carrier->executions = calloc(TEST_EXECUTIONS, sizeof *carrier->executions);
+  assert(carrier->executions);
+  for (int i = 0; i < TEST_EXECUTIONS; ++i) {
+    carrier->executions[i].stack = stack_alloc(65536);
+    carrier->executions[i].abort_stack = stack_alloc(65536);
+  }
   atomic_store_explicit(&carrier->phase, PHASE_READY, memory_order_release);
   while (atomic_load_explicit(&carrier->phase, memory_order_acquire) ==
          PHASE_READY) {
@@ -296,6 +320,44 @@ static void *carrier_main(void *argument) {
   struct timespec interrupted_wait = {.tv_sec = 5};
   assert(ppoll(NULL, 0, &interrupted_wait, NULL) == -1 && errno == EINTR);
   errno = EDOM;
+  host_check();
+  stack_t original_alternate;
+  gw_signal_stack_get(&original_alternate);
+  sigset_t original_recovery_mask;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &original_recovery_mask));
+  int resumed = sigsetjmp(recovery, 1);
+  if (!resumed) {
+    atomic_store_explicit(&carrier->phase, PHASE_RECOVER, memory_order_release);
+    for (;;) {
+      sched_yield();
+    }
+  }
+  assert(resumed == 71 &&
+         atomic_load(&carrier->abandoned) == TEST_RECOVERY_DEPTH &&
+         !carrier->recovery_depth);
+  carrier->interrupted_host_frame = NULL;
+  /* Another carrier can still have a legitimate active entry. Check this
+   * invocation's pin now; global retirement is checked after every join. */
+  assert(!carrier->target->pins);
+  host_check();
+  sigset_t restored_recovery_mask;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &restored_recovery_mask));
+  assert(!memcmp(&original_recovery_mask, &restored_recovery_mask,
+                 sizeof(uint64_t)));
+  stack_t restored_alternate;
+  gw_signal_stack_get(&restored_alternate);
+  if (carrier->host_onstack && carrier->host_autodisarm) {
+    assert(restored_alternate.ss_flags == SS_DISABLE);
+  } else {
+    assert(restored_alternate.ss_sp == original_alternate.ss_sp &&
+           restored_alternate.ss_size == original_alternate.ss_size &&
+           restored_alternate.ss_flags == original_alternate.ss_flags);
+  }
+  atomic_store_explicit(&carrier->phase, PHASE_RECOVER_AFTER,
+                        memory_order_release);
+  while (!atomic_load_explicit(&carrier->recovered, memory_order_acquire)) {
+    sched_yield();
+  }
   host_check();
   host_mask = gw_nonlocal_mask_block();
   exchange->host_execution_mask = host_mask;
@@ -379,6 +441,7 @@ static void start_owner(char **argv) {
 }
 
 static void prepare_routes(void) {
+  assert(!gw_nonlocal_init() && gw_nonlocal_ready());
   assert(control.notification != TEST_LOGICAL_SIGNAL);
   assert(TEST_LOGICAL_SIGNAL >= SIGRTMIN && TEST_LOGICAL_SIGNAL <= SIGRTMAX);
   assert(!signal_router_init());
@@ -486,6 +549,17 @@ static void send_guest_packets_and_close(void) {
   }
 }
 
+static void send_recovery_packets(void) {
+  for (int i = 0; i < TEST_CARRIERS; ++i) {
+    wait_value(&carriers[i].phase, PHASE_RECOVER);
+    assert(!owner_command(&carriers[i], OWNER_RECOVER, 0));
+    wait_value(&carriers[i].phase, PHASE_RECOVER_AFTER);
+    assert(!owner_command(&carriers[i], OWNER_SEND,
+                          carriers[i].index * 1000 + TEST_RECOVERY_VALUE));
+    wait_value(&carriers[i].recovered, 1);
+  }
+}
+
 struct totals {
   int packets, self_packets, host_entries, guest_entries, self_entries;
 };
@@ -506,7 +580,16 @@ static void join_carriers(pthread_t threads[TEST_CARRIERS],
     sum->guest_entries += carriers[i].guest_handlers;
     sum->self_entries += carriers[i].self_handlers;
     stack_free((void *)carriers[i].exchange.stack_low, 1024 * 1024);
-    stack_free(carriers[i].entry_stack, 65536);
+    assert(carriers[i].execution_count == TEST_EXECUTIONS);
+    for (int j = 0; j < TEST_EXECUTIONS; ++j) {
+      struct test_execution *execution = &carriers[i].executions[j];
+      assert(execution->finished && !execution->pinned);
+      assert(execution->scope.phase == GW_SIGNAL_EXECUTION_DONE ||
+             execution->scope.phase == GW_SIGNAL_EXECUTION_ABORTED);
+      stack_free(execution->stack, 65536);
+      stack_free(execution->abort_stack, 65536);
+    }
+    free(carriers[i].executions);
   }
 }
 
@@ -537,6 +620,7 @@ int main(int argc, char **argv) {
     start_carriers(batch, threads);
     send_busy_packets();
     send_wait_packets();
+    send_recovery_packets();
     send_guest_packets_and_close();
     join_carriers(threads, &sum);
   }
@@ -562,6 +646,8 @@ int main(int argc, char **argv) {
       "\"self_sends_before_return\":true,\"send_errno_contract\":true,"
       "\"handler_errno_visible\":true,"
       "\"runtime_target_registry\":true,\"entry_pins_balanced\":true,"
+      "\"host_jump_guest_retirement\":true,\"reentry_after_jump\":true,"
+      "\"nested_async_retirement\":true,\"retired_async_entries\":%d,"
       "\"nptl_signal_isolation\":true,\"guest_cancel_timer\":true,"
 #ifdef __ANDROID__
       "\"bionic_private_routes\":true,"
@@ -570,7 +656,7 @@ int main(int argc, char **argv) {
 #endif
       "\"recipient_close\":true,\"production_ready\":false}\n",
       sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,
-      sum.self_entries);
+      sum.self_entries, TEST_CARRIERS * TEST_BATCHES * TEST_RECOVERY_DEPTH);
   fflush(stdout);
   _exit(0);
 }

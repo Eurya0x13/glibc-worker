@@ -164,7 +164,7 @@ Guest 内核处理入口。外层汇编在跳转前撤销临时 Host 帧。Guest
 装载器查找仅由 Bionic 装载的映像中的帧信息。Host 所有的异步信号仍走显式 Host
 分派线程。未配置入口的 GNU 硬件故障继续失败关闭，不能交给 VM 解释。
 
-owning Guest 的 `domain_stack_call`、`domain_stack_call_record` 为保存原始栈
+所属 Guest 的 `domain_stack_call` 为保存原始栈
 位置的寄存器提供 DWARF 规则，在 SP 指向另一栈时也成立。原生 GNU 展开器继续
 使用自己的信号恢复入口识别：
 [ARM64](https://github.com/gcc-mirror/gcc/blob/releases/gcc-14/libgcc/config/aarch64/linux-unwind.h)、

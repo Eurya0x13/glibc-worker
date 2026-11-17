@@ -4,6 +4,8 @@
 #include "signal-relay.h"
 #include "raw_syscall.h"
 #include "nonlocal-mask.h"
+#include "nonlocal.h"
+#include "signal-execution.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -72,10 +74,10 @@ struct host_signal_anchor {
   struct signal_slot *slot;
   ucontext_t *frame;
   uint64_t mask, control[3];
-  uintptr_t suspended_sp;
+  const struct domain *suspended;
 };
-/* Accessed only after assembly restored Host TLS. These stack-owned anchors
- * live until the normally returning entry restores its owning kernel frame. */
+/* Accessed after assembly restores Host TLS. The entry owns each anchor until
+ * returning to its kernel frame or retiring it through native recovery. */
 static _Thread_local struct host_signal_anchor *host_anchor;
 static _Atomic unsigned deferred_recipients;
 static _Atomic unsigned independent_entries;
@@ -84,15 +86,33 @@ extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
 extern int gw_signal_selection_hidden(void *, uint64_t *) __attribute__((weak));
 
 #ifdef GW_DOMAIN_CHAIN
-int signal_guest_enter(const struct domain_signal_call *call,
-                       const stack_t *stack, void *host_frame) {
+static void restore_execution_stack(const stack_t *desired) {
+  stack_t actual;
+  gw_signal_stack_get(&actual);
+  if (actual.ss_sp != desired->ss_sp || actual.ss_size != desired->ss_size ||
+      actual.ss_flags != desired->ss_flags) {
+    gw_signal_stack_set(desired);
+  }
+}
+
+int signal_guest_execute(struct gw_signal_execution *execution,
+                         void *host_frame) {
   struct signal_slot *slot = host_recipient;
-  if (!slot || !call || call->tp != slot->exchange->guest.tp) {
+  if (!execution || execution->version != 1 || !slot ||
+      execution->guest.tp != slot->exchange->guest.tp ||
+      execution->abort.tp != execution->guest.tp ||
+      execution->phase != GW_SIGNAL_EXECUTION_PREPARED || !execution->swap) {
     return EINVAL;
   }
-  struct host_signal_anchor anchor = {
-      .previous = host_anchor, .slot = slot, .frame = host_frame};
-  atomic_fetch_add_explicit(&independent_entries, 1, memory_order_acquire);
+  if (!gw_nonlocal_ready()) {
+    return ENOTSUP;
+  }
+
+  uint64_t incoming_mask = gw_nonlocal_mask_block();
+  struct host_signal_anchor anchor = {.previous = host_anchor,
+                                      .slot = slot,
+                                      .frame = host_frame,
+                                      .suspended = &execution->host};
   if (host_frame) {
     memcpy(&anchor.mask, &anchor.frame->uc_sigmask, sizeof anchor.mask);
     if (gw_signal_selection_hidden) {
@@ -100,14 +120,34 @@ int signal_guest_enter(const struct domain_signal_call *call,
     }
     anchor.mask = signal_host_logical_mask(anchor.mask);
     read_control(anchor.frame, anchor.control);
+  }
+  stack_t original_stack;
+  gw_signal_stack_get(&original_stack);
+  struct gw_nonlocal_scope scope;
+  gw_nonlocal_enter(&scope);
+  atomic_fetch_add_explicit(&independent_entries, 1, memory_order_acquire);
+  if (host_frame) {
     host_anchor = &anchor;
   }
 
-  int result =
-      domain_guest_signal_stack_enter(call, stack, &anchor.suspended_sp);
+  if (!sigsetjmp(scope.landing, 0)) {
+    execution->swap(&execution->host, &execution->guest);
+    restore_execution_stack(&original_stack);
+  } else {
+    /* A nested Host handler may have changed its own alternate stack before
+     * the jump. Keep that actual Host state across Guest-only retirement. */
+    stack_t retained_stack;
+    gw_signal_stack_get(&retained_stack);
+    execution->swap(&execution->host, &execution->abort);
+    restore_execution_stack(&retained_stack);
+  }
   host_anchor = anchor.previous;
   atomic_fetch_sub_explicit(&independent_entries, 1, memory_order_release);
-  return result;
+  gw_nonlocal_leave(&scope);
+  gw_nonlocal_mask_restore(incoming_mask);
+
+  return execution->phase == GW_SIGNAL_EXECUTION_DONE ? execution->result
+                                                      : ECANCELED;
 }
 
 static uint64_t suspended_host_mask(struct signal_slot *slot) {
@@ -233,7 +273,7 @@ static void forward_anchored_host(int number, siginfo_t *info, void *token,
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);
   signal_router_forward_selected_suspended(
       number, info, frame, token, host_anchor->mask, &frame->uc_stack,
-      gw_signal_interrupted_sp(frame), host_anchor->suspended_sp, selected);
+      gw_signal_interrupted_sp(frame), host_anchor->suspended->sp, selected);
   memcpy(&mask, &frame->uc_sigmask, sizeof mask);
   mask = signal_host_physical_mask(mask);
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);

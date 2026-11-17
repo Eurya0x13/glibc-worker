@@ -10,9 +10,6 @@
 #define GW_SS_AUTODISARM (UINT32_C(1) << 31)
 
 void domain_stack_call(void (*)(void *), void *, uintptr_t);
-/* Record the lowest suspended caller SP at the actual stack switch. Nested
- * delivery must not reuse space occupied by these live transition frames. */
-void domain_stack_call_record(void (*)(void *), void *, uintptr_t, uintptr_t *);
 
 static inline int gw_stack_contains(const stack_t *stack, uintptr_t sp) {
   return !(stack->ss_flags & SS_DISABLE) &&

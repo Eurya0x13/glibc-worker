@@ -180,6 +180,8 @@ run(
         core / "src/domain/signal-pending.c",
         core / "src/domain/signal-inbox.c",
         core / "src/domain/signal-targets.c",
+        core / "src/domain/signal-execution-guest.c",
+        core / "src/domain/start.S",
         "-ldl",
         "-pthread",
         "-lm",
@@ -561,6 +563,7 @@ try:
     assert data.pop("self_entries") == 72
     assert data.pop("host_entries") >= 24
     assert data.pop("guest_entries") == 12
+    assert data.pop("retired_async_entries") == 36
     assert data.pop("production_ready") is False
     assert data.pop("bionic_private_routes") is bool(args.ndk)
     assert data and all(value is True for value in data.values()), data

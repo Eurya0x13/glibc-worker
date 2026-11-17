@@ -7,7 +7,8 @@ add_executable(guest_async_no_anchor host.c ${GW_DOMAIN_START} ${GW_GUEST_CLONE}
 target_compile_definitions(guest_async_no_anchor PRIVATE GW_TEST_NO_HOST_ANCHOR)
 foreach(target guest_async_host guest_async_no_anchor)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-  target_link_libraries(${target} PRIVATE glibc_worker::signal_interpose m)
+  target_link_libraries(${target} PRIVATE glibc_worker::signal_interpose
+    glibc_worker::nonlocal_interpose m)
   target_link_options(${target} PRIVATE -Wl,--export-dynamic)
   if(ANDROID)
     target_compile_options(${target} PRIVATE -fno-emulated-tls)

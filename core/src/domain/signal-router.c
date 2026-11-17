@@ -816,7 +816,14 @@ int signal_router_internal_action(int number,
     return EINVAL;
   }
   struct sigaction action = {.sa_sigaction = entry,
-                             .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART};
+                             .sa_flags = SA_SIGINFO | SA_RESTART};
+  /* This helper belongs to the runtime and runs before application selection.
+   * Keep its kernel frame on the interrupted stack. An alternate stack may
+   * still contain a suspended Host frame while a nested Host handler executes
+   * on its ordinary stack. Asking the kernel for SA_ONSTACK here would reuse
+   * that alternate stack from its top.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
+   * https://github.com/torvalds/linux/blob/v6.12/arch/x86/kernel/signal.c */
   wide_fault_mask(&action);
   return router_action(number, &action, NULL, 1) ? errno : 0;
 }

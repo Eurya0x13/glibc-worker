@@ -96,7 +96,6 @@ static int receive(int number, void *information, void *context) {
   assert((uintptr_t)&local >= (uintptr_t)carrier->entry_stack &&
          (uintptr_t)&local < (uintptr_t)carrier->entry_stack + 65536);
   assert(fegetround() == FE_UPWARD);
-  assert(!gw_signal_target_pin(carrier->target));
 
   int phase = atomic_load(&carrier->phase);
   if (carrier->interrupted_host_frame &&
@@ -165,9 +164,91 @@ static int receive(int number, void *information, void *context) {
   /* Deliberately perturb only Guest state; both return domains must retain
    * their own errno and FP control after the entry gateway returns. */
   assert(!fesetround(FE_TONEAREST));
-  assert(!gw_signal_target_unpin(carrier->target));
   errno = carrier->self_errno ? EILSEQ : saved_errno;
   return 0;
+}
+
+static int execute_receive(void *argument) {
+  struct test_execution *execution = argument;
+  struct async_carrier *carrier = execution->carrier;
+  assert(carrier == current && guest_tls == 41 && errno == EBADF);
+  assert(!execution->pinned && !execution->finished);
+  assert(!gw_signal_target_pin(carrier->target));
+  execution->pinned = 1;
+
+  int phase = atomic_load_explicit(&carrier->phase, memory_order_acquire);
+  if (phase == PHASE_RECOVER || phase == PHASE_RECOVER_AFTER) {
+    if (phase == PHASE_RECOVER) {
+      execution->recovery_depth = ++carrier->recovery_depth;
+    }
+    siginfo_t packet;
+    enum gw_signal_queue_source source;
+    assert(gw_signal_target_deliver(carrier->target, &packet, &source) ==
+           TEST_LOGICAL_SIGNAL);
+    assert(
+        source == GW_SIGNAL_THREAD && packet.si_code == SI_QUEUE &&
+        packet.si_value.sival_int ==
+            carrier->index * 1000 + TEST_RECOVERY_VALUE +
+                (phase == PHASE_RECOVER ? execution->recovery_depth - 1 : 0));
+    if (phase == PHASE_RECOVER) {
+      uint64_t bit = UINT64_C(1) << (TEST_NESTED_HOST_SIGNAL - 1);
+      assert(!syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &bit, NULL, sizeof bit));
+      assert(!syscall(SYS_tgkill, getpid(), syscall(SYS_gettid),
+                      TEST_NESTED_HOST_SIGNAL));
+      assert(!"Host jump must abandon this Guest invocation");
+    }
+    return 0;
+  }
+  return receive(control->notification, carrier, NULL);
+}
+
+static void finish_receive(void *argument, int abandoned) {
+  struct test_execution *execution = argument;
+  struct async_carrier *carrier = execution->carrier;
+  assert(carrier == current && guest_tls == 41);
+  assert(execution->pinned && !execution->finished);
+  uint64_t mask;
+  assert(!syscall(SYS_rt_sigprocmask, SIG_SETMASK, NULL, &mask, sizeof mask));
+  assert(mask == (UINT64_MAX & ~(UINT64_C(1) << (SIGKILL - 1)) &
+                  ~(UINT64_C(1) << (SIGSTOP - 1))));
+  assert(!gw_signal_target_unpin(carrier->target));
+  execution->pinned = 0;
+  execution->finished = 1;
+  if (abandoned) {
+    assert(execution->recovery_depth == carrier->recovery_depth);
+    --carrier->recovery_depth;
+    atomic_fetch_add_explicit(&carrier->abandoned, 1, memory_order_release);
+  } else if (atomic_load(&carrier->phase) == PHASE_RECOVER_AFTER) {
+    atomic_fetch_add_explicit(&carrier->recovered, 1, memory_order_release);
+  }
+}
+
+static void prepare_executions(struct async_carrier *carrier) {
+  for (int i = 0; i < TEST_EXECUTIONS; ++i) {
+    struct test_execution *execution = &carrier->executions[i];
+    execution->carrier = carrier;
+    struct gw_signal_execution_config config = {
+        .stack = execution->stack,
+        .stack_size = 65536,
+        .abort_stack = execution->abort_stack,
+        .abort_stack_size = 65536,
+        .alternate = {.ss_sp = execution->stack, .ss_size = 65536},
+        .swap = carrier->exchange.swap,
+        .invoke = execute_receive,
+        .finish = finish_receive,
+        .argument = execution};
+    if (!i) {
+      struct gw_signal_execution_config invalid = config;
+      invalid.abort_stack = config.stack;
+      assert(gw_guest_signal_execution_init(&execution->scope, &invalid) ==
+             EINVAL);
+      invalid = config;
+      invalid.alternate.ss_sp = config.abort_stack;
+      assert(gw_guest_signal_execution_init(&execution->scope, &invalid) ==
+             EINVAL);
+    }
+    assert(!gw_guest_signal_execution_init(&execution->scope, &config));
+  }
 }
 
 static void self_sends(struct async_carrier *carrier) {
@@ -219,22 +300,10 @@ static void serve(void *argument) {
   carrier->busy_end = (uintptr_t)gw_async_busy_end;
   assert(guest_tls == 41);
   assert(!fesetround(FE_UPWARD));
-  carrier->entry =
-      (struct domain_signal_call){.entry = receive,
-                                  .tp = (uintptr_t)__builtin_thread_pointer(),
-                                  .number = control->notification,
-                                  .info = carrier};
-#if defined(__x86_64__)
-  __asm__ volatile("stmxcsr %0" : "=m"(carrier->entry.control[0]));
-  __asm__ volatile("fnstcw %0" : "=m"(carrier->entry.control[1]));
-#else
-  __asm__ volatile("mrs %0, fpcr" : "=r"(carrier->entry.control[0]));
-  __asm__ volatile("mrs %0, fpsr" : "=r"(carrier->entry.control[1]));
-  __asm__ volatile("mov %0, x18" : "=r"(carrier->entry.x18));
-#endif
   assert(!gw_signal_target_open(&control->targets, (uintptr_t)carrier->token,
                                 exchange->host_tid, UINT64_MAX, carrier,
                                 &carrier->target));
+  prepare_executions(carrier);
   errno = EBADF;
   exchange->swap(&exchange->guest, &exchange->host);
   /* Host has not polled or entered Guest during PHASE_BUSY/PHASE_WAIT. This
@@ -352,6 +421,18 @@ int main(int argc, char **argv) {
       }
       case OWNER_SEND: {
         control->error = owner_send(carrier, control->value);
+        break;
+      }
+      case OWNER_RECOVER: {
+        select_carrier(carrier);
+        assert(!gw_signal_target_mask(carrier->target, UINT64_MAX).status);
+        for (int i = 0; i < TEST_RECOVERY_DEPTH; ++i) {
+          union sigval value = {.sival_int = carrier->index * 1000 +
+                                             TEST_RECOVERY_VALUE + i};
+          assert(!pthread_sigqueue((pthread_t)carrier->token,
+                                   TEST_LOGICAL_SIGNAL, value));
+        }
+        control->error = gw_signal_target_mask(carrier->target, 0).status;
         break;
       }
       case OWNER_CLOSE:

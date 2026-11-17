@@ -49,8 +49,9 @@ see [sleep controls](core/docs/en/SIGNAL_WAITING.md#native-sleep-controls).
 The [native cross-libc entry](core/docs/en/GUEST_ASYNC_ENTRY.md) now connects a
 Guest-owned inbox to actual adopted TCBs and guarded stacks. It validates busy
 Host/Guest interruption and transparent Host sleep/ppoll with real Guest work.
-The normally returning fixture is not public Guest sigaction/send integration,
-asynchronous nonlocal recovery or a JNI/VM compatibility pass.
+The native fixture also retires three nested asynchronous Guest entries on a
+Host-target `siglongjmp`. Installed JNI entry, Guest-target async recovery and
+general saved frames still need integration.
 
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,

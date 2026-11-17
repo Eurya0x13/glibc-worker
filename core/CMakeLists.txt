@@ -11,7 +11,7 @@ add_library(core STATIC src/bootstrap/loader_image.c src/bootstrap/clone.S
   src/domain/signal-contract.c)
 add_library(domains STATIC src/domain/switch.S src/domain/start.S
   src/domain/signals.c src/domain/signal-entry.S src/domain/signal-router.c
-  src/domain/nonlocal.c src/domain/signal-stack.S src/domain/signal-call.c
+  src/domain/nonlocal.c src/domain/signal-stack.S
   src/domain/signal-pending.c
   src/domain/signal-deferred.c src/domain/signal-relay.c
   src/domain/signal-inbox.c src/domain/signal-targets.c
@@ -210,7 +210,8 @@ install(DIRECTORY src/domain/ DESTINATION
         FILES_MATCHING PATTERN "*.h")
 install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/domain/signal-inbox.c src/domain/signal-targets.c
-        src/domain/signal-actions.c DESTINATION
+        src/domain/signal-actions.c src/domain/signal-execution-guest.c
+        src/domain/start.S DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/core/internal)
 install(TARGETS core domains signal_interpose nonlocal_interpose EXPORT GlibcWorkerCoreTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -2,9 +2,9 @@
 
 [English](../en/GUEST_ASYNC_ENTRY.md) | [简体中文](../zh/GUEST_ASYNC_ENTRY.md)
 
-core 提供供运行时通知使用、正常返回的 Guest 入口原语。它是独立 Guest 异步信号
-的前提，不是完整 `sigaction`/`ucontext` 实现。已安装的 JNI 服务尚未启用此入口，
-也尚未消费其独立 inbox。
+core 为收养载体上的 Guest 运行时通知提供入口和弃置恢复。原生夹具覆盖正常返回
+以及跳向 Host 检查点的 `siglongjmp`。公开 Guest 信号处置、通用保存上下文和已安装
+JNI 接入仍需分别验收。
 
 ## 入口和所有权
 
@@ -24,32 +24,30 @@ Host errno。对该预留路由的公开注册、替换和查询返回 `EBUSY`�
 目标是已登记的 Host 载体，包括其正在执行 Guest 域的情况。此路由不是供真正 GNU
 pthread 使用的 Host 回调入口；后者仍需独立的 Guest 原生生命周期和处置接入。
 
-回调可用有效的 Guest TCB、Guest FP/x18 状态和单独持有的保护页入口栈调用
-`domain_guest_signal_stack_call`。它切换栈和线程指针，执行 Guest 编译的代码，
-正常返回时恢复 Host 栈、TP/FP/x18。两个域都不调用另一套 libc 的分配器。接入方
-必须在这些切换期间保持可捕获信号屏蔽。原语不会把 Host 内核帧伪造成 Guest
-`ucontext`，也不会让未经协调的非局部退出变得安全。
+在有效的所属 Guest TCB 上用 `gw_guest_signal_execution_init` 初始化
+`gw_signal_execution`。该源码与 `start.S` 由 Guest libc 编译。执行、替代信号投递
+和弃置都使用带保护页的栈。执行与替代信号投递可共用映射，弃置栈必须独立。
+调用记录和栈必须活得比所有活动帧及保存续体更久。
 
-对于已登记载体，`signal_guest_enter` 在执行 Guest 期间持有实际被中断的
-Host 内核上下文。只有 Host 来源入口才传入该上下文；Guest 来源中断传 NULL，
-保留已有的外层 Host 锚点。嵌套 Host 处理器因此得到真正的 Host PC、寄存器和
-逻辑掩码，而非 Guest PC 或过期的协作切换 SP。处理器对上下文掩码的修改会在
-外层内核返回后保留。进入 Host 分派前恢复实际 Host 浮点控制状态及 ARM64 x18。
+`signal_guest_execute` 在屏蔽可捕获信号时切入 Guest 检查点。离开 Host 栈后才
+安装 Guest 物理替代信号栈。Host 来源入口传入实际内核帧，Guest 来源入口传 NULL
+以保留外层 Host 锚点。嵌套 Host 处理器收到暂停的 Host PC、寄存器和逻辑掩码。
+协作切换保存的 Host SP 限定处理器可用的栈空间。进入 Host 分派前恢复 Host
+浮点控制状态和 ARM64 x18。
 
-每个同时存活的入口需提供独立、有保护页、至少 16 KiB 的 `stack_t`，flags
-为零，作为物理路由栈。底层 `domain_guest_signal_stack_enter` 先离开 Host
-栈，再配置 Guest 物理备用信号栈；返回 Host 栈后才恢复旧配置。如果重用 Host
-备用栈顶，嵌套内核帧会覆盖仍存活的原通知帧。汇编在实际切栈处记录最低的
-悬挂 Host SP，嵌套 Host 处理器共享已占用的 Host 栈时使用此边界，同时保留
-Host 逻辑备用栈配置。
+私有通知的内核帧放在正被中断的栈上。此前的路由帧仍可能占用 Host 替代信号栈，
+而 Host 处理器此时运行在普通栈上。若私有通知额外设置 `SA_ONSTACK`，内核会
+从已占用的栈顶重新写入。转发 Host 处理器时仍按应用处置自己的 `SA_ONSTACK` 选择栈。
 
-这些锚点位于栈上，只支持正常返回，不允许未经协调的跳转，也不允许把上下文
-保存至入口生命周期之外。活跃入口会让运行时退出检查返回忙；入口计数为零
-不能证明接收者、已选择信号帧或保存续体已经静默，仍需生产续体协调器。
+跳向 Host 检查点的 `siglongjmp` 会从最内层开始，逐个退掉被跳过的原生作用域。
+每层从单独的弃置栈进入 Guest，由所属 libc 跳回检查点。Guest 屏蔽信号后释放桥
+持有的资源，切回一个新保存的 Host 恢复点。Host 恢复替代信号栈并解除锚点，再
+继续前往目标检查点。活动入口会阻止回收，内核已选中的入口及保存续体仍由独立的
+静止协议管理。
 
 ## 等待恢复
 
-执行隐藏工作前，`signal_guest_enter` 对实际被中断的 Host 内核帧调用
+执行隐藏工作前，`signal_guest_execute` 对实际被中断的 Host 内核帧调用
 `gw_signal_selection_hidden`，从而保留原等待的截止时间、原生余量及真正 Host
 中断规则。Guest TLS 中执行的工作也计入同一份 Host 预算。空通知或过期通知同样
 使用隐藏路径。选中的私有内核动作带有 `SA_RESTART`，但仅此不足以让睡眠/ppoll
@@ -97,9 +95,12 @@ Host `SA_ONSTACK` 开关，包括处理器内原生栈查询的标志。每个�
 信号，该等待必须返回 `EINTR`。独立的一次性对照故意不提供 Host 锚点，必须
 观察到错误上下文，证明仅有 Guest 调用成功不足以发现此类失败。
 
-源码/制品哈希、构建/运行命令、设备身份和结构化结果保存在
-`core/build/tests/guest-async{,-android}/`。摘要中的 `production_ready`、
-`guest_public_signal_abi`、`jni_vm_validated` 和 `nonlocal_async_entry_validated`
-保持 false。由测试持有的栈和发送者，只能建立这个正常返回原生夹具的静默边界，
-不能证明 Java 执行期间的独立模组信号、保存帧恢复、真正 GNU 线程目标，或活跃
-VM/ART 的回收提供者。
+12 次跳向 Host 的恢复各退出三层 Guest 入口。每层 Guest 清理按进入的逆序释放
+自己的目标 pin。Host 验证掩码、TLS 及替代信号栈状态，包括 AUTODISARM 的
+原生行为。后续通知、普通 Guest 调用及接收者关闭都必须成功。每个调用记录只用一次。
+
+源码和制品哈希、构建运行命令、设备身份及结构化结果保存在
+`core/build/tests/guest-async{,-android}/`。原生测试以
+`host_jump_guest_retirement` 和 `retired_async_entries` 记录已覆盖的跳转路径。
+`nonlocal_async_entry_validated` 保持 false，等待 Guest 目标及保存上下文恢复。
+`production_ready`、`guest_public_signal_abi` 和 `jni_vm_validated` 同样为 false。
