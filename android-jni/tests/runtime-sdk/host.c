@@ -54,6 +54,10 @@ static _Thread_local sigjmp_buf adopted_jump;
 static _Thread_local volatile sig_atomic_t adopted_jump_active;
 static _Thread_local struct adopted_signal_probe *adopted_guest_jump;
 static _Thread_local struct adopted_signal_probe *adopted_host_nested;
+#ifndef __ANDROID__
+static _Thread_local ucontext_t adopted_native_context;
+static _Thread_local volatile sig_atomic_t adopted_context_active;
+#endif
 
 static void worker_host_signal(int number) {
   assert(number == SIGUSR1 && signal_host_relay_running());
@@ -65,6 +69,16 @@ static void adopted_host_jump(int number) {
   if (adopted_jump_active) {
     siglongjmp(adopted_jump, 39);
   }
+#ifndef __ANDROID__
+  if (adopted_context_active) {
+    ucontext_t copy = adopted_native_context;
+#if defined(__x86_64__)
+    copy.uc_mcontext.fpregs = &copy.__fpregs_mem;
+#endif
+    assert(!setcontext(&copy));
+    assert(!"Host context restore returned to Guest signal scope");
+  }
+#endif
   struct adopted_signal_probe *probe = adopted_host_nested;
   if (probe) {
     assert(syscall(SYS_gettid) == probe->tid);
@@ -72,10 +86,29 @@ static void adopted_host_jump(int number) {
     while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
       sched_yield();
     }
-    assert(probe->mode != SIGNAL_NESTED_JUMP);
+    assert(!adopted_guest_target(probe->mode) &&
+           !adopted_parent_target(probe->mode));
     probe->host_returned = 1;
   }
 }
+
+#ifndef __ANDROID__
+static void await_adopted_context(struct adopted_signal_probe *probe) {
+  assert(!getcontext(&adopted_native_context));
+  if (!adopted_context_active) {
+    adopted_context_active = 1;
+    atomic_store_explicit(&probe->requested, 1, memory_order_release);
+    for (;;) {
+      sched_yield();
+    }
+  }
+  adopted_context_active = 0;
+  assert(!signal_host_retirement_busy());
+  sigset_t mask;
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &mask));
+  assert(!sigismember(&mask, SIGWINCH));
+}
+#endif
 
 static void await_adopted_signal(JNIEnv *env, jclass cls,
                                  struct adopted_signal_probe *probe) {
@@ -98,12 +131,20 @@ static void await_adopted_signal(JNIEnv *env, jclass cls,
     }
     adopted_jump_active = 0;
     assert(result == 39 && !signal_host_retirement_busy());
+#ifndef __ANDROID__
+  } else if (probe->mode == SIGNAL_HOST_CONTEXT) {
+    await_adopted_context(probe);
+#endif
   } else if (adopted_nested(probe->mode)) {
     atomic_store_explicit(&probe->requested, 1, memory_order_release);
     while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
       sched_yield();
     }
-    assert(probe->host_returned);
+    if (adopted_parent_target(probe->mode)) {
+      assert(probe->parent_resumed && !probe->host_returned);
+    } else {
+      assert(probe->host_returned);
+    }
   } else {
     const struct timespec duration = {.tv_nsec = 350000000};
     int result = probe->mode == SIGNAL_POLL ? ppoll(NULL, 0, &duration, NULL)
@@ -123,6 +164,11 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
       (*env)->GetStaticMethodID(env, cls, "jumpAdoptedSignal", "(J)I");
   assert(prepare && finish && jump);
   for (int mode = SIGNAL_JAVA; mode < SIGNAL_CASES; ++mode) {
+#ifdef __ANDROID__
+    if (mode == SIGNAL_HOST_CONTEXT) {
+      continue; /* Bionic has no public getcontext/setcontext pair. */
+    }
+#endif
     struct adopted_signal_probe probe = {.mode = mode,
                                          .tid = (int)syscall(SYS_gettid)};
     jlong address = (jlong)(uintptr_t)&probe;

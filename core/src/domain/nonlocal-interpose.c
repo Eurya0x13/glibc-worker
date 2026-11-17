@@ -21,3 +21,9 @@ _Noreturn void __longjmp_chk(jmp_buf buffer, int value) {
   gw_nonlocal_jump(buffer, value, 3);
 }
 #endif
+
+#ifndef __ANDROID__
+int setcontext(const ucontext_t *context) {
+  return gw_nonlocal_setcontext(context);
+}
+#endif

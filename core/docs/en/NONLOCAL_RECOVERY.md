@@ -41,6 +41,20 @@ Guest handler activations before a native jump reaches the original Guest
 command through `GetVersion`. Saved and unsaved mask cases are included in
 the [adopted-carrier fixture](../../../android-jni/docs/en/SDK_TESTS.md#independent-guest-delivery-on-adopted-carriers).
 
+The owning Guest libc reports synchronous context capture and restore at its
+native assembly's mask operation. A recorded `setcontext` target can be the
+original native command or an older live Guest handler. The coordinator retains
+the source context bytes before retirement and calls the owning libc after
+the abandoned scopes have released their resources. The Linux Host interposer
+records `getcontext` before tail entry and handles `setcontext` through the
+same Host scope chain. Native context restoration retains each libc's machine
+state and uses the target's logical mask.
+
+Same-scope Guest `swapcontext` retains its native resume behavior. A Guest
+`swapcontext` that would suspend live bridge scopes returns `ENOTSUP` until
+there is a protocol that can keep those scopes and their stacks resumable.
+Android verification covers Guest glibc contexts and Bionic jump buffers.
+
 The native-call integration masks catchable signals while acquiring/releasing
 bridge resources, publishing commands and crossing TP/stack boundaries. Requests
 not yet executed can be retired by their sole carrier; completed requests do not

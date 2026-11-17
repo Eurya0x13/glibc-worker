@@ -174,13 +174,18 @@ GNU pthread 的 Host 收养已经完成。
 Guest 通知编号，并在启动时启用 Host 延迟信号通道。GNU pthread 将各消息发送到
 收养载体，测试要求处理器收到原 TID、Guest TP、原生栈位置和负载。
 
-九个用例覆盖 Java 忙循环、阻塞的 Host `ppoll` 和 `nanosleep`、Host 目标跳转、
+用例覆盖 Java 忙循环、阻塞的 Host `ppoll` 和 `nanosleep`、Host 目标跳转、
 穿过原生 `GetVersion` 的保存及不保存掩码的 Guest 目标跳转，以及 Guest/Host/Guest
 嵌套投递。嵌套用例使用普通栈和替代栈，还验证跳向原 Guest 命令时退出两层信号调用。
 每个用例在模组卸载和 SDK 关闭前再次调用 JNI。
 
-同一夹具在 Linux x86_64 和指定 shell JRE17 的 Android ARM64 运行。记录对应已测
-原生和 Java 路径，APK/ART 接入与通用可恢复上下文另有验收标准。
+Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新的 Guest 信号
+调用，再恢复外层处理器。`setcontext` 用例从即将退出的栈传入上下文副本，检查目标
+掩码与浮点舍入模式，并在同一信号调用内通过 `swapcontext` 往返独立 Guest 栈。
+
+Linux x86_64 运行 14 个用例，其中包含 Host glibc `setcontext` 目标。Android
+ARM64 使用指定的 shell JRE17 运行 13 个用例。Bionic 无公开的 Host 上下文接口，
+Guest glibc 上下文用例在两端运行。
 
 ## 证据
 

@@ -26,6 +26,14 @@ static inline uintptr_t gw_signal_interrupted_sp(const ucontext_t *context) {
 #endif
 }
 
+static inline uintptr_t gw_signal_interrupted_pc(const ucontext_t *context) {
+#if defined(__x86_64__)
+  return context->uc_mcontext.gregs[REG_RIP];
+#else
+  return context->uc_mcontext.pc;
+#endif
+}
+
 static inline uintptr_t gw_signal_stack_top(uintptr_t sp) {
 #if defined(__x86_64__)
   /* The interrupted function owns the 128-byte SysV red zone.

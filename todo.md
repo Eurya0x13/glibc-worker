@@ -11,6 +11,9 @@ The configured bootstrap contract covers Host deferred dequeue and handler
 ordering, plus native consumption and lifecycle windows. Tagged Guest delivery
 also runs on adopted carriers in Host/Java. General saved and resumable native
 contexts remain part of the acceptance contract.
+Destructive `setcontext` and `siglongjmp` can already restore a saved native
+Guest command or an older Guest handler. Resuming a bridge scope suspended
+with `swapcontext` still requires a lifetime protocol for both stacks.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
@@ -117,8 +120,9 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   The opt-in installed service now coordinates Guest-target jumps through a
   reviewed C-only `GetVersion` boundary, with invocation-generation records,
   ordinary RPC cleanup and the owning glibc's fortified restore entry. An
-  asynchronous handler can also abandon nested signal scopes on this path. Complete
-  other native JNI callback boundaries and general saved/resumable native
+  asynchronous handler can also abandon nested signal scopes on this path or
+  restore an older Guest handler. Complete other native JNI callback boundaries
+  and general resumable native
   contexts without skipping Java/VM frames; this slice does not establish
   general Guest-target recovery.
 - Supply a reviewed live VM/ART recipient-quiescence provider for the explicit

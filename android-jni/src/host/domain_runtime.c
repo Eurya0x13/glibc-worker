@@ -30,16 +30,24 @@ void gw_domain_rpc_enter(struct gw_domain_rpc_scope *scope) {
   gw_nonlocal_enter(&scope->unwind);
 }
 
-void gw_domain_rpc_leave(struct gw_domain_rpc_scope *scope) {
+int gw_domain_rpc_leave(struct gw_domain_rpc_scope *scope, uint64_t host_mask) {
   REQUIRE(current->host_rpc == scope);
   current->host_rpc = scope->previous;
-  if (current->jump_target == scope->guest_checkpoint) {
+  int resume = current->jump_target == scope->guest_checkpoint;
+  if (resume) {
+    /* Keep delivery masked between retiring the Host RPC and committing the
+     * Guest restore. A second transfer cannot abandon half a transaction. */
+    current->jump_host_mask = host_mask;
     current->jump_resume = 1;
   }
   gw_nonlocal_leave(&scope->unwind);
+  return resume;
 }
 
 static void route_guest_jump(void) {
+  if (current->jump_signal_target) {
+    signal_guest_resume(current->jump_signal_target, session.signal_resume);
+  }
   struct gw_domain_rpc_scope *scope = current->host_rpc;
   while (scope && scope->guest_checkpoint != current->jump_target) {
     scope = scope->previous;
@@ -76,9 +84,11 @@ void gw_domain_abort_call(struct fb_call *call, int sequence) {
     return;
   }
   if (c->executing_guest) {
-    c->guest_mask =
-        (c->exchange.interrupted_guest_mask & ~session.reserved_signals) |
-        (c->guest_mask & session.reserved_signals);
+    uint64_t logical = session.guest_notification
+                           ? session.guest_virtual_signals
+                           : session.reserved_signals;
+    c->guest_mask = (c->exchange.interrupted_guest_mask & ~logical) |
+                    (c->guest_mask & logical);
     c->guest_altstack = c->exchange.interrupted_guest_altstack;
   }
   struct domain abort = c->exchange.guest;
@@ -230,22 +240,26 @@ int gw_domain_command(struct host_context *host, struct fb_call *call,
          sequence) {
 #ifdef GW_DOMAIN_NONLOCAL
     uint64_t host_mask = gw_nonlocal_mask_block();
+    if (current->jump_resume) {
+      REQUIRE(current->jump_record &&
+              current->abort_checkpoint == current->jump_target);
+      host_mask = current->jump_host_mask;
+      current->jump_resume = 0;
+    }
     e->host_execution_mask = host_mask;
     e->guest_execution_mask = signal_carrier_mask(current_signal, host_mask, 1);
     e->host_mask_valid = 1;
     gw_signal_stack_get(&e->host_altstack);
     current->executing_guest = 1;
-    if (current->jump_resume) {
-      REQUIRE(current->jump_record &&
-              current->abort_checkpoint == current->jump_target);
-      current->jump_resume = 0;
-    }
 #endif
     e->swap(&e->host, &e->guest);
 #ifdef GW_DOMAIN_NONLOCAL
     current->executing_guest = 0;
     gw_signal_stack_set(&e->host_altstack);
     signal_host_prune_notifications();
+    if (current->jump_record) {
+      route_guest_jump();
+    }
     /* Guest RPCs may update guest_mask before yielding. The Host mask
      * belongs to this particular suspended Host frame, including when the
      * callback re-enters another native command. */
@@ -253,9 +267,6 @@ int gw_domain_command(struct host_context *host, struct fb_call *call,
     gw_nonlocal_mask_restore(host_mask);
     if (reject_damaged_router(call, sequence)) {
       return 1;
-    }
-    if (current->jump_record) {
-      route_guest_jump();
     }
 #endif
     full_host_poll();

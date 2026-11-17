@@ -2,6 +2,7 @@
 #define GW_DOMAIN_NONLOCAL_H
 #include <setjmp.h>
 #include <stdint.h>
+#include <ucontext.h>
 #include "nonlocal-mask.h"
 
 /* Host-side native unwind boundaries. These do not describe resumable
@@ -21,6 +22,10 @@ int gw_nonlocal_pending(void);
 /* Retire nested scopes and land in a still-live owning Host boundary. No
  * foreign libc buffer is interpreted or passed to the Host restore entry. */
 _Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *);
-void *gw_nonlocal_capture(void *buffer, unsigned kind);
+void *gw_nonlocal_capture(void *buffer, unsigned kind, uintptr_t sp,
+                          uintptr_t pc);
 _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind);
+#ifndef __ANDROID__
+int gw_nonlocal_setcontext(const ucontext_t *);
+#endif
 #endif

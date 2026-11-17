@@ -29,6 +29,8 @@ static int (*reserve_signals)(uint64_t);
 static int (*bind_mask)(uint64_t *, const uint64_t *, const int *, uint64_t);
 static int (*install_sigaction_hook)(int (*)(int, const void *, void *, int *));
 static int (*install_jump_hook)(void (*)(void *, int, int));
+static int (*install_context_hook)(unsigned, int (*)(ucontext_t *,
+                                                     const ucontext_t *, int));
 
 static uint64_t virtual_signals(void) {
   return session->guest_notification ? gw_guest_virtual_mask()
@@ -117,6 +119,7 @@ static void guest_kernel_entry(int number, void *info, void *context) {
 static void suspend_for_host(struct jni_domain_context *c) {
   ucontext_t parked = {0};
   volatile sig_atomic_t resumed = 0;
+  c->parked_guest = &parked;
   if (getcontext(&parked)) {
     _exit(125);
   }
@@ -126,7 +129,6 @@ static void suspend_for_host(struct jni_domain_context *c) {
 
   resumed = 1;
   parked.uc_stack = c->guest_altstack;
-  c->parked_guest = &parked;
   c->exchange.swap(&c->exchange.guest, &c->exchange.host);
   c->parked_guest = NULL;
   if (c->resume_parked) {
@@ -134,8 +136,7 @@ static void suspend_for_host(struct jni_domain_context *c) {
     /* Resume this owning GNU context with delivery masked. The logical
      * signal-mask edits have already been committed to the Guest recipient. */
     sigfillset(&parked.uc_sigmask);
-    setcontext(&parked);
-    _exit(125);
+    gw_domain_restore_context(&parked);
   }
 }
 #endif
@@ -266,6 +267,7 @@ static int resolve(void) {
   API(bind_mask, "__gw_domain_mask_bind");
   API(install_sigaction_hook, "__gw_domain_sigaction_hook");
   API(install_jump_hook, "__gw_domain_jump_hook");
+  API(install_context_hook, "__gw_domain_context_hook");
 #endif
 #undef API
   return 0;
@@ -328,10 +330,12 @@ static int setup_signals(void) {
       return error;
     }
     session->signal_cookie = gw_guest_signal_cookie();
+    session->guest_virtual_signals = gw_guest_virtual_mask();
     if (session->domain) {
       gw_guest_signal_entries(&session->signal_entries);
       session->signal_invoke = gw_guest_signal_parked;
       session->signal_finish = gw_guest_signal_finish_parked;
+      session->signal_resume = gw_domain_resume_signal;
     }
   } else {
     gw_guest_signals_init(NULL, 0);
@@ -342,7 +346,8 @@ static int setup_signals(void) {
       session->bind_guest_kernel(guest_kernel_entry)) {
     return EINVAL;
   }
-  if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event)) {
+  if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event) ||
+      install_context_hook(1, gw_domain_context_event)) {
     return EINVAL;
   }
   return 0;

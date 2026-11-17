@@ -75,6 +75,7 @@ struct host_signal_anchor {
   ucontext_t *frame;
   uint64_t mask, control[3];
   const struct domain *suspended;
+  void *guest_identity;
 };
 /* Accessed after assembly restores Host TLS. The entry owns each anchor until
  * returning to its kernel frame or retiring it through native recovery. */
@@ -90,6 +91,10 @@ struct routed_guest {
   struct routed_guest *previous;
   struct signal_slot *slot;
   struct gw_signal_suspension suspended;
+  struct gw_nonlocal_scope unwind;
+  uint64_t control[3];
+  void *identity;
+  int (*volatile resume)(int, void *, void *);
 };
 
 static _Thread_local struct routed_guest *routed_guest;
@@ -102,6 +107,19 @@ int signal_guest_suspended(struct signal_slot *slot,
   }
   *suspended = routed_guest->suspended;
   return 1;
+}
+
+_Noreturn void signal_guest_resume(void *identity,
+                                   int (*restore)(int, void *, void *)) {
+  struct routed_guest *entry = routed_guest;
+  while (entry && entry->identity != identity) {
+    entry = entry->previous;
+  }
+  if (!identity || !entry || !restore) {
+    _exit(125);
+  }
+  entry->resume = restore;
+  gw_nonlocal_route(&entry->unwind);
 }
 
 static void restore_execution_stack(const stack_t *desired) {
@@ -130,7 +148,8 @@ int signal_guest_execute(struct gw_signal_execution *execution,
   struct host_signal_anchor anchor = {.previous = host_anchor,
                                       .slot = slot,
                                       .frame = host_frame,
-                                      .suspended = &execution->host};
+                                      .suspended = &execution->host,
+                                      .guest_identity = execution->argument};
   if (host_frame) {
     memcpy(&anchor.mask, &anchor.frame->uc_sigmask, sizeof anchor.mask);
     if (gw_signal_selection_hidden) {
@@ -401,6 +420,19 @@ static void deliver_foreign_host(int number, siginfo_t *info, void *context,
   }
 }
 
+static _Noreturn void resume_interrupted_guest(
+    const struct routed_guest *entry) {
+  restore_execution_stack(&entry->suspended.alternate);
+  struct domain_signal_call call = {
+      .entry = entry->resume,
+      .tp = entry->suspended.state.tp,
+      .x18 = entry->control[2],
+      .control = {entry->control[0], entry->control[1]},
+      .context = entry->suspended.frame};
+  domain_guest_signal_call(&call);
+  _exit(125);
+}
+
 static void forward_foreign_host(int number, siginfo_t *info, void *context,
                                  void *token, struct signal_slot *slot,
                                  int selected) {
@@ -413,29 +445,33 @@ static void forward_foreign_host(int number, siginfo_t *info, void *context,
    * the actual interrupted Guest frame, even when it is younger than the
    * cooperative RPC frame. Retire this publication on Host-native escapes. */
   struct routed_guest entry = {.previous = routed_guest, .slot = slot};
+  if (host_anchor && host_anchor->slot == slot) {
+    entry.identity = host_anchor->guest_identity;
+  }
   entry.suspended.frame = context;
   entry.suspended.state = slot->exchange->guest;
   gw_signal_stack_get(&entry.suspended.alternate);
-  uint64_t control[3];
-  read_control(context, control);
+  read_control(context, entry.control);
 #if defined(__aarch64__)
-  entry.suspended.state.saved[12] = control[2];
-  entry.suspended.state.saved[21] = control[0];
-  entry.suspended.state.saved[22] = control[1];
+  entry.suspended.state.saved[12] = entry.control[2];
+  entry.suspended.state.saved[21] = entry.control[0];
+  entry.suspended.state.saved[22] = entry.control[1];
 #else
-  entry.suspended.state.saved[6] = control[0];
-  entry.suspended.state.saved[7] = control[1];
+  entry.suspended.state.saved[6] = entry.control[0];
+  entry.suspended.state.saved[7] = entry.control[1];
 #endif
 
-  struct gw_nonlocal_scope scope;
-  gw_nonlocal_enter(&scope);
+  gw_nonlocal_enter(&entry.unwind);
   routed_guest = &entry;
-  if (!sigsetjmp(scope.landing, 0)) {
+  if (!sigsetjmp(entry.unwind.landing, 0)) {
     deliver_foreign_host(number, info, context, token, slot, selected,
                          &entry.suspended.stack_floor);
   }
   routed_guest = entry.previous;
-  gw_nonlocal_leave(&scope);
+  gw_nonlocal_leave(&entry.unwind);
+  if (entry.resume) {
+    resume_interrupted_guest(&entry);
+  }
 }
 
 static void forward_host(int number, siginfo_t *info, void *context,

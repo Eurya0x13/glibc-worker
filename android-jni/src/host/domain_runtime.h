@@ -24,7 +24,7 @@ struct gw_domain_rpc_scope {
 };
 
 DOMAIN_INTERNAL void gw_domain_rpc_enter(struct gw_domain_rpc_scope *);
-DOMAIN_INTERNAL void gw_domain_rpc_leave(struct gw_domain_rpc_scope *);
+DOMAIN_INTERNAL int gw_domain_rpc_leave(struct gw_domain_rpc_scope *, uint64_t);
 DOMAIN_INTERNAL int gw_domain_rpc_recoverable(void);
 DOMAIN_INTERNAL void gw_domain_signal_notification(int, siginfo_t *, void *);
 #endif

@@ -1,20 +1,30 @@
 #define _GNU_SOURCE
 #include "nonlocal.h"
+#include "signal-stack.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <signal.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
 typedef void (*restore_fn)(void *, int);
-static void *captures[3];
+
+enum { CONTEXT_CAPTURE = 3, CAPTURE_COUNT };
+
+static void *captures[CAPTURE_COUNT];
 static restore_fn restores[4];
 static _Thread_local struct gw_nonlocal_scope *top;
 static _Thread_local uint64_t generation;
 extern int gw_nonlocal_interposed(void) __attribute__((weak));
 extern void signal_host_prune_notifications(void) __attribute__((weak));
+#ifndef __ANDROID__
+static int (*native_setcontext)(const ucontext_t *);
+extern uint64_t signal_host_logical_mask(uint64_t) __attribute__((weak));
+extern uint64_t signal_host_physical_mask(uint64_t) __attribute__((weak));
+#endif
 
 static void prepare_native_restore(void) {
   /* Native mask restoration bypasses public sigprocmask. Retire invalidated
@@ -29,9 +39,11 @@ int gw_nonlocal_ready(void) {
 }
 
 struct checkpoint {
-  void *buffer;
+  const void *buffer;
   struct gw_nonlocal_scope *scope;
   uint64_t generation;
+  uintptr_t sp, pc;
+  unsigned kind;
 };
 
 /* Buffers remain opaque. Recording ownership before a tail call preserves
@@ -67,6 +79,13 @@ int gw_nonlocal_init(void) {
 #else
   const char *save[] = {"__sigsetjmp", "setjmp", "_setjmp"};
 #endif
+#ifndef __ANDROID__
+  native_setcontext = dlsym(RTLD_NEXT, "setcontext");
+  captures[CONTEXT_CAPTURE] = dlsym(RTLD_NEXT, "getcontext");
+  if (!native_setcontext || !captures[CONTEXT_CAPTURE]) {
+    return ENOSYS;
+  }
+#endif
   const char *jump[] = {"siglongjmp", "longjmp", "_longjmp"};
   void *resolved[6];
   for (unsigned i = 0; i < 3; ++i) {
@@ -95,7 +114,7 @@ int gw_nonlocal_init(void) {
   return 0;
 }
 
-static struct checkpoint *find_checkpoint(void *buffer, int create) {
+static struct checkpoint *find_checkpoint(const void *buffer, int create) {
   struct checkpoint *empty = NULL;
   for (struct checkpoint_page *p = pages; p; p = p->next) {
     for (unsigned i = 0; i < 64; ++i) {
@@ -127,15 +146,23 @@ static struct checkpoint *find_checkpoint(void *buffer, int create) {
   return &p->records[0];
 }
 
-void *gw_nonlocal_capture(void *buffer, unsigned kind) {
-  if (kind >= 3 || !captures[kind]) {
+void *gw_nonlocal_capture(void *buffer, unsigned kind, uintptr_t sp,
+                          uintptr_t pc) {
+  if (kind >= CAPTURE_COUNT || !captures[kind]) {
     _exit(125);
   }
   int saved = errno;
   uint64_t mask = gw_nonlocal_mask_block();
   if (!top || buffer != (void *)top->landing || kind != 0) {
     struct checkpoint *r = find_checkpoint(buffer, 1);
-    *r = (struct checkpoint){buffer, top, top ? top->generation : 0};
+    *r = (struct checkpoint){.buffer = buffer,
+                             .scope = top,
+                             .generation = top ? top->generation : 0,
+                             .kind = kind};
+    if (kind == CONTEXT_CAPTURE) {
+      r->sp = sp;
+      r->pc = pc;
+    }
   }
   gw_nonlocal_mask_restore(mask);
   errno = saved;
@@ -195,13 +222,36 @@ void gw_nonlocal_leave(struct gw_nonlocal_scope *scope) {
   gw_nonlocal_mask_restore(mask);
 }
 
+static int live_checkpoint(const struct checkpoint *record) {
+  struct gw_nonlocal_scope *ancestor = top;
+  while (ancestor && ancestor != record->scope) {
+    ancestor = ancestor->previous;
+  }
+  return ancestor == record->scope &&
+         (!ancestor || ancestor->generation == record->generation);
+}
+
+static _Noreturn void transfer(const struct checkpoint *record, void *buffer,
+                               int value, restore_fn restore, uint64_t mask) {
+  pending.buffer = buffer;
+  pending.active = 1;
+  pending.routed = 0;
+  pending.value = value;
+  pending.restore = restore;
+  pending.target = record->scope;
+  pending.target_generation = record->generation;
+  pending.mask = mask;
+  continue_transfer();
+}
+
 _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind) {
   if (kind >= 4 || !restores[kind]) {
     _exit(125);
   }
   uint64_t mask = gw_nonlocal_mask_block();
   struct checkpoint *r = find_checkpoint(buffer, 0);
-  if (!top || (r && r->scope == top && r->generation == top->generation)) {
+  if (!top || (r && r->kind != CONTEXT_CAPTURE && r->scope == top &&
+               r->generation == top->generation)) {
     prepare_native_restore();
     gw_nonlocal_mask_restore(mask);
     restores[kind](buffer, value);
@@ -209,27 +259,112 @@ _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind) {
   }
   /* An unobserved capture cannot establish which live resources it skips.
    * This remains an integration failure, never a compatibility success. */
-  if (!r || pending.active) {
+  if (!r || r->kind == CONTEXT_CAPTURE || pending.active ||
+      !live_checkpoint(r)) {
     _exit(125);
   }
-  struct gw_nonlocal_scope *ancestor = top;
-  while (ancestor && ancestor != r->scope) {
-    ancestor = ancestor->previous;
-  }
-  if (ancestor != r->scope ||
-      (ancestor && ancestor->generation != r->generation)) {
-    _exit(125);
-  }
-  pending.buffer = buffer;
-  pending.active = 1;
-  pending.routed = 0;
-  pending.value = value;
-  pending.restore = restores[kind];
-  pending.target = r->scope;
-  pending.target_generation = r->generation;
-  pending.mask = mask;
-  continue_transfer();
+  transfer(r, buffer, value, restores[kind], mask);
 }
+
+#ifndef __ANDROID__
+struct host_context_copy {
+  ucontext_t value;
+#if defined(__x86_64__)
+  struct _libc_fpstate fp;
+#endif
+};
+
+static struct checkpoint *find_context(const ucontext_t *context) {
+  struct checkpoint *record = find_checkpoint(context, 0);
+  if (record && record->kind == CONTEXT_CAPTURE) {
+    return record;
+  }
+
+  uintptr_t sp = gw_signal_interrupted_sp(context);
+  uintptr_t pc = gw_signal_interrupted_pc(context);
+  struct checkpoint *match = NULL;
+  for (struct checkpoint_page *p = pages; p; p = p->next) {
+    for (unsigned i = 0; i < 64; ++i) {
+      record = &p->records[i];
+      if (record->kind != CONTEXT_CAPTURE || record->sp != sp ||
+          record->pc != pc || !live_checkpoint(record)) {
+        continue;
+      }
+      if (match && (match->scope != record->scope ||
+                    match->generation != record->generation)) {
+        return NULL;
+      }
+      match = record;
+    }
+  }
+  return match;
+}
+
+static int restore_context(ucontext_t *context, uint64_t mask) {
+  prepare_native_restore();
+  if (signal_host_logical_mask && signal_host_physical_mask) {
+    uint64_t saved;
+    memcpy(&saved, &context->uc_sigmask, sizeof saved);
+    saved = signal_host_physical_mask(signal_host_logical_mask(saved));
+    memcpy(&context->uc_sigmask, &saved, sizeof saved);
+  }
+  int result = native_setcontext(context);
+  int error = errno;
+  gw_nonlocal_mask_restore(mask);
+  errno = error;
+  return result;
+}
+
+static void finish_context_transfer(void *buffer, int unused) {
+  (void)unused;
+  struct host_context_copy restored = *(struct host_context_copy *)buffer;
+  if (syscall(SYS_munmap, buffer, sizeof restored)) {
+    _exit(125);
+  }
+#if defined(__x86_64__)
+  if (restored.value.uc_mcontext.fpregs) {
+    restored.value.uc_mcontext.fpregs = &restored.fp;
+  }
+#endif
+  restore_context(&restored.value, UINT64_MAX);
+  _exit(125);
+}
+
+int gw_nonlocal_setcontext(const ucontext_t *context) {
+  if (!native_setcontext) {
+    errno = ENOSYS;
+    return -1;
+  }
+  uint64_t mask = gw_nonlocal_mask_block();
+  struct checkpoint *record = top ? find_context(context) : NULL;
+  if (!top || (record && record->scope == top && live_checkpoint(record))) {
+    ucontext_t direct = *context;
+    return restore_context(&direct, mask);
+  }
+  if (!record || pending.active || !live_checkpoint(record)) {
+    gw_nonlocal_mask_restore(mask);
+    errno = ENOTSUP;
+    return -1;
+  }
+
+  struct host_context_copy *copy =
+      (void *)syscall(SYS_mmap, NULL, sizeof *copy, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (copy == MAP_FAILED) {
+    int error = errno;
+    gw_nonlocal_mask_restore(mask);
+    errno = error;
+    return -1;
+  }
+  copy->value = *context;
+#if defined(__x86_64__)
+  if (context->uc_mcontext.fpregs) {
+    copy->fp = *context->uc_mcontext.fpregs;
+  }
+#endif
+  transfer(record, copy, 0, finish_context_transfer, UINT64_MAX);
+}
+#endif
 
 _Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *target) {
   uint64_t mask = gw_nonlocal_mask_block();

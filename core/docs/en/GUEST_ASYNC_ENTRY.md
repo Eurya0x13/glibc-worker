@@ -71,11 +71,14 @@ was interrupted and a Host handler is running, the router instead supplies
 that newer kernel frame and the stack floor saved by the switch. Nested Guest
 handlers use their normal or alternate stack below live frames.
 
-For a Guest-target `siglongjmp` through the reviewed native `GetVersion`
-callback, the signal invocation first exits through its GNU checkpoint. Host
+For a Guest-target `siglongjmp` or `setcontext` through the reviewed native
+`GetVersion` callback, the signal invocation first exits through its GNU checkpoint. Host
 then retires the abandoned native scopes and publishes the callback response.
 The original Guest RPC cleans up before the owning glibc resumes the target.
-The target's saved-mask mode controls its final mask. See the
+The target's saved-mask mode controls its final mask. A target in an older
+Guest handler resumes at the Host boundary holding that handler's original
+kernel frame. The older activation survives and can return through its original
+entry. See the
 [installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md).
 
 ## Wait recovery

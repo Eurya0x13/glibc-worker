@@ -1,4 +1,4 @@
-"""Keep glibc's native context assembly and route only its mask operation."""
+"""Route the mask operation and report native context lifetime events."""
 
 from pathlib import Path
 
@@ -30,17 +30,19 @@ def patch_context_masks(source: Path):
                         "\tcall\tHIDDEN_JUMPTARGET(__gw_context_sigmask)\n"
                         f"\tpopq\t{saved}\n\tcfi_adjust_cfa_offset(-8)"
                     )
-                new += "\n\tnegq\t%rax"
+                new = "\txorl\t%ecx, %ecx\n" + new + "\n\tnegq\t%rax"
             else:
                 old = (
                     "\tmov\tx3, "
                     + ("#_NSIG8" if name == "setcontext" else "_NSIG8")
                     + "\n\tmov\tx8, SYS_ify (rt_sigprocmask)\n\tsvc\t0"
                 )
+                target = "x9" if name == "swapcontext" else "xzr"
                 new = (
                     "\tstp\tx9, x30, [sp, #-16]!\n"
                     "\tcfi_adjust_cfa_offset(16)\n"
                     "\tcfi_rel_offset(x30, 8)\n"
+                    f"\tmov\tx3, {target}\n"
                     "\tbl\tHIDDEN_JUMPTARGET(__gw_context_sigmask)\n"
                     "\tldp\tx9, x30, [sp], #16\n"
                     "\tcfi_adjust_cfa_offset(-16)\n"

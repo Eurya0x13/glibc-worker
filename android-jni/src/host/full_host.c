@@ -472,8 +472,9 @@ void fh_service(struct host_context *c, struct fb_rpc *r) {
   atomic_store_explicit(&r->response, seq, memory_order_release);
 #ifdef GW_DOMAIN_NONLOCAL
   if (recover) {
-    gw_domain_rpc_leave(&scope);
-    gw_nonlocal_mask_restore(transferred ? admission_mask : cleanup_mask);
+    if (!gw_domain_rpc_leave(&scope, admission_mask)) {
+      gw_nonlocal_mask_restore(cleanup_mask);
+    }
   }
 #endif
 #ifdef GW_DOMAIN_JNI

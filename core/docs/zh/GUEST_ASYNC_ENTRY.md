@@ -53,10 +53,13 @@ Host errno。对该预留路由的公开注册、替换和查询返回 `EBUSY`�
 指令刚被中断且 Host 处理器正在运行，路由器改用更新的内核帧和切换时保存的栈
 下界。嵌套的 Guest 处理器在活动帧以下使用普通栈或替代栈。
 
-对穿过已审阅的原生 `GetVersion` 回调、目标位于 Guest 的 `siglongjmp`，信号
+对穿过已审阅的原生 `GetVersion` 回调、目标位于 Guest 的 `siglongjmp` 或
+`setcontext`，信号
 调用先通过 GNU 检查点退出。然后 Host 清理放弃的原生作用域并发布回调响应。
 原 Guest RPC 完成清理后，由所属 glibc 恢复目标。最终掩码遵循目标的保存掩码
-模式。见 [已安装 SDK 测试](../../../android-jni/docs/zh/SDK_TESTS.md)。
+模式。目标位于更早的 Guest 处理器时，Host 在持有该处理器原始内核帧的边界恢复
+执行。外层信号调用继续存活，并可以通过原入口返回。见
+[已安装 SDK 测试](../../../android-jni/docs/zh/SDK_TESTS.md)。
 
 ## 等待恢复
 

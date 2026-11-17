@@ -208,7 +208,7 @@ def execute_case(
                     "owned_context": True,
                     "post_signal_jni": True,
                 }
-                for phase in range(9)
+                for phase in range(13 if require_host_private else 14)
             ]
         )
         or (

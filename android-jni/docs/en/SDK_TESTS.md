@@ -258,16 +258,22 @@ bootstraps the Host deferred-signal lanes. A GNU pthread sends each packet to
 the adopted carrier and the test requires the original TID, Guest TP, native
 stack placement and payload at the handler.
 
-The nine cases cover a Java busy loop, blocked Host `ppoll` and `nanosleep`,
+The cases cover a Java busy loop, blocked Host `ppoll` and `nanosleep`,
 a Host-target jump, saved and unsaved Guest-target jumps through native
 `GetVersion`, and nested Guest/Host/Guest delivery. The nested cases use
 ordinary and alternate stacks and also abandon both signal invocations on a
 jump back to the original Guest command. Every case calls JNI again before
 module unload and SDK shutdown.
 
-The same fixture runs on Linux x86_64 and Android ARM64 with the selected shell
-JRE17. The recorded cases establish the tested native and Java paths. APK/ART
-integration and general resumable contexts have separate acceptance criteria.
+Guest `siglongjmp` and `setcontext` also resume an outer handler while retiring
+the intervening Host callback and younger Guest activation. The `setcontext`
+cases pass a copy from the stack that is about to retire, check the target
+mask and floating-point rounding, and exercise a round trip with `swapcontext`
+on a separate Guest stack within the same activation.
+
+Linux x86_64 runs 14 cases, including a Host glibc `setcontext` target.
+Android ARM64 runs 13 cases with the selected shell JRE17. Bionic lacks the
+public Host context API, and the Guest glibc context cases run on both targets.
 
 ## Evidence
 

@@ -20,6 +20,16 @@ android-jni 的 `GW_NATIVE_UNWIND_INTEGRATION` 默认关闭。Host 库与 Guest 
 原生回调跳向原 Guest 命令。[收养载体用例](../../../android-jni/docs/zh/SDK_TESTS.md#收养载体的独立-guest-投递)
 也覆盖保存及不保存掩码的情况。
 
+所属 Guest libc 在原生汇编的掩码操作处上报同步上下文的捕获和恢复。已记录的
+`setcontext` 目标可以是原 native 命令，也可以是仍存活的外层 Guest 处理器。协调器
+在清理前保留传入的上下文数据，等放弃的作用域释放资源后再调用所属 libc。Linux
+Host 在尾调用 `getcontext` 前记录目标，并通过同一套 Host 作用域处理 `setcontext`。
+原生恢复使用各 libc 的机器状态实现及目标逻辑掩码。
+
+同作用域 Guest `swapcontext` 保留原生暂停与恢复。Guest `swapcontext` 如果需要暂停
+仍活动的桥接作用域，当前返回 `ENOTSUP`，直到有协议能保留这些作用域及其栈供恢复。
+Android 验证覆盖 Guest glibc 上下文和 Bionic 跳转缓冲区。
+
 尚需完成 Guest 目标接入、可恢复原生上下文、状态发布窗口、完整架构状态与安全的
 JNI 资源清理。保存记录当前固定保留，线程/continuation 生命周期回收未完成。
 未知检查点、失效 scope 代数及嵌套待处理转移当前会使接入失败；这些是待解决问题，
