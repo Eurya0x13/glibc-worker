@@ -272,14 +272,23 @@ mask and floating-point rounding, and exercise a round trip with `swapcontext`
 on a Guest stack prepared before the signal activation. The native return link
 resumes the handler within that activation.
 
+The cross-scope `swapcontext` case keeps the outer Guest handler on its normal
+stack and the inner handler on an `SS_AUTODISARM` alternate stack. It switches
+between them three times while the intervening Host callback is still live.
+Three further Host callbacks run during the suspension. Assertions cover both
+Guest stack frames, the Host callback's stack data, per-context floating-point
+rounding and masks, rearming the alternate stack, another JNI call and teardown.
+A separate case verifies `EINVAL` for an overlapping Guest stack and checks
+that the inner handler and the Host callback still return normally.
+
 A returning Guest handler edits the parked GNU context's FP control state.
 The next native entry must observe the edit. The absolute `clock_nanosleep`
 case checks that a Guest notification delivered during the kernel sleep leaves
 the original Host deadline intact.
 
-Linux x86_64 runs 16 cases, including the Host glibc context case. That case
+Linux x86_64 runs 18 cases, including the Host glibc context case. That case
 resumes a same-scope `swapcontext` capture before restoring its outer
-`getcontext` target. Android ARM64 runs 15 cases with the selected shell JRE17.
+`getcontext` target. Android ARM64 runs 17 cases with the selected shell JRE17.
 Guest glibc context cases run on both targets. The Host glibc case requires
 public APIs absent from Bionic.
 

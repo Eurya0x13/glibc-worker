@@ -15,6 +15,11 @@
  * mmap avoids allocator reentry when a handler captures a continuation.
  * https://man7.org/linux/man-pages/man7/signal-safety.7.html
  */
+struct native_stack {
+  uintptr_t low;
+  size_t size;
+};
+
 struct jump_record {
   const void *buffer;
   const ucontext_t *link;
@@ -22,6 +27,7 @@ struct jump_record {
   struct jni_domain_signal *signal;
   uint64_t generation, module;
   uintptr_t sp, pc;
+  struct native_stack stack;
   int context, prepared;
   int depth, rpc_top;
 };
@@ -45,6 +51,7 @@ static __thread struct jump_page *pages;
 static __thread uint64_t generation;
 static __thread struct context_copy *pending_context;
 static __thread const ucontext_t *restoring_context;
+static __thread struct jump_record *switch_target;
 static void (*checked_jump)(void *, int);
 
 int gw_domain_jump_init(void) {
@@ -257,6 +264,41 @@ static int retain_context(const ucontext_t *context) {
   return 0;
 }
 
+static int stack_contains(struct native_stack stack, uintptr_t address) {
+  return address - stack.low < stack.size;
+}
+
+static struct native_stack stack_bounds(uintptr_t sp) {
+  const struct exchange *exchange = &carrier->exchange;
+  struct native_stack ordinary = {exchange->stack_low,
+                                  exchange->stack_high - exchange->stack_low};
+  if (stack_contains(ordinary, sp)) {
+    return ordinary;
+  }
+
+  stack_t alternate;
+  gw_signal_stack_get(&alternate);
+  if (gw_stack_contains(&alternate, sp)) {
+    return (struct native_stack){(uintptr_t)alternate.ss_sp, alternate.ss_size};
+  }
+  for (struct jni_domain_signal *entry = carrier->live_signals; entry;
+       entry = entry->live_next) {
+    const stack_t *stack = &entry->frame->uc_stack;
+    if (gw_stack_contains(stack, sp)) {
+      return (struct native_stack){(uintptr_t)stack->ss_sp, stack->ss_size};
+    }
+  }
+  for (struct jump_page *page = pages; page; page = page->next) {
+    for (unsigned i = 0; i < 64; ++i) {
+      struct jump_record *record = &page->records[i];
+      if (record->prepared && stack_contains(record->stack, sp)) {
+        return record->stack;
+      }
+    }
+  }
+  return (struct native_stack){0};
+}
+
 static void track_context(enum gw_context_operation operation,
                           ucontext_t *saved,
                           struct gw_domain_native_checkpoint *frame) {
@@ -272,6 +314,12 @@ static void track_context(enum gw_context_operation operation,
   r->context = 1;
   r->pc = gw_signal_interrupted_pc(saved);
   r->sp = gw_signal_interrupted_sp(saved);
+  if (r->prepared) {
+    r->stack = (struct native_stack){(uintptr_t)saved->uc_stack.ss_sp,
+                                     saved->uc_stack.ss_size};
+  } else if (r->signal) {
+    r->stack = stack_bounds(r->sp);
+  }
 }
 
 static int can_enter_prepared(const struct jump_record *r,
@@ -291,8 +339,106 @@ static int can_enter_prepared(const struct jump_record *r,
          link->signal == carrier->guest_signal;
 }
 
+static int ancestor_of(struct jni_domain_signal *ancestor,
+                       struct jni_domain_signal *signal) {
+  for (; signal; signal = signal->previous) {
+    if (ancestor == signal) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int switch_preserves_stacks(const struct jump_record *r,
+                                   uintptr_t source_sp) {
+  struct native_stack source = stack_bounds(source_sp);
+  if (!source.size || !r->stack.size || stack_contains(r->stack, source.low) ||
+      stack_contains(source, r->stack.low)) {
+    return 0;
+  }
+
+  /* Leaving an enabled stack would let a new SA_ONSTACK delivery reuse its
+   * occupied top. Native contexts use AUTODISARM for this transfer.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
+  stack_t alternate;
+  gw_signal_stack_get(&alternate);
+  if (gw_stack_contains(&alternate, source_sp)) {
+    return 0;
+  }
+
+  for (struct jni_domain_signal *entry = carrier->live_signals; entry;
+       entry = entry->live_next) {
+    if (ancestor_of(entry, r->signal)) {
+      continue;
+    }
+    if (stack_contains(r->stack, entry->stack_floor) ||
+        stack_contains(r->stack, entry->continuation_sp) ||
+        gw_stack_contains(&alternate, entry->stack_floor) ||
+        gw_stack_contains(&alternate, entry->continuation_sp)) {
+      return 0;
+    }
+    if (entry->kernel_frame) {
+      uintptr_t interrupted = gw_signal_interrupted_sp(entry->frame);
+      if (stack_contains(r->stack, (uintptr_t)entry->frame) ||
+          (stack_contains(r->stack, interrupted) && interrupted != r->sp)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int prepare_scope_switch(struct jump_record *r, ucontext_t *saved,
+                                const ucontext_t *target,
+                                struct gw_domain_native_checkpoint *frame) {
+  struct jni_domain_signal *source = carrier->guest_signal;
+  struct jni_domain_signal *destination = r->signal;
+  if (!source || !destination || r->owner != frame ||
+      (frame && r->generation != frame->generation) || carrier->jump_record ||
+      switch_target || r->buffer == saved ||
+      r->sp != gw_signal_interrupted_sp(target) ||
+      r->pc != gw_signal_interrupted_pc(target)) {
+    return ENOTSUP;
+  }
+  if (!ancestor_of(destination, source) &&
+      destination->continuation != r->buffer) {
+    return ENOTSUP;
+  }
+
+  uintptr_t source_sp =
+      saved ? gw_signal_interrupted_sp(saved) : (uintptr_t)&source;
+  if (!switch_preserves_stacks(r, source_sp)) {
+    return EINVAL;
+  }
+
+  switch_target = r;
+  return GW_CONTEXT_DEFER_MASK;
+}
+
+static void commit_scope_switch(ucontext_t *saved) {
+  struct jump_record *r = switch_target;
+  struct jni_domain_signal *source = carrier->guest_signal;
+  if (!r || !source) {
+    _exit(125);
+  }
+
+  struct jni_domain_signal *target = r->signal;
+  source->continuation = saved;
+  source->continuation_sp = saved ? gw_signal_interrupted_sp(saved) : 0;
+  target->continuation = NULL;
+  target->continuation_sp = 0;
+  gw_domain_signal_select(source, target);
+
+  gdepth = r->depth;
+  gmodule = r->module;
+  atomic_store_explicit(&fb_context_at(G, gid)->rpc_top, r->rpc_top,
+                        memory_order_release);
+  switch_target = NULL;
+}
+
 int gw_domain_context_event(enum gw_context_operation operation,
-                            ucontext_t *saved, const ucontext_t *target) {
+                            ucontext_t *saved, const ucontext_t *target,
+                            const uint64_t *entry_mask) {
   if (!carrier || (saved && saved == carrier->parked_guest) ||
       (target && target == carrier->parked_guest)) {
     return 0;
@@ -307,9 +453,12 @@ int gw_domain_context_event(enum gw_context_operation operation,
   }
 
   int original_errno = errno;
-  uint64_t mask = gw_nonlocal_mask_block();
+  uint64_t mask = entry_mask ? *entry_mask : gw_nonlocal_mask_block();
   int error = 0;
-  if (operation == GW_CONTEXT_CAPTURE || operation == GW_CONTEXT_CONSTRUCT) {
+  if (operation == GW_CONTEXT_COMMIT) {
+    commit_scope_switch(saved);
+  } else if (operation == GW_CONTEXT_CAPTURE ||
+             operation == GW_CONTEXT_CONSTRUCT) {
     track_context(operation, saved, frame);
   } else {
     struct jump_record *r = lookup_context(target);
@@ -320,14 +469,20 @@ int gw_domain_context_event(enum gw_context_operation operation,
         error = ENOTSUP;
       }
     } else if (r->owner != frame || r->signal != carrier->guest_signal) {
-      if (operation == GW_CONTEXT_SWAP || !can_route(r, frame)) {
+      int resume_child = r->signal && r->signal->continuation == r->buffer &&
+                         ancestor_of(carrier->guest_signal, r->signal);
+      if (operation == GW_CONTEXT_SWAP || resume_child) {
+        error = prepare_scope_switch(r, saved, target, frame);
+      } else if (!can_route(r, frame)) {
         error = ENOTSUP;
       } else if (!(error = retain_context(target))) {
         route(r, frame, 0, NATIVE_SETCONTEXT, mask);
       }
     }
   }
-  gw_nonlocal_mask_restore(mask);
+  if (!entry_mask) {
+    gw_nonlocal_mask_restore(mask);
+  }
   errno = original_errno;
   return error;
 }
@@ -415,9 +570,10 @@ void gw_domain_rpc_finish(void) {
 
 void gw_domain_jump_finish(void) {
   if (!carrier || carrier->abort_checkpoint || carrier->jump_record ||
-      carrier->guest_signal || carrier->guest_rpc_owner ||
-      carrier->jump_signal_target || carrier->abort_resume || pending_context ||
-      restoring_context) {
+      carrier->guest_signal || carrier->live_signals ||
+      carrier->guest_rpc_owner || carrier->jump_signal_target ||
+      carrier->abort_resume || pending_context || restoring_context ||
+      switch_target) {
     _exit(125);
   }
   while (pages) {

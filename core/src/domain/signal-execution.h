@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <stddef.h>
 
+#define GW_SIGNAL_EXECUTION_VERSION 2u
+
 enum gw_signal_execution_phase {
   GW_SIGNAL_EXECUTION_PREPARED = 1,
   GW_SIGNAL_EXECUTION_RUNNING,
@@ -33,6 +35,7 @@ struct gw_signal_execution {
   unsigned version;
   volatile sig_atomic_t phase;
   int result;
+  void *host_view;
 };
 
 struct gw_signal_execution_config {
@@ -68,11 +71,13 @@ int gw_guest_signal_execution_init(struct gw_signal_execution *,
                                    const struct gw_signal_execution_config *);
 int gw_guest_signal_internal_jump(const void *);
 _Noreturn void gw_guest_signal_escape(void);
+int gw_guest_signal_select(struct gw_signal_execution *,
+                           struct gw_signal_execution *);
 
 /* Host carrier with a registered Guest TCB and capture/restore interposition.
  * Every transition is masked. A Host-target native jump retires Guest work
  * through its own checkpoint, then resumes the requested Host continuation.
  * After entry starts, release_host runs once on Host after either outcome.
- * This is destructive recovery, not a resumable-ucontext lifetime protocol. */
+ * A reversible selection holds the same scope and stack pins until return. */
 int signal_guest_execute(struct gw_signal_execution *, void *host_frame);
 #endif

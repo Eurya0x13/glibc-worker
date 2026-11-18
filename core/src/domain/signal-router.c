@@ -989,7 +989,8 @@ void signal_router_forward_domain(int number, siginfo_t *info, void *context,
 static void forward_selected(int number, siginfo_t *info, void *context,
                              void *token, uint64_t host_mask,
                              const stack_t *host_stack, uintptr_t host_sp,
-                             int foreign, int selected, uintptr_t suspended_sp,
+                             int foreign, int selected,
+                             const struct gw_host_stack_floors *floors,
                              uintptr_t *guest_floor) {
   struct disposition *record = token;
   if (!record) {
@@ -1019,8 +1020,8 @@ static void forward_selected(int number, siginfo_t *info, void *context,
     if ((record->action.sa_flags & SA_ONSTACK) &&
         !(host_stack->ss_flags & SS_DISABLE) &&
         !gw_stack_contains(host_stack, host_sp)) {
-      top = suspended_sp && gw_stack_contains(host_stack, suspended_sp)
-                ? gw_signal_stack_top(suspended_sp)
+      top = floors && floors->alternate
+                ? gw_signal_stack_top(floors->alternate)
                 : (uintptr_t)host_stack->ss_sp + host_stack->ss_size;
       if ((unsigned)host_stack->ss_flags & GW_SS_AUTODISARM) {
         effective = (stack_t){.ss_flags = SS_DISABLE};
@@ -1029,10 +1030,12 @@ static void forward_selected(int number, siginfo_t *info, void *context,
       /* A private entry may be on the original ordinary stack, or below a
        * Host handler already on its alternate stack. Preserve all of those
        * suspended frames rather than starting again below the original PC. */
-      int same_stack =
-          suspended_sp && gw_stack_contains(host_stack, suspended_sp) ==
-                              gw_stack_contains(host_stack, host_sp);
-      top = gw_signal_stack_top(same_stack ? suspended_sp : host_sp);
+      uintptr_t floor = 0;
+      if (floors) {
+        floor = gw_stack_contains(host_stack, host_sp) ? floors->alternate
+                                                       : floors->ordinary;
+      }
+      top = gw_signal_stack_top(floor && floor < host_sp ? floor : host_sp);
     }
   } else {
     /* The outer fault route always requests a kernel alternate frame so a
@@ -1069,15 +1072,16 @@ void signal_router_forward_selected_domain(
     int number, siginfo_t *info, void *context, void *token, uint64_t host_mask,
     const stack_t *host_stack, uintptr_t host_sp, int foreign, int selected) {
   forward_selected(number, info, context, token, host_mask, host_stack, host_sp,
-                   foreign, selected, 0, NULL);
+                   foreign, selected, NULL, NULL);
 }
 
 void signal_router_forward_selected_suspended(
     int number, siginfo_t *info, void *context, void *token, uint64_t host_mask,
-    const stack_t *host_stack, uintptr_t host_sp, uintptr_t suspended_sp,
-    int selected, uintptr_t *guest_floor) {
+    const stack_t *host_stack, uintptr_t host_sp,
+    const struct gw_host_stack_floors *floors, int selected,
+    uintptr_t *guest_floor) {
   forward_selected(number, info, context, token, host_mask, host_stack, host_sp,
-                   1, selected, suspended_sp, guest_floor);
+                   1, selected, floors, guest_floor);
 }
 
 _Noreturn void signal_router_default(int number) {

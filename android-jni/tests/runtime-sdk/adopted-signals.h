@@ -19,6 +19,8 @@ enum {
   SIGNAL_PARENT_CONTEXT,
   SIGNAL_CONTEXT_EDIT,
   SIGNAL_SLEEP_ABSOLUTE,
+  SIGNAL_PARENT_SWAP,
+  SIGNAL_PARENT_SWAP_OVERLAP,
   SIGNAL_HOST_CONTEXT,
   SIGNAL_CASES
 };
@@ -29,7 +31,8 @@ static inline int adopted_parent_target(int mode) {
 
 static inline int adopted_nested(int mode) {
   return (mode >= SIGNAL_NESTED && mode <= SIGNAL_NESTED_JUMP) ||
-         mode == SIGNAL_NESTED_CONTEXT || adopted_parent_target(mode);
+         mode == SIGNAL_NESTED_CONTEXT || mode == SIGNAL_PARENT_SWAP ||
+         mode == SIGNAL_PARENT_SWAP_OVERLAP || adopted_parent_target(mode);
 }
 
 static inline int adopted_context(int mode) {
@@ -46,7 +49,11 @@ struct adopted_signal_probe {
   int mode, tid;
   _Atomic int host_returned;
   _Atomic int parent_resumed;
+  _Atomic int swap_phase, host_entries;
+  _Atomic int overlap_rejected;
 };
+
+enum { SIGNAL_SWAP_ROUNDS = 3 };
 
 _Static_assert(offsetof(struct adopted_signal_probe, handled) == 4,
                "Java direct buffer layout");

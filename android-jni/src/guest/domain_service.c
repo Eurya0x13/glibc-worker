@@ -57,6 +57,28 @@ uint64_t gw_domain_reserved_signals(void) {
   return virtual_signals();
 }
 
+void gw_domain_signal_select(struct jni_domain_signal *source,
+                             struct jni_domain_signal *target) {
+  struct gw_signal_execution *from = source->execution, *to = target->execution;
+  struct domain_signal_call call = {.entry = session->signal_select_host,
+                                    .tp = from->host.tp,
+                                    .info = from,
+                                    .context = to};
+#if defined(__aarch64__)
+  call.x18 = from->host.saved[12];
+  call.control[0] = from->host.saved[21];
+  call.control[1] = from->host.saved[22];
+#else
+  call.control[0] = from->host.saved[6];
+  call.control[1] = from->host.saved[7];
+#endif
+  if (session->signal_call(&call) || gw_guest_signal_select(from, to)) {
+    _exit(125);
+  }
+  current->guest_signal = target;
+  current->exchange.guest_execution_mask = target->carrier_mask;
+}
+
 uint64_t gw_domain_rpc_return_mask(uint64_t original) {
   return current->guest_native_active ? physical_mask(current->guest_mask)
                                       : original;
@@ -346,7 +368,7 @@ static int setup_signals(void) {
     return EINVAL;
   }
   if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event) ||
-      install_context_hook(2, gw_domain_context_event)) {
+      install_context_hook(3, gw_domain_context_event)) {
     return EINVAL;
   }
   return 0;

@@ -79,6 +79,30 @@ static void run_on_host_stack(void) {
 
 #endif
 
+static void adopted_swap_host(struct adopted_signal_probe *probe) {
+  int invocation = atomic_fetch_add(&probe->host_entries, 1);
+  if (invocation) {
+    assert(probe->swap_phase == 2 * invocation - 1 && !probe->host_returned);
+    assert(signal_host_retirement_busy());
+    return;
+  }
+
+  volatile unsigned char retained[4096];
+  for (size_t i = 0; i < sizeof retained; ++i) {
+    retained[i] = (unsigned char)(i ^ 0x75);
+  }
+  atomic_store_explicit(&probe->requested, 2, memory_order_release);
+  while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
+    sched_yield();
+  }
+  assert(probe->swap_phase == 2 * SIGNAL_SWAP_ROUNDS + 1);
+  assert(probe->host_entries == SIGNAL_SWAP_ROUNDS + 1);
+  for (size_t i = 0; i < sizeof retained; ++i) {
+    assert(retained[i] == (unsigned char)(i ^ 0x75));
+  }
+  probe->host_returned = 1;
+}
+
 static void adopted_host_jump(int number) {
   assert(number == SIGWINCH);
   if (adopted_jump_active) {
@@ -99,6 +123,10 @@ static void adopted_host_jump(int number) {
   struct adopted_signal_probe *probe = adopted_host_nested;
   if (probe) {
     assert(syscall(SYS_gettid) == probe->tid);
+    if (probe->mode == SIGNAL_PARENT_SWAP) {
+      adopted_swap_host(probe);
+      return;
+    }
     atomic_store_explicit(&probe->requested, 2, memory_order_release);
     while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
       sched_yield();
@@ -210,6 +238,13 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
 #endif
     struct adopted_signal_probe probe = {.mode = mode,
                                          .tid = (int)syscall(SYS_gettid)};
+    struct sigaction original;
+    if (mode == SIGNAL_PARENT_SWAP) {
+      assert(!sigaction(SIGWINCH, NULL, &original));
+      struct sigaction action = original;
+      action.sa_flags |= SA_ONSTACK;
+      assert(!sigaction(SIGWINCH, &action, NULL));
+    }
     jlong address = (jlong)(uintptr_t)&probe;
     adopted_host_nested = adopted_nested(mode) ? &probe : NULL;
     if (adopted_guest_target(mode)) {
@@ -226,6 +261,18 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
         assert(errno == EDOM);
       }
       assert((*env)->CallStaticIntMethod(env, cls, finish) == 73);
+    }
+    if (mode == SIGNAL_PARENT_SWAP) {
+      assert(!sigaction(SIGWINCH, &original, NULL));
+      assert(!signal_host_retirement_busy());
+      printf(
+          "{\"stage\":\"adopted-scope-resume\",\"round_trips\":%d,"
+          "\"host_reentries\":%d,\"host_returned\":true}\n",
+          SIGNAL_SWAP_ROUNDS, probe.host_entries - 1);
+    } else if (mode == SIGNAL_PARENT_SWAP_OVERLAP) {
+      assert(probe.overlap_rejected && probe.host_returned &&
+             !signal_host_retirement_busy());
+      puts("{\"stage\":\"adopted-scope-overlap\",\"rejected\":true}");
     }
     adopted_host_nested = NULL;
     assert(!(*env)->ExceptionCheck(env));

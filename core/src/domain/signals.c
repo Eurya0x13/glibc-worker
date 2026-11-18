@@ -7,6 +7,7 @@
 #include "nonlocal.h"
 #include "signal-execution.h"
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -69,13 +70,19 @@ struct signal_slot signal_slots[DOMAIN_FIXTURE_CARRIERS];
  * TLS-free registry, while Host mask/wait APIs avoid scanning that registry. */
 static _Thread_local struct signal_slot *host_recipient;
 
+struct routed_guest;
+
 struct host_signal_anchor {
   struct host_signal_anchor *previous;
+  struct host_signal_anchor *volatile live_next;
   struct signal_slot *slot;
   ucontext_t *frame;
   uint64_t mask, control[3];
   const struct domain *suspended;
   void *guest_identity;
+  struct gw_nonlocal_scope *scope;
+  struct routed_guest *guest_route;
+  void *volatile wait;
 };
 /* Accessed after assembly restores Host TLS. The entry owns each anchor until
  * returning to its kernel frame or retiring it through native recovery. */
@@ -98,6 +105,42 @@ struct routed_guest {
 };
 
 static _Thread_local struct routed_guest *routed_guest;
+static _Thread_local struct host_signal_anchor *live_anchors;
+extern void *gw_signal_wait_scope(void) __attribute__((weak));
+extern void gw_signal_wait_select(void *) __attribute__((weak));
+
+/* Called from the active GNU entry via the TLS-switch assembly. The two
+ * views identify live frames, including any intervening Host callback.
+ * Selecting a view does not run a landing or release its resources. */
+int signal_guest_select_host(int unused, void *from, void *to) {
+  (void)unused;
+  struct gw_signal_execution *source = from, *target = to;
+  struct host_signal_anchor *old = source->host_view;
+  struct host_signal_anchor *next = target->host_view;
+  if (!old || old != host_anchor || !next || old->slot != next->slot ||
+      gw_nonlocal_select(old->scope, next->scope)) {
+    return EBUSY;
+  }
+
+  if (gw_signal_wait_scope && gw_signal_wait_select) {
+    old->wait = gw_signal_wait_scope();
+    gw_signal_wait_select(next->wait);
+  }
+  host_anchor = next;
+  routed_guest = next->guest_route;
+  return 0;
+}
+
+static void retire_host_anchor(struct host_signal_anchor *anchor) {
+  struct host_signal_anchor *volatile *link = &live_anchors;
+  while (*link != anchor) {
+    if (!*link || (*link)->previous == anchor) {
+      _exit(125);
+    }
+    link = &(*link)->live_next;
+  }
+  *link = anchor->live_next;
+}
 
 int signal_guest_suspended(struct signal_slot *slot,
                            struct gw_signal_suspension *suspended) {
@@ -134,8 +177,8 @@ static void restore_execution_stack(const stack_t *desired) {
 int signal_guest_execute(struct gw_signal_execution *execution,
                          void *host_frame) {
   struct signal_slot *slot = host_recipient;
-  if (!execution || execution->version != 1 || !slot ||
-      execution->guest.tp != slot->exchange->guest.tp ||
+  if (!execution || execution->version != GW_SIGNAL_EXECUTION_VERSION ||
+      !slot || execution->guest.tp != slot->exchange->guest.tp ||
       execution->abort.tp != execution->guest.tp ||
       execution->phase != GW_SIGNAL_EXECUTION_PREPARED || !execution->swap) {
     return EINVAL;
@@ -167,6 +210,12 @@ int signal_guest_execute(struct gw_signal_execution *execution,
   gw_nonlocal_enter(&scope);
   atomic_fetch_add_explicit(&independent_entries, 1, memory_order_acquire);
   if (host_frame) {
+    anchor.scope = &scope;
+    anchor.guest_route = routed_guest;
+    anchor.wait = gw_signal_wait_scope ? gw_signal_wait_scope() : NULL;
+    anchor.live_next = live_anchors;
+    live_anchors = &anchor;
+    execution->host_view = &anchor;
     host_anchor = &anchor;
   }
 
@@ -181,7 +230,11 @@ int signal_guest_execute(struct gw_signal_execution *execution,
     execution->swap(&execution->host, &execution->abort);
     restore_execution_stack(&retained_stack);
   }
-  host_anchor = anchor.previous;
+  if (host_frame) {
+    retire_host_anchor(&anchor);
+    execution->host_view = NULL;
+    host_anchor = anchor.previous;
+  }
   int result = execution->phase == GW_SIGNAL_EXECUTION_DONE ? execution->result
                                                             : ECANCELED;
   if (execution->release_host) {
@@ -296,6 +349,20 @@ int signal_guest_carrier_attach(struct signal_slot *slot) {
   if (slot->guest_async) {
     return EALREADY;
   }
+  pthread_attr_t attributes;
+  int error = pthread_getattr_np(pthread_self(), &attributes);
+  if (error) {
+    return error;
+  }
+  void *stack;
+  size_t size;
+  error = pthread_attr_getstack(&attributes, &stack, &size);
+  pthread_attr_destroy(&attributes);
+  if (error) {
+    return error;
+  }
+  slot->host_stack_low = (uintptr_t)stack;
+  slot->host_stack_high = slot->host_stack_low + size;
   slot->guest_async = 1;
   return 0;
 }
@@ -389,6 +456,41 @@ __attribute__((no_stack_protector)) void signal_note_guest_thread(
   atomic_store_explicit(&guest_tids[index], tid, memory_order_release);
 }
 
+static struct gw_host_stack_floors host_stack_floors(
+    const struct host_signal_anchor *anchor) {
+  const stack_t *alternate = &anchor->frame->uc_stack;
+  uintptr_t original = anchor->suspended->sp;
+  struct gw_host_stack_floors floors = {0};
+  if (gw_stack_contains(alternate, original)) {
+    floors.alternate = original;
+  } else {
+    floors.ordinary = original;
+  }
+  if (!anchor->slot->guest_async) {
+    return floors;
+  }
+
+  uintptr_t interrupted_sp = gw_signal_interrupted_sp(anchor->frame);
+  uintptr_t low = anchor->slot->host_stack_low;
+  uintptr_t high = anchor->slot->host_stack_high;
+  for (const struct host_signal_anchor *entry = live_anchors; entry;
+       entry = entry->live_next) {
+    uintptr_t sp = entry->suspended->sp;
+    if (entry->slot != anchor->slot || !sp) {
+      continue;
+    }
+    if (gw_stack_contains(alternate, sp)) {
+      if (!floors.alternate || sp < floors.alternate) {
+        floors.alternate = sp;
+      }
+    } else if (interrupted_sp >= low && interrupted_sp < high && sp >= low &&
+               sp < high && (!floors.ordinary || sp < floors.ordinary)) {
+      floors.ordinary = sp;
+    }
+  }
+  return floors;
+}
+
 static void forward_anchored_host(int number, siginfo_t *info, void *token,
                                   int selected, uintptr_t *guest_floor) {
   /* A VM handler must see the real suspended Host PC/registers, never the
@@ -398,10 +500,10 @@ static void forward_anchored_host(int number, siginfo_t *info, void *token,
   memcpy(&mask, &frame->uc_sigmask, sizeof mask);
   mask = signal_host_logical_mask(mask);
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);
+  struct gw_host_stack_floors floors = host_stack_floors(host_anchor);
   signal_router_forward_selected_suspended(
       number, info, frame, token, host_anchor->mask, &frame->uc_stack,
-      gw_signal_interrupted_sp(frame), host_anchor->suspended->sp, selected,
-      guest_floor);
+      gw_signal_interrupted_sp(frame), &floors, selected, guest_floor);
   memcpy(&mask, &frame->uc_sigmask, sizeof mask);
   mask = signal_host_physical_mask(mask);
   memcpy(&frame->uc_sigmask, &mask, sizeof mask);
@@ -416,7 +518,8 @@ static void deliver_foreign_host(int number, siginfo_t *info, void *context,
     struct exchange *exchange = slot->exchange;
     signal_router_forward_selected_suspended(
         number, info, context, token, exchange->host_execution_mask,
-        &exchange->host_altstack, exchange->host.sp, 0, selected, guest_floor);
+        &exchange->host_altstack, exchange->host.sp, NULL, selected,
+        guest_floor);
   }
 }
 
@@ -1199,6 +1302,10 @@ int signal_prepare_release(struct signal_slot *slot, int thread_exiting) {
 #ifdef GW_DOMAIN_CHAIN
   if (slot && slot->deferred_active) {
     uint64_t mask = gw_nonlocal_mask_block();
+    if (live_anchors && live_anchors->slot == slot) {
+      gw_nonlocal_mask_restore(mask);
+      return EBUSY;
+    }
     synchronize_deferred(slot);
     gw_signal_deferred_prune(slot->deferred);
     if (thread_exiting) {

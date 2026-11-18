@@ -216,6 +216,15 @@ int gw_nonlocal_pending(void) {
   return pending.active;
 }
 
+int gw_nonlocal_select(struct gw_nonlocal_scope *from,
+                       struct gw_nonlocal_scope *to) {
+  if (top != from || !to || !to->generation || pending.active) {
+    return EBUSY;
+  }
+  top = to;
+  return 0;
+}
+
 static _Noreturn void continue_transfer(void) {
   if (top == pending.target &&
       (!top || top->generation == pending.target_generation)) {

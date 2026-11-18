@@ -184,6 +184,7 @@ static int run_parked_signal(struct jni_domain_context *c, void *frame) {
   }
 
   struct gw_signal_execution execution;
+  activation.execution = &execution;
   const struct gw_signal_execution_config config = {
       .stack = stack,
       .stack_size = size,
@@ -504,8 +505,8 @@ int gw_domain_context_stop(struct host_context *host, int thread_exiting) {
   }
   struct jni_domain_context *c = current;
   REQUIRE(c->id == host->id);
-  if (c->abort_checkpoint || c->host_rpc || c->jump_record || c->jump_resume ||
-      c->guest_rpc_owner || c->abort_resume) {
+  if (c->live_signals || c->abort_checkpoint || c->host_rpc || c->jump_record ||
+      c->jump_resume || c->guest_rpc_owner || c->abort_resume) {
     return -EBUSY;
   }
   int error = signal_prepare_release(current_signal, thread_exiting);

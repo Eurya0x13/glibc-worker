@@ -357,7 +357,7 @@ for origin, name in [
                 "logical-mask-inheritance-and-notify-v1",
                 "pre-clone-recipient-admission-v1",
                 "optional-logical-consuming-waits-v1",
-                "optional-native-context-events-v2",
+                "optional-native-context-events-v3",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

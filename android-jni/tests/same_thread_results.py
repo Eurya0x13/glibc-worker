@@ -33,7 +33,7 @@ SUITES = [
 ]
 REMAINING = [
     "Guest signalfd, job control and remaining I/O interruption semantics",
-    "General saved/resumable continuations and Guest targets beyond C-only GetVersion",
+    "Continuation lifetimes beyond live signal scopes and additional Guest JNI targets",
     "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",
 ]
 

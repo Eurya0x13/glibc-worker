@@ -184,13 +184,19 @@ Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新�
 掩码与浮点舍入模式，并通过 `swapcontext` 往返信号调用前准备的独立 Guest 栈。
 原生返回链接恢复仍属于当前信号调用的处理器。
 
+跨作用域 `swapcontext` 用例让外层 Guest 处理器使用普通栈，内层使用
+`SS_AUTODISARM` 备用栈。中间的 Host 回调暂停期间，两层 Guest 处理器往返三轮，
+并执行三个额外的 Host 回调。断言覆盖两份 Guest 栈帧、原 Host 回调的栈数据、
+各上下文的浮点舍入模式和掩码、备用栈重新启用、再次调用 JNI 和关闭。另一用例
+验证 Guest 栈重叠时返回 `EINVAL`，内层处理器和中间的 Host 回调仍能正常返回。
+
 正常返回的 Guest 处理器会修改暂停 GNU 上下文的浮点控制状态，下次原生入口必须
 观测到这项修改。绝对时间 `clock_nanosleep` 用例要求，内核睡眠期间处理 Guest 通知
 后，Host 仍按原截止时间醒来。
 
-Linux x86_64 运行 16 个用例，其中 Host glibc 用例先恢复同作用域的 `swapcontext`
+Linux x86_64 运行 18 个用例，其中 Host glibc 用例先恢复同作用域的 `swapcontext`
 捕获，再恢复外层 `getcontext` 目标。Android ARM64 使用指定的 shell JRE17 运行
-15 个用例。Guest glibc 上下文用例在两端运行。Host glibc 用例需要 Bionic 没有
+17 个用例。Guest glibc 上下文用例在两端运行。Host glibc 用例需要 Bionic 没有
 提供的公开接口。
 
 ## 证据

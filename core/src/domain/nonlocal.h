@@ -22,6 +22,9 @@ int gw_nonlocal_ready(void);
 void gw_nonlocal_enter(struct gw_nonlocal_scope *);
 void gw_nonlocal_leave(struct gw_nonlocal_scope *);
 int gw_nonlocal_pending(void);
+/* Select between live Host scope chains on this carrier. Delivery is masked
+ * and both chains stay pinned throughout this operation. */
+int gw_nonlocal_select(struct gw_nonlocal_scope *, struct gw_nonlocal_scope *);
 /* Retire nested scopes and land in a still-live owning Host boundary. No
  * foreign libc buffer is interpreted or passed to the Host restore entry. */
 _Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *);

@@ -58,6 +58,16 @@ int gw_guest_signal_internal_jump(const void *buffer) {
   return active && active->landing == buffer;
 }
 
+int gw_guest_signal_select(struct gw_signal_execution *from,
+                           struct gw_signal_execution *to) {
+  if (active != from || !to || to->phase != GW_SIGNAL_EXECUTION_RUNNING ||
+      !to->landing) {
+    return EBUSY;
+  }
+  active = to;
+  return 0;
+}
+
 _Noreturn void gw_guest_signal_escape(void) {
   if (!active || !active->landing) {
     _exit(125);

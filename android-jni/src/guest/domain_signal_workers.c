@@ -303,6 +303,8 @@ int gw_guest_signal_parked(void *argument) {
   carrier->guest_native_active = 1;
   activation->previous = carrier->guest_signal;
   carrier->guest_signal = activation;
+  activation->live_next = carrier->live_signals;
+  carrier->live_signals = activation;
 
   ucontext_t *parked = activation->frame;
   ucontext_t frame = *parked;
@@ -361,7 +363,19 @@ void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
   }
 
   gw_domain_jump_signal_leave(activation);
+  struct jni_domain_signal **link = &carrier->live_signals;
+  while (*link != activation) {
+    if (!*link || (*link)->previous == activation) {
+      _exit(125);
+    }
+    link = &(*link)->live_next;
+  }
+  *link = activation->live_next;
   carrier->guest_signal = activation->previous;
+  if (carrier->guest_signal) {
+    carrier->guest_signal->continuation = NULL;
+    carrier->guest_signal->continuation_sp = 0;
+  }
   carrier->guest_native_active = activation->previous_active;
   carrier->exchange.guest_execution_mask = activation->previous_carrier_mask;
   gw_guest_workers_wake_error(gw_signal_target_unpin(current));

@@ -66,7 +66,7 @@ int gw_signal_execution_from_saved(
   execution->argument = config->argument;
   execution->carrier_mask = config->carrier_mask;
   execution->alternate = config->alternate;
-  execution->version = 1;
+  execution->version = GW_SIGNAL_EXECUTION_VERSION;
   execution->guest = execution->abort = *saved;
   set_entry(&execution->guest, (uintptr_t)config->stack + config->stack_size,
             entries->start, execution, entries->run);

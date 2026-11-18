@@ -27,8 +27,8 @@ static inline int jni_domain_select(const char *mode) {
 }
 
 #define GW_DOMAIN_TRANSPORT_MAGIC UINT64_C(0x4757444f4d41494e)
-#define GW_DOMAIN_TRANSPORT_VERSION 17u
-#define GW_DOMAIN_LIBC_CAPABILITIES UINT64_C(0x475744010000000d)
+#define GW_DOMAIN_TRANSPORT_VERSION 18u
+#define GW_DOMAIN_LIBC_CAPABILITIES UINT64_C(0x475744010000000e)
 #define GW_DOMAIN_CAP_ADOPTION UINT64_C(1)
 #define GW_DOMAIN_CAP_NATIVE_UNWIND UINT64_C(2)
 #define GW_DOMAIN_CAP_STOP_QUIESCENT UINT64_C(4)
@@ -78,11 +78,16 @@ struct jni_domain_context {
   ucontext_t *parked_guest;
   int resume_parked;
   struct jni_domain_signal *guest_signal;
+  struct jni_domain_signal *live_signals;
 };
 
 struct jni_domain_signal {
   struct jni_domain_context *carrier;
   struct jni_domain_signal *previous;
+  struct jni_domain_signal *live_next;
+  struct gw_signal_execution *execution;
+  const ucontext_t *continuation;
+  uintptr_t continuation_sp;
   ucontext_t *frame;
   uintptr_t stack_floor;
   void *mapping;
@@ -113,6 +118,8 @@ struct jni_domain_session {
   int (*signal_invoke)(void *);
   void (*signal_finish)(void *, enum gw_signal_exit);
   int (*signal_resume)(int, void *, void *);
+  int (*signal_call)(const struct domain_signal_call *);
+  int (*signal_select_host)(int, void *, void *);
   /* Published with STOP response, after the native kernel mask is installed.
    * The supervisor never resumes application work or unmasks after this ACK. */
   uint64_t owner_stopped_mask;

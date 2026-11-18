@@ -341,7 +341,7 @@ static void resolve(void) {
   } while (0)
   unsigned long (*capabilities)(void);
   RESOLVE(capabilities, "__gw_domain_capabilities");
-  assert(capabilities() == 0x475744010000000dUL);
+  assert(capabilities() == 0x475744010000000eUL);
   RESOLVE(allocate_domain, "__gw_domain_alloc");
   RESOLVE(bind_domain, "__gw_domain_bind");
   RESOLVE(run_domain, "__gw_domain_run");

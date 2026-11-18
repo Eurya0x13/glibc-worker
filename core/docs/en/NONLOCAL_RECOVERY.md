@@ -54,9 +54,20 @@ GNU Host `swapcontext` records the source and tail-calls native libc. Guest
 libc also reports when `makecontext` prepares a new stack entry, so that entry
 can run under the current scope even if it was constructed earlier. A return
 link can refer to the outgoing `swapcontext` capture or another live context
-in the current scope. A Guest switch to a suspended older bridge scope still
-returns `ENOTSUP`. Resuming such scopes requires lifetime accounting for both
-owning stacks.
+in the current scope.
+
+Guest `swapcontext` can also switch between live Guest signal handlers in the
+same native invocation across an intervening Host callback. The bridge selects
+the target's Host and Guest scope chains without unwinding either stack. Host
+dispatch uses the stack bounds of every retained activation. Guest glibc applies
+the target's signal mask after installing its native stack. A `setcontext` to
+the parked inner capture can resume it without saving another outer capture.
+
+Keep both continuations and their stack mappings live until the inner handler
+returns through the suspended Host callback. Disjoint stack mappings are
+required for this path. An overlapping transfer returns `EINVAL` without
+changing the selected scope. When leaving an occupied signal alternate stack,
+use `SS_AUTODISARM` to prevent a later delivery from reusing its top.
 Android verification covers Guest glibc contexts and Bionic jump buffers.
 
 The native-call integration masks catchable signals while acquiring/releasing

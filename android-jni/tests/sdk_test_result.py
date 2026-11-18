@@ -208,8 +208,25 @@ def execute_case(
                     "owned_context": True,
                     "post_signal_jni": True,
                 }
-                for phase in range(15 if require_host_private else 16)
+                for phase in range(17 if require_host_private else 18)
             ]
+        )
+        or (
+            mode == "adopted-signals"
+            and [r for r in rows if r.get("stage") == "adopted-scope-resume"]
+            != [
+                {
+                    "stage": "adopted-scope-resume",
+                    "round_trips": 3,
+                    "host_reentries": 3,
+                    "host_returned": True,
+                }
+            ]
+        )
+        or (
+            mode == "adopted-signals"
+            and [r for r in rows if r.get("stage") == "adopted-scope-overlap"]
+            != [{"stage": "adopted-scope-overlap", "rejected": True}]
         )
         or (
             mode == "worker-signals"

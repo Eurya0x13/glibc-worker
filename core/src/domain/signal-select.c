@@ -336,6 +336,14 @@ static atomic_flag sleep_lock = ATOMIC_FLAG_INIT;
 static _Thread_local _Atomic(struct sleep_record *) waiting;
 _Static_assert(ATOMIC_POINTER_LOCK_FREE == 2, "signal wait publication");
 
+void *gw_signal_wait_scope(void) {
+  return atomic_load_explicit(&waiting, memory_order_acquire);
+}
+
+void gw_signal_wait_select(void *record) {
+  atomic_store_explicit(&waiting, record, memory_order_release);
+}
+
 static void lock_sleep_records(void) {
   while (atomic_flag_test_and_set_explicit(&sleep_lock, memory_order_acquire)) {
   }

@@ -24,7 +24,7 @@ struct guest_observation {
   struct sigaction previous;
   sigset_t inherited;
   sigjmp_buf continuation;
-  ucontext_t context;
+  ucontext_t context, resumed_parent;
   ucontext_t suspended_handler, prepared_fiber;
   void *fiber_stack;
   volatile sig_atomic_t fiber_ran;
@@ -87,6 +87,132 @@ static void signal_host(const struct guest_observation *o) {
   assert(!syscall(SYS_tgkill, getpid(), o->probe->tid, SIGWINCH));
 }
 
+/* No newer ordinary-stack frame lives below the outer getcontext capture
+ * when the kernel lands on the AUTODISARM alternate stack. */
+static inline __attribute__((always_inline)) long send_host_in_frame(long pid,
+                                                                     long tid) {
+#if defined(__x86_64__)
+  long result = SYS_tgkill;
+  __asm__ volatile("syscall"
+                   : "+a"(result)
+                   : "D"(pid), "S"(tid), "d"((long)SIGWINCH)
+                   : "rcx", "r11", "memory");
+  return result;
+#else
+  register long result __asm__("x0") = pid;
+  register long thread __asm__("x1") = tid;
+  register long number __asm__("x2") = SIGWINCH;
+  register long syscall_number __asm__("x8") = SYS_tgkill;
+  __asm__ volatile("svc #0"
+                   : "+r"(result)
+                   : "r"(thread), "r"(number), "r"(syscall_number)
+                   : "memory", "cc");
+  return result;
+#endif
+}
+
+static void check_swap_state(int rounding, int blocked) {
+  stack_t current;
+  sigset_t mask;
+  assert(!sigaltstack(NULL, &current) && (current.ss_flags & SS_DISABLE));
+  assert(fegetround() == rounding);
+  assert(!pthread_sigmask(SIG_SETMASK, NULL, &mask));
+  assert(sigismember(&mask, SIGURG) == blocked);
+}
+
+static void resume_outer_swap(struct guest_observation *o) {
+  struct sigaction action;
+  assert(!sigaction(SIGUSR1, NULL, &action));
+  action.sa_flags |= SA_ONSTACK;
+  assert(!sigaction(SIGUSR1, &action, NULL));
+
+  sigset_t mask, original;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGURG);
+  assert(!pthread_sigmask(SIG_UNBLOCK, &mask, &original));
+  int rounding = fegetround();
+  assert(!fesetround(FE_DOWNWARD));
+  long pid = getpid(), tid = o->probe->tid;
+  volatile unsigned canary = 0x71379u;
+  assert(!getcontext(&o->context));
+  if (!o->probe->swap_phase) {
+    assert(!send_host_in_frame(pid, tid));
+    assert(o->probe->swap_phase == 2 * SIGNAL_SWAP_ROUNDS + 1);
+    assert(o->probe->host_returned && canary == 0x71379u);
+    stack_t stack;
+    assert(!sigaltstack(NULL, &stack) && stack.ss_sp == o->alternate.ss_sp &&
+           stack.ss_flags == o->alternate.ss_flags);
+    assert(!pthread_sigmask(SIG_SETMASK, &original, NULL));
+    assert(!fesetround(rounding));
+    return;
+  }
+
+  for (int round = 0; round < SIGNAL_SWAP_ROUNDS; ++round) {
+    assert(o->probe->swap_phase == 2 * round + 1 && !o->probe->host_returned);
+    assert(canary == 0x71379u);
+    check_swap_state(FE_DOWNWARD, 0);
+    signal_host(o); /* Runs a distinct Host callback below the retained one. */
+    o->probe->swap_phase = 2 * round + 2;
+    if (round + 1 == SIGNAL_SWAP_ROUNDS) {
+      setcontext(&o->suspended_handler);
+      _exit(125);
+    }
+    assert(!swapcontext(&o->resumed_parent, &o->suspended_handler));
+  }
+}
+
+static void resume_inner_swap(struct guest_observation *o) {
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGURG);
+  assert(!pthread_sigmask(SIG_BLOCK, &mask, NULL));
+  assert(!fesetround(FE_UPWARD));
+  volatile unsigned canary = 0x91451u;
+  for (int round = 0; round < SIGNAL_SWAP_ROUNDS; ++round) {
+    o->probe->swap_phase = 2 * round + 1;
+    const ucontext_t *outer = round ? &o->resumed_parent : &o->context;
+    assert(!swapcontext(&o->suspended_handler, outer));
+    assert(o->probe->swap_phase == 2 * round + 2 && canary == 0x91451u);
+    assert(!o->probe->host_returned);
+    check_swap_state(FE_UPWARD, 1);
+  }
+  o->probe->swap_phase = 2 * SIGNAL_SWAP_ROUNDS + 1;
+}
+
+static void try_overlapping_swap(struct guest_observation *o, int nested) {
+  if (!nested) {
+    volatile sig_atomic_t entered = 0;
+    assert(!getcontext(&o->context) && !entered);
+    entered = 1;
+    signal_host(o);
+    assert(o->probe->overlap_rejected && o->probe->host_returned);
+    return;
+  }
+
+  int rounding = fegetround();
+  sigset_t mask, old_mask, observed;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGURG);
+  assert(!pthread_sigmask(SIG_BLOCK, &mask, &old_mask));
+  assert(!fesetround(FE_UPWARD));
+
+#if defined(__x86_64__)
+  register uintptr_t canary __asm__("r12") = 0x71379u;
+  __asm__ volatile("" : "+r"(canary));
+#endif
+  int error = swapcontext(&o->suspended_handler, &o->context);
+#if defined(__x86_64__)
+  __asm__ volatile("" : "+r"(canary));
+  assert(canary == 0x71379u);
+#endif
+  assert(error == -1 && errno == EINVAL);
+  assert(fegetround() == FE_UPWARD);
+  assert(!pthread_sigmask(SIG_SETMASK, &old_mask, &observed));
+  assert(sigismember(&observed, SIGURG) == 1);
+  assert(!fesetround(rounding));
+  o->probe->overlap_rejected = 1;
+}
+
 static void resume_parent_signal(struct guest_observation *o) {
   if (o->probe->mode == SIGNAL_PARENT_JUMP) {
     int value = sigsetjmp(o->continuation, 1);
@@ -123,12 +249,12 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
   volatile char local = 41;
   uintptr_t low = o->stack;
   size_t size = o->size;
-  if (mode == SIGNAL_NESTED_ALT) {
+  if (mode == SIGNAL_NESTED_ALT || (mode == SIGNAL_PARENT_SWAP && nested)) {
     low = (uintptr_t)o->alternate.ss_sp;
     size = o->alternate.ss_size;
   }
   assert(frame && (uintptr_t)&local - low < size);
-  if (nested) {
+  if (nested && mode != SIGNAL_PARENT_SWAP) {
     assert(signal_sp(frame) - low < size);
     assert((uintptr_t)&local < signal_sp(frame) &&
            signal_sp(frame) < o->outer_sp);
@@ -141,16 +267,32 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
   }
   atomic_fetch_add_explicit(&o->probe->handled, 1, memory_order_release);
 
+  if (mode == SIGNAL_PARENT_SWAP_OVERLAP) {
+    if (!nested) {
+      o->outer_sp = (uintptr_t)&local;
+    }
+    try_overlapping_swap(o, nested);
+    assert(local == 41);
+    return;
+  }
+
   if (mode == SIGNAL_HOST_JUMP || mode == SIGNAL_HOST_CONTEXT ||
       (adopted_nested(mode) && !nested)) {
     o->outer_sp = (uintptr_t)&local;
-    if (adopted_parent_target(mode)) {
+    if (mode == SIGNAL_PARENT_SWAP) {
+      resume_outer_swap(o);
+    } else if (adopted_parent_target(mode)) {
       resume_parent_signal(o);
     } else {
       signal_host(o);
       assert(mode == SIGNAL_NESTED || mode == SIGNAL_NESTED_ALT);
       assert(o->probe->host_returned && atomic_load(&o->probe->handled) == 2);
     }
+    assert(local == 41);
+    return;
+  }
+  if (mode == SIGNAL_PARENT_SWAP) {
+    resume_inner_swap(o);
     assert(local == 41);
     return;
   }
@@ -236,12 +378,17 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
   if (adopted_nested(o->probe->mode)) {
     action.sa_flags |= SA_NODEFER;
   }
-  if (o->probe->mode == SIGNAL_NESTED_ALT) {
+  if (o->probe->mode == SIGNAL_NESTED_ALT ||
+      o->probe->mode == SIGNAL_PARENT_SWAP) {
     o->alternate = (stack_t){.ss_size = 65536 * 2};
+    if (o->probe->mode == SIGNAL_PARENT_SWAP) {
+      o->alternate.ss_flags = (int)(UINT32_C(1) << 31); /* SS_AUTODISARM */
+    } else {
+      action.sa_flags |= SA_ONSTACK;
+    }
     o->alternate.ss_sp = malloc(o->alternate.ss_size);
     assert(o->alternate.ss_sp &&
            !sigaltstack(&o->alternate, &o->previous_stack));
-    action.sa_flags |= SA_ONSTACK;
   }
   if (adopted_context(o->probe->mode) ||
       o->probe->mode == SIGNAL_PARENT_CONTEXT) {
@@ -275,7 +422,8 @@ jint sdk_adopted_signal_finish(JNIEnv *env, jclass cls) {
          (adopted_nested(o->probe->mode) ? 2 : 1));
   assert(!sigaction(SIGUSR1, &o->previous, NULL));
   assert(!pthread_sigmask(SIG_SETMASK, &o->inherited, NULL));
-  if (o->probe->mode == SIGNAL_NESTED_ALT) {
+  if (o->probe->mode == SIGNAL_NESTED_ALT ||
+      o->probe->mode == SIGNAL_PARENT_SWAP) {
     assert(!sigaltstack(&o->previous_stack, NULL));
     free(o->alternate.ss_sp);
   }

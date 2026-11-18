@@ -12,12 +12,11 @@ ordering, plus native consumption and lifecycle windows. Tagged Guest delivery
 also runs on adopted carriers in Host/Java. General saved and resumable native
 contexts remain part of the acceptance contract.
 Destructive `setcontext` and `siglongjmp` can already restore a saved native
-Guest command or an older Guest handler. Resuming a bridge scope suspended
-with `swapcontext` still requires a lifetime protocol for both stacks.
-A prepared `makecontext` entry can run and return within the current scope.
-The remaining test must switch from an inner Guest handler to an older live
-Guest continuation and later resume the inner handler with both Guest stacks
-and the intervening Host callback intact.
+Guest command or an older Guest handler. A prepared `makecontext` entry can
+run and return within the current scope. Within one native invocation,
+`swapcontext` can resume an older Guest handler and switch back to the inner
+handler while both Guest stacks and the intervening Host callback remain live.
+General lifetime accounting for other saved native continuations remains open.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
@@ -126,9 +125,8 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   ordinary RPC cleanup and the owning glibc's fortified restore entry. An
   asynchronous handler can also abandon nested signal scopes on this path or
   restore an older Guest handler. Complete other native JNI callback boundaries
-  and general resumable native
-  contexts without skipping Java/VM frames; this slice does not establish
-  general Guest-target recovery.
+  and resumable native contexts beyond live handler scopes in one invocation.
+  Keep transfers that skip Java/VM frames outside the contract.
 - Supply a reviewed live VM/ART recipient-quiescence provider for the explicit
   `signal_router_reclaim` protocol. Its standalone single-recipient gate is
   implemented/tested; a JVM safepoint alone is insufficient. Without a provider,

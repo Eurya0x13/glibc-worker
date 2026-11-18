@@ -71,6 +71,8 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
       return ENOTSUP;
     }
     session.signal_page_size = (size_t)page;
+    session.signal_call = domain_guest_signal_call;
+    session.signal_select_host = signal_guest_select_host;
   }
 #endif
   /* Claim bridge ownership before creating helpers or changing Guest fault
