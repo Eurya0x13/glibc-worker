@@ -32,6 +32,8 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 
 依赖下载和源码缓存分别归所属项目的 `vendor/`、`work/`，构建输出归各自 `build/`；根目录不保存这些缓存。代码格式见 [STYLE](STYLE.md)，项目边界、契约文档与 review 顺序见 [REVIEW_GUIDE](REVIEW_GUIDE.md)。
 
+计划中的工作见 [项目待办](TODO.md)。
+
 ## 同线程域
 
 core 维护同线程域切换、收养补丁和信号路由。android-jni 的 `runtime_bridge.h` 启动接口默认

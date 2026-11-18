@@ -32,6 +32,8 @@ Real validation primarily covers Android HotSpot. Separating public JNI from pri
 
 Downloads, source caches and outputs belong to each project's `vendor/`, `work/` and `build/`. The workspace root keeps none of these caches. See [style](STYLE.md) and [review order](REVIEW_GUIDE.md).
 
+Planned work is tracked in the [project TODO](TODO.md).
+
 ## Same-thread domains
 
 Core maintains context switching, adoption patches and signal routing. The
