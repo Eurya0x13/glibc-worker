@@ -66,21 +66,24 @@ python3 core/tests/signal_aliases.py --ndk "$ANDROID_NDK_HOME" --serial "$ANDROI
 3. 其他经 Guest 运行时显式标记的信号归 Guest。
 4. 外部未标记信号归 Host，包括进程定向信号。
 
-`signal_contract.h` 独立实现并测试分类，不等于实际投递已完成。普通服务仍执行 Host 保留策略；
-显式原生展开服务另外安装独立 Guest 同步故障动作及收养载体掩码。其
-`signal_router_guest_faults` 接入在 Host 默认/忽略动作时仍保留外层故障路由，仅在投递 Host
-时消耗 Host 的一次性处理器。GNU 自建 pthread 可在真实 Guest TLS 下恢复同步故障。
-Guest 执行期间，Host 保留的待处理异步信号继续留在内核队列。
+`signal_contract.h` 实现该分类。普通服务执行 Host 保留策略。原生展开构建增加独立的
+Guest 故障处置、收养载体掩码和原生信号栈，涵盖已验证的 AUTODISARM 暂停与恢复。
+掩码适配将 Host 保留的待决信号留在内核队列。故障路由仅在投递 Host 时消耗 Host 的
+一次性处置。
+GNU 自建 pthread 使用自己的 Guest TLS 恢复同步故障。
 
-这些是部分机制，不是完整双域独立投递。显式服务支持独立原生信号栈及已测的 AUTODISARM
-暂停/恢复路径；[信号等待适配](SIGNAL_WAITING.md) 还在临时掩码等待、消费型等待、待决查询及
-signalfd 创建/更新时保护 Host 保留队列。真正 GNU pthread 收到的 Host 信号采用
-显式 [Host 分发线程策略](HOST_SIGNAL_RELAY.md)，改变处理线程并保留原始信号帧。
-标记的异步发送和 Guest 端到端待决投递仍未完成。内部
-[Guest 信号收件队列](GUEST_SIGNAL_INBOX.md) 已提供私有/共享队列选择、
-跨队列实时配额以及通知/关闭事务，尚未接入异步 Guest TLS 入口或 libc
-发送/等待钩子。最终要求见
-[非局部恢复](NONLOCAL_RECOVERY.md) 与仓库 todo.md；普通 SDK 不会静默启用显式展开能力。
+显式 V2 启动将 GNU libc 带标签发送和消费型等待接入 Guest 收件队列，支持线程定向队列、
+共享队列及实时信号计数。同线程后端允许目标载体在执行 Host 代码或 Java 时进入 Guest
+处理器。Guest signalfd 支持逻辑读取、就绪通知和描述符生命周期；已适配的 Host 等待
+可以在内部通知后恢复。参见 [Guest 发送](GUEST_SIGNAL_SEND.md)、
+[异步入口](GUEST_ASYNC_ENTRY.md) 和 [信号等待](SIGNAL_WAITING.md)。
+
+GNU 自建 pthread 收到的 Host 信号交给专用的 Host pthread。原始信号帧保留至
+分发线程返回。共享作业控制信号遵循 Linux 进程语义。参见
+[分发契约](HOST_SIGNAL_RELAY.md) 和 [共享作业控制](SIGNAL_WAITING.md#共享-linux-作业控制)。
+
+缺省启动选择同线程执行后端。独立 Guest 信号路径需要
+[显式 V2 配置](../../../android-jni/docs/zh/RUNTIME.md)。
 
 绕过运行时的原始信号系统调用不携带逻辑域身份。GNU 自建 pthread 也没有隐含的 Host TLS/JVM 线程身份，不能带着 Guest TP 执行 Host 处理器。
 
@@ -122,7 +125,8 @@ Guest 辅助线程前，预留一个未使用的公开实时信号。正常 Host
 等待回收器持有的写锁。独立契约测试覆盖 worker 全部 join、拒绝回收、后续投递，
 以及 Host 的 `siglongjmp`。
 
-首版要求透明恢复跨域 siglongjmp/setcontext；恢复责任和验收矩阵见 [非局部恢复](NONLOCAL_RECOVERY.md)。仅同域通过或隔离一个有效跨域跳转，都不满足该要求。
+原生跨域 `siglongjmp`、`setcontext` 和受支持的 `swapcontext` 路径遵循
+[非局部恢复](NONLOCAL_RECOVERY.md) 中的上下文生命周期及清理契约。
 
 相关内核路径是 get_signal/SA_RESETHAND 发布，以及 ARM64 的 setup_return/setup_rt_frame：
 

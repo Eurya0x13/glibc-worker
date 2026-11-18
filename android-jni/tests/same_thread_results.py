@@ -32,9 +32,6 @@ SUITES = [
     "android-jni/build/tests/runtime-sdk-android-late-nonlocal-recovery-pending",
     "jvm-jni/build/tests/signal-profile-android",
 ]
-REMAINING = [
-    "Reviewed live VM/ART recipient quiescence and late integration acceptance",
-]
 
 
 def inspect_suite(relative):
@@ -109,7 +106,7 @@ def main():
         "full_compatibility": "INCOMPLETE",
         "execution": "native Linux and Android ARM64 shell JRE17; no APK/ART claim",
         "evidence_current": all(row["result"] == "PASS" for row in cases),
-        "remaining_acceptance": REMAINING,
+        "remaining_acceptance": [],
         "cases": cases,
     }
 

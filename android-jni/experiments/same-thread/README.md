@@ -1,12 +1,12 @@
 # Production JNI paths with same-thread domain switching
 
-本实验让真实 Guest JNI 桥分别通过 worker 通知和同线程栈/TLS 切换执行，比较相同 JNI 工作的耗时。它是可选实验，不改变正常构建的默认后端。
+本实验让真实 Guest JNI 桥分别通过 worker 通知和同线程栈/TLS 切换执行，比较相同 JNI 工作的耗时。正式启动接口见 [JNI runtime 接入](../../docs/zh/RUNTIME.md)。
 
 ## 接入边界
 
 两种模式使用同一个 Host、Guest、DSO、Java 测试类和打过收养补丁的 glibc；当前接入构建在未设置 `GW_DOMAIN_MODE` 时默认同线程；显式 `GW_DOMAIN_MODE=worker` 选择线程后端，`GW_DOMAIN_MODE=domain` 显式选择同线程。空值和其他名称均拒绝启动，不静默改用其他后端。APK 兼容性入口不再强制写入该变量，而是验证原生默认值；A/B runner 继续为每轮显式选择后端。
 
-[默认后端回归证据](results/default-backend/README.md) 覆盖缺省、显式选择、非法选择与 ART/HotSpot 同进程装卸载。这个默认值只适用于带收养 runtime 和信号接入的构建；常规安装 SDK 的迁移独立跟踪于 [todo.md](../../../todo.md)。
+[默认后端回归证据](results/default-backend/README.md) 覆盖缺省、显式选择、非法选择与 ART/HotSpot 同进程装卸载。
 
 - 复用 `full_host_start`、`full_guest_start`、Host controller、公开 loader API，以及真实的 `JNI_OnLoad`、`RegisterNatives`、`JNI_OnUnload` 和关闭流程。
 - 复用生产生成的 JNI 表、参数封送、引用/ID 存储、Zig 绑定存储和 libffi 跳板。没有用测试专用 JNI 函数表代替生产桥。
@@ -42,7 +42,9 @@
 
 JFR 提供真实 VM 采样负载；[OpenJDK 的 Java 采样路径使用 SuspendedThreadTask，native 采样则有独立路径](https://github.com/openjdk/jdk17u/blob/master/src/hotspot/share/jfr/periodic/sampling/jfrThreadSampler.cpp)。本测试断言实际 SIGUSR2 转发和 VM 正常完成，不把非零计数解释成每次中断都发生在 Guest TLS 下。独立 HotSpot 夹具另外覆盖 JIT 同步故障恢复和线程析构；这些压力流量均不加入性能计时。
 
-仍沿用已约定的首版边界：不支持双域独立信号注册/掩码、任意 Guest 自定义处理器和跨域 longjmp/unwind。信号注册代次及登记页保留到进程退出，未实现通用回收。Guest owner 启动登记前的极短窗口及绕过 libc 的信号系统调用不在支持范围内。后续完整信号虚拟化见 [todo.md](../../../todo.md)。
+本基础夹具覆盖首版的信号保留策略。当前安装 SDK 的独立 Guest 投递、在线回收及跨域恢复契约见
+[core 信号与域切换](../../../core/docs/zh/DOMAINS.md) 和
+[SDK 测试](../../docs/zh/SDK_TESTS.md)。
 
 ## 构建和运行
 

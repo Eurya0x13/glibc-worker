@@ -34,6 +34,11 @@ Downloads, source caches and outputs belong to each project's `vendor/`, `work/`
 
 ## Same-thread domains
 
-Context switching, adoption patches and signal routing are maintained core source; the public JNI runtime belongs to android-jni. The new `runtime_bridge.h` startup API defaults to same-thread execution and offers an explicit worker backend. See [domain and signal boundaries](core/docs/en/DOMAINS.md) and [runtime integration](android-jni/docs/en/RUNTIME.md). `experiments/same-thread/` retains validation entrypoints and historical evidence. Full dual-domain signal virtualization remains unfinished; see [todo.md](todo.md).
+Core maintains context switching, adoption patches and signal routing. The
+`runtime_bridge.h` startup API in android-jni defaults to same-thread execution and
+offers an explicit worker backend. The experiment directories retain
+validation entrypoints and historical evidence. See
+[domain and signal boundaries](core/docs/en/DOMAINS.md) and
+[runtime integration](android-jni/docs/en/RUNTIME.md).
 
-The [measurement method](jvm-jni/experiments/same-thread/PERFORMANCE.md) is separate from historical raw evidence under experiment `results/` directories. Controlled array-copy/allocator-page-return comparisons are in the [1–2 MiB cache results](android-jni/experiments/same-thread/results/array-cache/README.md); caller obligations are in the [array-copy contract](android-jni/docs/en/ARRAY_COPY_CACHE.md). Results for pinned artifacts do not establish general ART/JRE/mod compatibility.
+The [measurement method](jvm-jni/experiments/same-thread/PERFORMANCE.md) is separate from historical raw evidence under experiment `results/` directories. Controlled array-copy/allocator-page-return comparisons are in the [1–2 MiB cache results](android-jni/experiments/same-thread/results/array-cache/README.md); caller obligations are in the [array-copy contract](android-jni/docs/en/ARRAY_COPY_CACHE.md). Results apply to the pinned ART, JRE and mod artifacts tested.

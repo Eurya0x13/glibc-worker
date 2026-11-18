@@ -166,10 +166,9 @@ JNI 调用正常。core 的 [stdio 原生对照](../../../core/docs/zh/STDIO.md)
 上下文可释放，之后新信号读取及再次 JNI 调用正常。Host 忽略该编号期间，Guest 陷阱
 仍须正常恢复，Host 异步到达则丢弃。判定器要求 `host-ignore-pending` 记录。
 
-这个显式启用用例已在原生 Linux x86_64 和 Android ARM64/JRE17 通过，普通接入不会
-自动启用。描述符生命周期/别名的接入缺口、并发忽略或重置语义及通用独立 Guest 异步投递
-仍须验收。本用例和普通正向/死亡矩阵不能证明
-其余要求已完成，见 [信号等待](../../../core/docs/zh/SIGNAL_WAITING.md)。
+这个显式启用用例已在原生 Linux x86_64 和 Android ARM64/JRE17 通过。描述符生命周期
+与 Guest 投递用例使用匹配的 GNU 服务覆盖对应的 V2 路径。参见
+[信号等待](../../../core/docs/zh/SIGNAL_WAITING.md)。
 
 每次 nonlocal 回归还会从 Guest 向未屏蔽的 Host 动作异步发送 `SIGSEGV`，须保留发送者
 元数据并以 Host TLS 执行，不能误入 Guest 同步故障路径。用例在 VM 创建前安装兜底动作，
@@ -242,7 +241,8 @@ JFR 必须记录该线程处于 Guest JNI 的 `jdk.NativeMethodSample`。随后 
 在工作区根目录执行 `python3 android-jni/tests/same_thread_results.py --require-current`，
 可核验 23 组选定桌面/Android 测试的输入散列，输出
 `android-jni/build/tests/same-thread-compatibility.json`。证据缺失、失败或过期均使检查失败。
-只要 [todo.md](../../../todo.md) 的验收要求尚未完成，即便选定矩阵全部有效通过，完整兼容性
-仍报告为 `INCOMPLETE`。
+用 `evidence_current` 查看这个矩阵的结果。`full_compatibility: INCOMPLETE` 字段
+体现该报告的适用范围。另有同进程应用夹具覆盖已审阅的 ART 晚接入 profile 和在线注册回收。
+参见 [VM 适配验证](../../../jvm-jni/docs/zh/ADAPTER.md)。
 
 输出位于 android-jni/build/tests/，由 -android、-nonlocal、-recovery 后缀区分。它们是生成证据，不能修改清单使过期制品看似匹配。

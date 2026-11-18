@@ -49,13 +49,13 @@
 
 不能将 worker 的波动解释为固定桥损耗，也不能推导 CPU/能耗、游戏 FPS 或所有模组的收益。没有普通 bionic JNI 直接基线；本轮仅比较同一夹具中的两种交接方式。
 
-## Remaining boundaries
+## Boundaries of the recorded runs
 
 - 本轮真实 VM 为固定 Android JRE 17；桌面 OpenJDK 17 是补充机制验证。未验证该后端的 ART、其他 JRE 制品、真实模组或 ClassLoader GC 自动卸载。
 - 使用公开 loader API；未覆盖 JRE 私有 `System.load` 钩子的集成。
 - 不支持双域独立信号注册/掩码、任意 Guest 自定义处理器、跨域 longjmp/unwind。Guest-only 线程收到必须转交 Host 的信号会终止隔离进程。
 - 信号代次入口和登记页保留到进程退出；未实现通用回收。Guest owner 登记前窗口、原始信号系统调用绕过、完整 runtime 卸载仍不在支持范围。
-- 默认生产后端仍为 worker；实验 hooks 只在 `GW_EXPERIMENT_DOMAIN_JNI` 下启用。完整双域信号语义按 [todo.md](../../../../../todo.md) 保留。
+- 本报告对应的生产后端默认 worker，实验 hooks 由 `GW_EXPERIMENT_DOMAIN_JNI` 启用。现行契约见 [JNI runtime 接入](../../../../docs/zh/RUNTIME.md)。
 
 ## Evidence
 

@@ -34,7 +34,8 @@ core 提供可选的 `GW_DOMAIN_CHAIN` Host 注册层，在创建 VM 前安装�
 - Host 注册记录及可执行入口按隔离进程生命周期保留。每次注册绑定不可变代次，内核掩码与处理器一致；一次性处理器只重置自身代次。独立测试覆盖 1,000 次并发替换、SA_RESETHAND、掩码、备用栈和重启语义。通用回收、跨域 unwind/longjmp 和任意 VM suspension 组合仍未覆盖。
 - Guest 嵌套回调中退出、完整 Guest runtime 卸载尚未覆盖。
 
-双域独立信号语义保留在 [todo.md](../../../todo.md)。只有生产 JNI 兼容及收益测量支持切换后端之后，才投入该扩展。
+本基础夹具验证 Host 保留策略。现行 Guest 投递与跨域恢复契约见
+[core 信号与域切换](../../../core/docs/zh/DOMAINS.md)。
 
 Host 信号合同可独立复现：
 

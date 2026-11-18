@@ -95,29 +95,30 @@ The agreed ownership policy is:
 3. Other signals explicitly tagged by the Guest runtime belong to Guest.
 4. Untagged external signals belong to Host, including process-directed signals.
 
-`signal_contract.h` implements and tests this classification separately from
-actual signal delivery. The ordinary service enforces Host reservations. The
-explicit native-unwind service additionally installs separate Guest synchronous
-fault dispositions and adopted-carrier masks. Its `signal_router_guest_faults`
-integration retains outer fault routes for Host default/ignore actions and
-consumes Host one-shot handlers only on Host delivery. GNU-created pthreads can
-recover synchronous faults under their real Guest TLS. Host-reserved pending
-asynchronous signals retain their kernel queues while Guest executes.
+`signal_contract.h` implements the classification. The ordinary service
+enforces Host reservations. The native-unwind build adds separate Guest fault
+dispositions, adopted-carrier masks, and native signal stacks, including tested
+AUTODISARM suspend/resume. Its mask adapter keeps Host-reserved pending signals
+in their kernel queues. Its fault router consumes Host one-shot actions only on
+Host delivery. Real GNU pthreads recover synchronous faults with their own Guest
+TLS.
 
-These are partial mechanisms, not independent dual-domain signal delivery.
-Independent native signal stacks and the tested AUTODISARM suspend/resume paths
-are available in the opt-in service. Its [signal wait adapter](SIGNAL_WAITING.md)
-protects Host-reserved queues across mask-and-wait, consuming waits, pending
-queries and signalfd creation/update. Host arrivals on genuine GNU pthreads use
-the explicit [Host dispatcher policy](HOST_SIGNAL_RELAY.md), which changes the
-handler thread while retaining the original signal frame. Tagged asynchronous
-sends and end-to-end Guest pending delivery remain incomplete. The internal
-[Guest signal inbox](GUEST_SIGNAL_INBOX.md) supplies private/shared selection,
-aggregate RT accounting and notification/close transactions; it is not yet
-connected to asynchronous Guest TLS entry or libc send/wait hooks. See
-[nonlocal recovery](NONLOCAL_RECOVERY.md) and the repository `todo.md` for the
-required final contract. The regular SDK does not silently enable the opt-in
-unwind capability.
+Explicit V2 startup connects tagged GNU libc sends and consuming waits to the
+Guest inbox, with directed/shared queues and realtime accounting. On the
+same-thread backend, the target carrier can enter a Guest handler while running
+Host code or Java. Guest signalfd supports logical reads, readiness and descriptor
+lifecycle. Host waits recover from internal notifications along the adapted
+paths. See [Guest sends](GUEST_SIGNAL_SEND.md),
+[asynchronous entry](GUEST_ASYNC_ENTRY.md), and [signal waiting](SIGNAL_WAITING.md).
+
+Host arrivals on genuine GNU pthreads use a dedicated Host pthread.
+The source signal frame remains live until the dispatcher returns. Shared
+job-control signals follow Linux process semantics. See the
+[dispatcher contract](HOST_SIGNAL_RELAY.md) and
+[shared job control](SIGNAL_WAITING.md#shared-linux-job-control).
+
+Default same-thread startup selects the execution backend. The independent
+Guest signal paths require the [explicit V2 configuration](../../../android-jni/docs/en/RUNTIME.md).
 
 Raw signal syscalls that bypass the runtime cannot supply the logical domain
 identity. There is also no implicit Host TLS/JVM thread identity on a GNU-created
@@ -175,10 +176,9 @@ registrations, cover saved continuations and avoid waiting on the writer lock
 held by the collector. The standalone contract tests this path with joined
 workers, a refused collection, subsequent delivery and a Host `siglongjmp`.
 
-Transparent cross-domain `siglongjmp`/`setcontext` recovery is required for the
-first release. Its restoration obligations and acceptance matrix are specified
-in [nonlocal recovery](NONLOCAL_RECOVERY.md). Same-domain-only success or
-quarantining a valid cross-domain jump does not complete that requirement.
+Native cross-domain `siglongjmp`, `setcontext` and supported `swapcontext`
+paths follow the continuation lifetime and cleanup contract in
+[nonlocal recovery](NONLOCAL_RECOVERY.md).
 
 Relevant kernel paths are `get_signal`/`SA_RESETHAND` publication and
 `setup_return`/`setup_rt_frame` on ARM64:

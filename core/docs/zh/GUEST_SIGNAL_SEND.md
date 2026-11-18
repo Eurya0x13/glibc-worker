@@ -5,8 +5,8 @@
 匹配的收养 libc 提供可选、有版本号的启动期扩展
 `__gw_domain_signal_send_hook`。它把公开发送接口接到集成方的独立 Guest
 队列，继续使用 NPTL 自己的线程描述符和 `pthread_kill` 校验。
-已安装的 JNI 服务尚未启用此接口。公开的 Guest 异步处理动作、掩码、等待和
-处理器非局部退出仍需分别完成。
+V2 启动启用 Guest 通知时，匹配的 JNI 服务安装该钩子。参见
+[运行时配置](../../../android-jni/docs/zh/RUNTIME.md)。
 
 ## 注册与回调
 
@@ -77,8 +77,7 @@ Guest 待决队列。描述符指针或 TID 本身不能证明目标的独立接
 事务，验证目标 TID 仍然存活，再放行发送者。它们分别覆盖 `pthread_kill`
 和 `pthread_sigqueue`、锁内原生回退，以及 join 前有效的已退出描述符探测。
 
-夹具显式调度逻辑掩码，在改变指定共享接收者前确认消息已经消费。
-[core 注册表](SIGNAL_TARGETS.md)执行真实查找、准入、选择和退休。它尚未接入
-已安装的 JNI 服务，也不提供公开 Guest 处理器 `ucontext`。
-这些发送入口验证不构成 JNI/VM 信号兼容性、
-任意 GNU 线程目标入口或异步非局部恢复的验收。
+夹具调度逻辑掩码，在改变指定共享接收者前确认消息已经消费。该夹具和已安装的
+V2 服务均通过 [core 目标注册表](SIGNAL_TARGETS.md) 查找、准入、选择和退休。
+已验证的 JNI/VM 投递和原生恢复路径见
+[已安装 SDK 用例](../../../android-jni/docs/zh/SDK_TESTS.md)。

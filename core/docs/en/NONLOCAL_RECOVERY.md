@@ -313,8 +313,9 @@ The out-of-scope managed-frame transfer is isolated by the
 Its observations are boundary evidence, not a bridge compatibility pass or a
 blocker for native recovery. The matrix below does not abandon Java/VM frames.
 
-All rows remain required until demonstrated with reproducible results. They are
-not a list of tests already passing.
+Use this matrix to review a recovery integration. The
+[installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md) describe the
+tested configurations and how to reproduce them.
 
 | Case | Assertions after transfer |
 | --- | --- |

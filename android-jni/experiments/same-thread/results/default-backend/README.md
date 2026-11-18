@@ -39,5 +39,5 @@ The JNI runner now includes the absent/invalid selection cases before the
 explicit matrix. The Android application supervisor removes `GW_DOMAIN_MODE`
 for its normal compatibility launch; timed A/B runs still select modes
 explicitly. The pinned Vivo Android 13 ART profile and Android JRE17 remain
-requirements for the recorded inline application path. SDK promotion work is
-tracked in [todo.md](../../../../../todo.md).
+requirements for the recorded inline application path. See the
+[installed SDK startup contract](../../../../docs/en/RUNTIME.md).

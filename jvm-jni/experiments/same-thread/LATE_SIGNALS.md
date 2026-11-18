@@ -4,8 +4,9 @@ This experiment supports loading the bridge **after HotSpot startup**, before
 application native work begins. It does not rely on late ELF interposition.
 Adoption-enabled entrypoints default to same-thread execution when
 `GW_DOMAIN_MODE` is absent. Set `GW_DOMAIN_MODE=worker` for an explicit worker
-run; empty or unknown values are rejected. The regular installed SDK still
-uses its existing worker build while its separate migration is pending.
+run; empty or unknown values are rejected. Applications using the regular
+installed SDK select the backend through the
+[runtime startup API](../../../android-jni/docs/en/RUNTIME.md).
 
 ## Integration contract
 

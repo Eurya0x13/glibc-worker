@@ -244,11 +244,9 @@ fresh signal read and another JNI call. A Guest trap must still recover while
 Host ignores that number; asynchronous Host arrivals are discarded. The
 `host-ignore-pending` row is required.
 
-This opt-in case passes on native Linux x86_64 and Android ARM64/JRE17. Ordinary
-integrations do not enable it. Descriptor lifecycle/alias integration gaps,
-concurrent ignore/reset semantics and general independent asynchronous Guest
-delivery remain acceptance work. This case and the normal positive/death
-matrix do not establish those remaining requirements; see
+This opt-in case passes on native Linux x86_64 and Android ARM64/JRE17. The
+descriptor lifecycle and Guest delivery cases exercise the corresponding
+V2 paths with the matching GNU service. See
 [signal waiting](../../../core/docs/en/SIGNAL_WAITING.md).
 
 Every nonlocal run also sends an asynchronous `SIGSEGV` from Guest to the
@@ -352,9 +350,11 @@ From the workspace root,
 `python3 android-jni/tests/same_thread_results.py --require-current`
 verifies input hashes for 23 selected desktop/Android suites
 and writes `android-jni/build/tests/same-thread-compatibility.json`. Missing,
-failed or stale evidence fails this check. A current selected matrix still
-reports full compatibility as `INCOMPLETE` while the acceptance work in
-[todo.md](../../../todo.md) remains.
+failed or stale evidence fails this check. Use `evidence_current` for the
+result of this matrix. The report's `full_compatibility: INCOMPLETE` field
+reflects its limited scope. The separate inline app fixture covers the reviewed
+ART late profile and live registration reclamation. See
+[VM adapter validation](../../../jvm-jni/docs/en/ADAPTER.md).
 
 Output directories are under `android-jni/build/tests/`, with `-android`,
 `-nonlocal` and `-recovery` suffixes identifying the selected fixture. They are

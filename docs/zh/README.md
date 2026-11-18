@@ -34,6 +34,9 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 
 ## 同线程域
 
-同线程域切换、收养补丁和信号路由位于 core 正式源码，公开 JNI 运行时位于 android-jni；`runtime_bridge.h` 的新启动接口默认同线程，可显式选择 worker。参见 [core 域机制与信号边界](../../core/docs/zh/DOMAINS.md) 和 [JNI runtime 接入](../../android-jni/docs/zh/RUNTIME.md)。`experiments/same-thread/` 保留验证入口和历史证据。完整双域信号虚拟化仍未完成，剩余任务见 [todo.md](../../todo.md)。
+core 维护同线程域切换、收养补丁和信号路由。android-jni 的 `runtime_bridge.h` 启动接口默认
+同线程，可显式选择 worker。实验目录保留验证入口和历史证据。参见
+[core 域机制与信号边界](../../core/docs/zh/DOMAINS.md) 和
+[JNI runtime 接入](../../android-jni/docs/zh/RUNTIME.md)。
 
-[测量方法](../../jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](../../android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](../../android-jni/docs/zh/ARRAY_COPY_CACHE.md)。这些固定制品的结果不等同于通用 ART/JRE/模组兼容保证；完整双域信号语义仍见 [todo.md](../../todo.md)。
+[测量方法](../../jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](../../android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](../../android-jni/docs/zh/ARRAY_COPY_CACHE.md)。结果适用于已验证的固定 ART、JRE 和模组制品。

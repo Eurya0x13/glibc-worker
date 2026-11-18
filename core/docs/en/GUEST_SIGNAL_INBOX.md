@@ -8,12 +8,11 @@ installed internal source can also be compiled by the owning Guest libc. Do not
 call Host-compiled queue functions while using a Guest thread pointer. Only data
 crosses this boundary, not libc allocation ownership or function implementations.
 
-The installed JNI service does not yet use this inbox for asynchronous delivery.
-The existing six synchronous Guest fault routes remain unchanged. This component
-alone does not isolate ordinary Guest `sigaction` registrations, implement tagged
-`raise`/`pthread_kill`/`sigqueue`, switch TLS or enter a handler during Java code.
-The acceptance requirement is timely delivery on the original carrier, including
-while it runs Host/Java; deferral until its next Guest call is insufficient.
+The V2 JNI service uses this inbox for tagged Guest deliveries. The matching
+GNU send hook supplies packets, the action table selects a disposition, and the
+target's entry uses its Guest stack and TLS. An adopted carrier can handle a
+packet while running Host or Java code. See
+[Guest sends](GUEST_SIGNAL_SEND.md) and [asynchronous entry](GUEST_ASYNC_ENTRY.md).
 
 ## Selection and ownership
 
@@ -67,10 +66,9 @@ Publication distinguishes rejection from failed wakeup:
 | `status == 0`, `wake_error == 0` | Packet accepted/coalesced; notification succeeded or was unnecessary. |
 | `status == 0`, `wake_error != 0` | Packet remains accepted; notification needs retry or terminal handling. |
 
-Do not map an accepted-but-unnotified packet to a public send rejection and retry
-the whole send: that could duplicate an RT packet. The future libc adapter must
-resolve notification failure explicitly. A callback failure does not remove an
-earlier coalesced standard packet either.
+If retrying is possible, retry only the notification for the accepted packet.
+Retrying the entire send could duplicate an RT packet. An earlier coalesced
+standard packet retains its place after a callback failure.
 
 Closing a receiver under the same writer prevents future sends/notifications and
 releases its pending RT budget. Group close rejects new work and drops shared
@@ -86,7 +84,7 @@ accounting. Native notification allocation and its failures remain separate.
 Standard packets do not consume the RT budget. Queue chunks grow as needed and
 are retained until quiescent destruction; there is no fixed packet table.
 
-## Validation and remaining adapter work
+## Validation
 
 Run the native/Linux or Android ARM64 suite:
 
@@ -109,28 +107,18 @@ work is retained, retries failed wakeup and preserves the Host's own handler for
 the logical signal number. That test uses one libc and does not establish Guest
 entry/TLS or VM compatibility.
 
-A separate [cross-libc entry fixture](GUEST_ASYNC_ENTRY.md) now connects the
-Guest-compiled inbox to real adopted TCBs and guarded entry stacks. It covers
-timely interruption of native Host/Guest code and actual Host sleep/ppoll
-recovery on Linux and Android ARM64. Its normally returning internal entry is
-not a public Guest signal ABI or installed JNI integration.
-
-Production integration still needs independent dispositions/default actions,
-immutable selected generations, tagged sends, native thread lifetime integration,
-logical mask/wait adaptation, asynchronous entry with the correct Guest stack/TLS,
-and valid nonlocal exits. A private notification must preserve the logical
-handler's `SA_RESTART`/`EINTR` decision and must not leak a spurious interruption
-when masked/coalesced work has no selected handler. The inbox deliberately does
-not choose a physical notification number or claim those kernel-frame semantics.
+A separate fixture connects the Guest-compiled inbox to adopted TCBs and
+guarded entry stacks. It covers timely interruption of native Host/Guest
+code and Host sleep/ppoll recovery on Linux and Android ARM64. The installed
+V2 cases also exercise Guest delivery during Java and native recovery.
+See the [cross-libc entry fixture](GUEST_ASYNC_ENTRY.md) and
+[installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md).
 
 The optional `signal_inbox_test --notification-control` native-only reproducer
 queues an empty private notification and admits it through `ppoll`'s temporary
 mask. It reports `CONTROL_ONLY`: even with `SA_RESTART`, the Host wait returns
-`EINTR` without any Guest packet. It is evidence for the required wait-adapter
-design, not a Guest compatibility pass; the suite records it separately in
-`native_controls`. The agreed integration policy also keeps an actually executed
-Guest handler transparent to the suspended Host wait: preserve its original
-deadline, suppress internal `EINTR`, and still expose real Host signal
-interruptions. This requires a wait adapter; the queue alone does not provide
-it. See Linux
-[`ppoll` and poll restart handling](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).
+`EINTR` with no Guest packet. The suite records this in `native_controls`.
+The installed service relies on the Host wait adapter to preserve deadlines
+and expose Host-owned interruptions after Guest delivery. See
+[wait recovery](SIGNAL_WAITING.md) and
+[Linux poll restart handling](https://github.com/torvalds/linux/blob/v6.12/fs/select.c).

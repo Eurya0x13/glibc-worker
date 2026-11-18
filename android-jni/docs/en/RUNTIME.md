@@ -99,10 +99,9 @@ installed-package checks on ARM64 with an explicitly supplied reviewed JRE
 startup fixture/profile; this test does not move VM creation into android-jni.
 Android results live in `android-jni/build/tests/runtime-sdk-android/`.
 
-The ownership classifier is implemented, but full independent Guest signal
-semantics are still pending; [core domains](../../../core/docs/en/DOMAINS.md) lists the
-current supported boundary. Default same-thread selection does not remove that
-boundary.
+The ordinary service enforces Host signal reservations. Independent Guest
+delivery across libc domains requires the explicit configuration below.
+See [core signal ownership](../../../core/docs/en/DOMAINS.md).
 
 The opt-in unwind service uses owning-Guest [action snapshots](../../../core/docs/en/SIGNAL_ACTIONS.md)
 for synchronous faults. Re-registering a handler no longer allocates a pinned
@@ -124,7 +123,16 @@ Host libc or runs a routed Host handler. Nested entry uses the most recent
 Guest frame and records the live stack boundary before the switch. See
 [Guest asynchronous entry](../../../core/docs/en/GUEST_ASYNC_ENTRY.md).
 
-Tagged sends, dispositions and blocked-set consumption use the Guest libc ABI.
-Logical registration and sending for job-control signals return `EBUSY`.
-Guest signalfd and the remaining I/O and saved-context acceptance cases are in
-[the compatibility work list](../../../todo.md).
+Tagged sends, dispositions and blocked-set consumption use the matching Guest
+libc ABI. Guest signalfd supports readiness, descriptor aliases and concurrent
+close. Job-control sends keep native Linux behavior, with shared Host-owned
+dispositions. A Guest attempt to change a job-control disposition returns
+`EBUSY`. The signal waiting contract covers Host timeout and restart behavior,
+including the native limits of private and direct syscalls. See
+[signal waiting](../../../core/docs/en/SIGNAL_WAITING.md).
+
+Supported native transfers restore saved contexts and reconcile abandoned
+bridge-owned JNI resources. The contract requires valid native targets and
+preserves surviving Java frames. See
+[nonlocal recovery](../../../core/docs/en/NONLOCAL_RECOVERY.md) and
+[installed SDK tests](SDK_TESTS.md).

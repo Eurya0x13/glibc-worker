@@ -131,4 +131,5 @@ SA_RESETHAND 只重置自身代次。代次入口暂保留至进程退出。
 生产 JNI 实验使用 `signal-registry.inc` 的动态分页登记，配合 NPTL
 入口/出口 hook 覆盖 Guest 自建线程，基础收养夹具仍保留固定测试参数。
 完整边界和 HotSpot 复现步骤见 [JVM 实验文档](../../../jvm-jni/experiments/same-thread/README.md)。
-独立双域信号虚拟化按 [todo.md](../../../todo.md) 的收益准入条件推迟。
+本夹具覆盖早期 Host 所有权策略。现行 Guest 投递和注册回收契约见
+[core 信号与域切换](../../docs/zh/DOMAINS.md)。

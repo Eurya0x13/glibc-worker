@@ -6,8 +6,8 @@ The matching adoption libc provides the optional, versioned
 `__gw_domain_signal_send_hook` bootstrap extension. It connects public sends to
 an integration's independent Guest queues without replacing NPTL thread
 descriptors or inventing a second implementation of `pthread_kill` validation.
-The installed JNI service does not yet enable it. Public asynchronous Guest
-actions, masks, waits and nonlocal handler exits remain separate work.
+The matching JNI service installs the hook when V2 startup enables Guest
+notifications. See [runtime configuration](../../../android-jni/docs/en/RUNTIME.md).
 
 ## Registration and callback
 
@@ -95,9 +95,9 @@ still alive, then release the sender. They exercise both `pthread_kill` and
 `pthread_sigqueue`, including native fallback under the lock and valid
 post-exit descriptor probes before joining.
 
-The fixture explicitly schedules logical masks and acknowledges consumption
-before changing its chosen shared recipient. The [core registry](SIGNAL_TARGETS.md)
-performs actual lookup, admission, selection and retirement. It is not yet wired
-into the installed JNI service and supplies no public Guest handler `ucontext`.
-These send-site checks do not establish JNI/VM signal
-compatibility, arbitrary GNU target entry or asynchronous nonlocal recovery.
+The fixture schedules logical masks and acknowledges consumption before
+changing its chosen shared recipient. Both this fixture and the installed V2
+service use the [core target registry](SIGNAL_TARGETS.md) for lookup, admission,
+selection and retirement. See
+[installed SDK cases](../../../android-jni/docs/en/SDK_TESTS.md) for tested
+JNI/VM delivery and native recovery paths.

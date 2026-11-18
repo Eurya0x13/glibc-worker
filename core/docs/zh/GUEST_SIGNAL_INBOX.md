@@ -7,11 +7,10 @@
 不得在 Guest 线程指针下调用 Host 编译的队列函数。跨域共享的是数据，
 不是 libc 分配所有权或函数实现。
 
-当前安装的 JNI service 尚未用它进行异步投递，现有六类 Guest 同步故障
-路由不变。单独使用此组件不能隔离普通 Guest `sigaction` 注册，也没有实现
-带 Guest 目标的 `raise`/`pthread_kill`/`sigqueue`、TLS 切换或 Java 执行期间的
-处理器入口。验收要求是在原载体线程上及时投递，包含其执行 Host/Java 的
-时段；等到下一次 Guest 调用不符合这个要求。
+V2 JNI 服务通过此队列投递带标签的 Guest 信号。匹配的 GNU 发送钩子提供消息，
+处置表选出处置，目标入口使用自己的 Guest 栈和 TLS。收养载体可以在运行 Host
+或 Java 代码时处理消息。参见 [Guest 发送](GUEST_SIGNAL_SEND.md) 和
+[异步入口](GUEST_ASYNC_ENTRY.md)。
 
 ## 选择与所有权
 
@@ -57,9 +56,8 @@
 | `status == 0`、`wake_error == 0` | 已接受或合并；通知成功或无需通知。 |
 | `status == 0`、`wake_error != 0` | 消息已经接受；需要重试通知或终止性处理。 |
 
-不能把已接受但未通知的结果映射为公开发送失败，再重试整次发送，否则可能
-重复实时信号。后续 libc 适配器必须显式处理通知失败。通知失败也不会删除
-先前已经合并的普通信号消息。
+消息已被接受且允许重试时，只重试失败的通知。重试整次发送可能重复实时信号。
+通知失败后，先前已合并的普通信号消息保留原位。
 
 在同一写锁下关闭接收者后，不再接受发往它的消息或通知，并归还其待决实时
 信号配额。关闭组会拒绝新消息并丢弃共享待决队列，各接收者随后关闭私有
@@ -73,7 +71,7 @@
 仍单独处理。普通信号不占实时配额；队列块按需增长并保留到静止销毁，没有
 固定消息表。
 
-## 验证与剩余适配工作
+## 验证
 
 运行原生 Linux 或 Android ARM64 测试：
 
@@ -92,24 +90,16 @@ python3 core/tests/signal_deferred.py --ndk "$ANDROID_NDK_HOME" --serial "$ANDRO
 以及 Host 对同一逻辑编号的处理器不受影响。该测试只使用一套 libc，不证明
 Guest 入口/TLS 或 VM 兼容性。
 
-单独的[跨 libc 入口夹具](GUEST_ASYNC_ENTRY.md)现已将 Guest 编译的 inbox 接到
-真实收养 TCB 和保护页入口栈上，覆盖 Linux 与 Android ARM64 原生 Host/Guest
-代码的及时中断，以及实际 Host 睡眠/ppoll 恢复。这个正常返回的内部入口不是
-公开 Guest 信号 ABI，也没有接入已安装的 JNI 服务。
-
-生产接入仍需独立的动作表和默认行为、不可变的已选动作代次、带域目标的
-发送、原生线程生命周期、逻辑屏蔽/等待适配、具有正确 Guest 栈/TLS 的
-异步入口，以及合法的非局部退出。私有通知必须保留逻辑动作的
-`SA_RESTART`/`EINTR` 决策，在屏蔽或合并导致没有可投递处理器时也不能暴露
-虚假的中断。收件队列不会擅自选择物理通知编号，也不声称已经满足这些
-内核信号帧语义。
+独立夹具将 Guest 编译的队列接到真实收养 TCB 和带保护页的入口栈上，覆盖
+Linux 与 Android ARM64 原生 Host/Guest 代码的及时中断，以及 Host 睡眠/ppoll
+恢复。已安装的 V2 用例还覆盖 Java 执行期间的 Guest 投递和原生恢复。参见
+[跨 libc 入口夹具](GUEST_ASYNC_ENTRY.md) 和
+[已安装 SDK 测试](../../../android-jni/docs/zh/SDK_TESTS.md)。
 
 可选的纯原生复现 `signal_inbox_test --notification-control` 排入一个没有逻辑
 消息的私有通知，再由 `ppoll` 临时屏蔽字原子地允许它进入，报告
 `CONTROL_ONLY`：即使设置了 `SA_RESTART`，Host 等待仍在没有 Guest 消息时返回
-`EINTR`。这为等待适配器设计提供证据，不算 Guest 兼容性通过；测试套件将其
-单独记录在 `native_controls` 中。已确定的接入策略还要求实际执行 Guest
-处理器后，被挂起的 Host 等待仍保持透明：保留原截止时限，隐藏内部通知的
-`EINTR`，同时保留真正 Host 信号造成的中断。这需要等待适配器，队列本身
-尚未实现。参见 Linux
-[`ppoll` 与 poll 重启处理](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。
+`EINTR`。测试套件将其记录在 `native_controls` 中。已安装服务使用 Host 等待
+适配器在 Guest 投递后保留截止时间，并向调用者报告 Host 信号中断。参见
+[等待恢复](SIGNAL_WAITING.md) 和
+[Linux poll 重启处理](https://github.com/torvalds/linux/blob/v6.12/fs/select.c)。

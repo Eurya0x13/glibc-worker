@@ -92,7 +92,7 @@ drain, Guest finish and carrier join. It uses the registry directly from the
 public libc send callback. Its small fixed carrier array now controls only the
 test oracle's logical-mask schedule, not runtime target lookup.
 
-## Verification and remaining integration
+## Verification
 
 The native control grows to 2,048 stable targets, replaces a descriptor key while
 an older identity remains pinned, races four senders against close, checks
@@ -105,10 +105,10 @@ A subsequent publication and delivery must still work. It runs under the
 matched GNU libc on Linux and Android ARM64. The Host/core variant also runs
 under Clang UBSan.
 
-These are recipient/queue lifetime guarantees. The installed JNI service still
-needs public asynchronous dispositions, complete logical mask/wait hooks and
-general saved-frame coordination. The normally returning entry test does not
-make arbitrary asynchronous nonlocal exits or VM integration complete.
+These controls exercise recipient and queue lifetimes. The installed V2 cases
+exercise the registry with public asynchronous dispositions, logical masks,
+waits and saved native frames. See
+[installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md).
 
 The [action table](SIGNAL_ACTIONS.md) combines disposition replacement, ignore
 flush, sending and delivery selection under one transaction. Selected actions

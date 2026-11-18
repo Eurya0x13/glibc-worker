@@ -58,7 +58,8 @@ Guest 信号描述符仍打开或 Host 描述符等待仍在进行时，在关�
 关闭测试除 API 返回值外，还通过 `/proc/self/task` 检查监督线程实际的内核
 信号掩码与 futex 等待。生产运行时不依赖这些 `/proc` 观测。
 
-所有权分类已实现，但完整独立 Guest 信号语义仍待完成；见 [core 域边界](../../../core/docs/zh/DOMAINS.md)。默认同线程不取消这些限制。
+普通服务执行 Host 信号保留策略。跨 libc 域的独立 Guest 投递需要下述显式配置。
+参见 [core 信号所有权](../../../core/docs/zh/DOMAINS.md)。
 
 可选 unwind 服务为同步故障使用所属 Guest 的
 [处置快照](../../../core/docs/zh/SIGNAL_ACTIONS.md)。重新注册不再分配固定的记录，
@@ -75,6 +76,13 @@ Java、在 Host libc 内等待或执行转发的 Host 处理器时，Guest 接�
 收养的 GNU TCB。嵌套入口使用最近的 Guest 帧，并在切换前记录活动栈边界。
 见 [Guest 异步入口](../../../core/docs/zh/GUEST_ASYNC_ENTRY.md)。
 
-带标签发送、处置和屏蔽集合消费使用 Guest libc ABI。作业控制信号的逻辑注册
-和发送返回 `EBUSY`。Guest signalfd、其余 I/O 以及保存上下文的验收项见
-[兼容性待办](../../../todo.md)。
+带标签发送、处置和屏蔽集合消费使用匹配的 Guest libc ABI。Guest signalfd 支持
+就绪通知、描述符别名和并发关闭。作业控制信号按 Linux 原生语义发送，使用由 Host
+拥有的共享处置。Guest 尝试改写作业控制处置会收到 `EBUSY`。信号等待契约覆盖
+Host 超时与重启行为，以及私有入口、直接系统调用的原生限制。参见
+[信号等待](../../../core/docs/zh/SIGNAL_WAITING.md)。
+
+受支持的原生转移可以恢复保存的上下文，并清理被放弃路径中由桥持有的 JNI 资源。
+契约要求原生目标有效，并保留仍存活的 Java 帧。参见
+[非局部恢复](../../../core/docs/zh/NONLOCAL_RECOVERY.md) 与
+[已安装 SDK 测试](SDK_TESTS.md)。
