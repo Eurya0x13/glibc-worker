@@ -31,6 +31,11 @@ its generated source/object trees remain owned by core. `experiments/` contains
 validation entrypoints and historical evidence, not the implementation used by
 the installed domain target.
 
+The adoption runtime uses glibc's `mmap` heap fallback. The process break is
+shared with Host even when the Guest's loader starts libc as its first
+instance. Guest libc allows `sbrk(0)` queries and reports `ENOMEM` on requests
+to move the break. See [glibc's secondary-libc allocator policy](https://github.com/bminor/glibc/blob/master/malloc/arena.c).
+
 The owning libc's [logical-mask lifecycle](MASK_LIFECYCLE.md) separates native
 GNU thread inheritance from a borrowed carrier's physical mask and supplies
 an optional observer for queue eligibility. It requires the matching private

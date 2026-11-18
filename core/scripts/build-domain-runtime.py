@@ -72,6 +72,31 @@ if not (root / "patched").exists():
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(base_source, src)
+
+    # An independent loader considers its libc initial, but its process break
+    # still belongs to the Host. Use the mmap fallback of a secondary libc.
+    # https://github.com/bminor/glibc/blob/master/malloc/arena.c
+    replace(
+        src / "malloc/morecore.c",
+        "static bool __always_fail_morecore = false;",
+        "static bool __always_fail_morecore = true;",
+    )
+    replace(
+        src / "misc/sbrk.c",
+        "  if (!__libc_initial)\n",
+        "  /* This libc shares the process break with the Host.  */\n",
+    )
+    replace(
+        src / "sysdeps/unix/sysv/linux/brk.c",
+        "  __curbrk = __brk_call (addr);\n",
+        "  if (addr != NULL)\n"
+        "    {\n"
+        "      __set_errno (ENOMEM);\n"
+        "      return -1;\n"
+        "    }\n\n"
+        "  __curbrk = __brk_call (addr);\n",
+    )
+
     patch_private_signals(src, replace)
     create = src / "nptl/pthread_create.c"
     replace(
@@ -320,6 +345,7 @@ for origin, name in [
             "domain_abi": 1,
             "capabilities": [
                 "adopted-carriers",
+                "mmap-backed-embedded-heap",
                 "host-signal-reservation",
                 "reserved-signal-masks",
                 "context-signal-masks",

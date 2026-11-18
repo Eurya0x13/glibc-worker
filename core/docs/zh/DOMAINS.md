@@ -18,6 +18,10 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 
 维护的补丁片段位于 `core/src/runtime/`；构建配方及生成的源码/对象目录也归 core。`experiments/` 保留验证入口与历史证据，不再作为已安装域目标的实现来源。
 
+收养版运行时使用 glibc 的 `mmap` 堆回退路径。Guest 装载器将自己的 libc 作为首个
+实例启动时，仍与 Host 共用进程的 break。Guest libc 保留 `sbrk(0)` 查询，修改 break
+的请求返回 `ENOMEM`。见 [glibc 对第二套 libc 的分配策略](https://github.com/bminor/glibc/blob/master/malloc/arena.c)。
+
 所属 libc 的[逻辑掩码生命周期](MASK_LIFECYCLE.md)将 GNU 原生线程继承与
 借用载体的物理掩码分开，并提供用于队列资格的可选观察器。它要求匹配的私有
 能力值，不为 GNU 线程创建 Bionic 状态。

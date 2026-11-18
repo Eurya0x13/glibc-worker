@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static struct async_control *control;
 static int (*allocate_domain)(void *, size_t, void **, void **, void **);
@@ -380,6 +381,20 @@ static int owner_send(struct async_carrier *carrier, int value) {
   return result;
 }
 
+static void check_embedded_heap(void) {
+  void *process_break = sbrk(0);
+  assert(process_break != (void *)-1);
+  assert(sbrk(1) == (void *)-1 && errno == ENOMEM);
+  assert(brk((void *)((uintptr_t)process_break + 1)) == -1 && errno == ENOMEM);
+
+  volatile unsigned char *allocation = malloc(32768);
+  assert(allocation);
+  allocation[0] = 41;
+  allocation[32767] = 73;
+  assert(allocation[0] == 41 && allocation[32767] == 73);
+  free((void *)allocation);
+}
+
 int main(int argc, char **argv) {
   assert(argc == 2);
   control = (void *)(uintptr_t)strtoull(argv[1], NULL, 16);
@@ -389,6 +404,7 @@ int main(int argc, char **argv) {
     assert(layout[i] == control->layout[i]);
   }
   resolve();
+  check_embedded_heap();
   assert(TEST_LOGICAL_SIGNAL >= SIGRTMIN && TEST_LOGICAL_SIGNAL <= SIGRTMAX);
   gw_signal_targets_init(&control->targets, UINT64_C(1) << 49, 128, notify,
                          control);
