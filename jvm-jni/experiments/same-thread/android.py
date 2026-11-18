@@ -218,6 +218,11 @@ if args.system_load:
         for line in report.splitlines()
         if line.startswith("LATE_SIGNAL_DELIVERIES ")
     ]
+    art_reclaim = [
+        json.loads(line.removeprefix("ART_SIGNAL_RECLAIM "))
+        for line in report.splitlines()
+        if line.startswith("ART_SIGNAL_RECLAIM ")
+    ]
     if manifest.get("late_signal") and (
         len(pressure) != 3
         or any(
@@ -230,6 +235,17 @@ if args.system_load:
         or signal_delivery[0].get("sr_guest", 0) < 3
         or (args.inline_vm and not signal_install[0].get("art_chain"))
         or (args.inline_vm and not outer_chain)
+        or (
+            args.inline_vm
+            and (
+                len(art_reclaim) != 1
+                or art_reclaim[0].get("result") != "PASS"
+                or art_reclaim[0].get("reclaimed", 0) < 1
+                or not art_reclaim[0].get("ordinary_mask")
+                or not art_reclaim[0].get("old_callback_returned")
+                or not art_reclaim[0].get("replacement_delivered")
+            )
+        )
     ):
         raise SystemExit(f"Late application signal coverage failed: {evidence}")
     rows = [
@@ -279,6 +295,7 @@ if args.system_load:
         "pressure": pressure,
         "signal_install": signal_install,
         "signal_delivery": signal_delivery,
+        "art_reclaim": art_reclaim,
         "supervisor_uid": uids[0],
         "contract": rows[0],
         "lifecycle": life[0],

@@ -2,6 +2,7 @@
 #define GW_DOMAIN_SIGNAL_ROUTER_H
 #include <signal.h>
 #include <stdint.h>
+#include <ucontext.h>
 
 /* Host registration layer. Initialize before creating the VM or Guest owner.
  * This does not virtualize Guest libc's independently resolved sigaction. */
@@ -107,8 +108,7 @@ unsigned signal_router_retained(void);
  * changing the router; on success leave releases the gate without waiting on
  * code needing the router lock. Neither callback may call this router.
  * A general JVM safepoint alone does not establish this signal quiescence.
- * For fully masked records, the built-in live proof is available separately
- * through signal_channel.h. */
+ * The built-in live proof for owned routes is available in signal_channel.h. */
 struct signal_router_quiescence {
   uint32_t version, size;
   void *context;
@@ -120,5 +120,9 @@ struct signal_router_quiescence {
 int signal_router_reclaim(const struct signal_router_quiescence *,
                           unsigned *reclaimed);
 int signal_router_reclaim_signal(void);
+/* Entry/probe gateways call these with every catchable signal blocked. */
+void signal_router_expose_prefix(void *frame, uint64_t *entry_mask);
+int signal_router_probe_prefix(void *frame);
+uint64_t signal_router_entry_mask(void *, uint64_t entry, uint64_t interrupted);
 uint64_t signal_router_reserved(void);
 #endif

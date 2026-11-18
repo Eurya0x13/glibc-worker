@@ -32,9 +32,10 @@ int gw_host_signal_channel_enable(const int *notifications, size_t count);
 int gw_host_signal_reclaim_enable(int number);
 
 /* Call on a normal Host control thread, outside signal handlers. Reclaim
- * replaced generations that have a fully masked kernel entry (including
- * deferred fault channels), plus unpublished data-only generations. Others
- * still require the embedding's complete recipient/continuation barrier.
+ * replaced generations with a fully masked kernel entry or ordinary
+ * entries published under complete routing, plus data-only records.
+ * An unbound entry exposed in a nested native context remains under the
+ * embedding's complete recipient/continuation barrier.
  * Missing native acknowledgements or a changing task census return EBUSY.
  * Probe delivery uses SA_RESTART and the installed Host wait adapters hide
  * it. Non-restartable waits outside those adapters may receive EINTR.

@@ -117,11 +117,6 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM
   identity or original-thread Host TLS adoption is implied.
-- [Live Host registration reclamation](core/docs/en/DOMAINS.md#reclaiming-host-registrations)
-  covers guarded entries through actual Linux recipients in HotSpot and ART.
-  Entries published with ordinary kernel masks use the full
-  `signal_router_reclaim` barrier. Extending live reclamation to those entries
-  requires a proof that preserves their original kernel delivery masks.
 - Cover initialization/teardown windows, remaining mask/wait APIs and registration
   aliases. The implemented wait guard does not supply logical Guest queues or
   virtualize a Host descriptor passed across domains.

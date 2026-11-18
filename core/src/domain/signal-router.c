@@ -16,6 +16,10 @@
 #include <unistd.h>
 
 extern void domain_signal_entry(int, siginfo_t *, void *);
+extern char domain_signal_masked[] __attribute__((weak));
+#if defined(__aarch64__)
+extern char domain_signal_token_saved[] __attribute__((weak));
+#endif
 /* Standalone registration-contract fixtures provide their own entry and have
  * no carrier registry. The full domain target supplies the mask translator. */
 extern uint64_t signal_host_physical_mask(uint64_t) __attribute__((weak));
@@ -33,21 +37,24 @@ extern int signal_host_relay_busy(void) __attribute__((weak));
 extern int signal_stdio_enable(void) __attribute__((weak));
 extern int signal_stdio_verify(void) __attribute__((weak));
 extern int signal_stdio_disable(void) __attribute__((weak));
+extern uint64_t gw_signal_wait_entry_mask(const ucontext_t *, uint64_t)
+    __attribute__((weak));
 
 struct disposition {
   struct sigaction action;
   uint64_t ignore_generation;
+  uint64_t prefix_mask;
   _Atomic int fired;
-  int internal, guarded;
+  int internal, guarded, ordinary, exposed_context;
   void *entry;
   size_t entry_size;
   struct disposition *next;
 };
 
 /* A kernel frame can reference an immutable generation before its first
- * instruction executes. Guarded entries block all catchable signals from
- * kernel selection through the last use of their generation. Unguarded
- * entries require the embedding's full recipient and continuation proof.
+ * instruction executes. A fully masked entry excludes the probe until it
+ * binds. Ordinary entries rely on inspecting the interrupted PC and saving
+ * generations that a nested handler can expose to another continuation.
  * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
  * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c */
 static _Atomic(struct disposition *) current[NSIG];
@@ -65,6 +72,8 @@ static uint64_t host_reservations;
 static _Atomic uint64_t guest_private;
 static _Atomic unsigned records, retained;
 static struct disposition *allocations;
+static struct disposition *reclaim_batch;
+static _Atomic int routing_complete;
 static atomic_flag writer = ATOMIC_FLAG_INIT;
 static atomic_flag reclaimer = ATOMIC_FLAG_INIT;
 static _Atomic int reclaim_signal;
@@ -93,6 +102,14 @@ static int fault_lane(int);
 static int fault_routed(int);
 static int widen_host_fault_routes(void);
 static int same_action(const struct sigaction *, const struct sigaction *);
+
+static uint64_t native_prefix_mask(void) {
+  uint64_t mask = atomic_load_explicit(&guest_private, memory_order_acquire);
+#ifdef __GLIBC__
+  mask |= UINT64_C(3) << (GW_GNU_HOST_CANCEL - 1);
+#endif
+  return mask;
+}
 
 static void wide_fault_mask(struct sigaction *action) {
   uint64_t all = UINT64_MAX;
@@ -363,6 +380,142 @@ static void lock_writer(uint64_t *previous) {
   }
 }
 
+/* The two entry gateways already run under the kernel's full catchable mask
+ * here. They can execute before Host TLS or the ARM64 platform register is
+ * restored. Keep this lookup free of libc and thread-local storage. */
+static inline __attribute__((always_inline)) struct disposition *find_prefix(
+    struct disposition *records, uintptr_t pc, uintptr_t token) {
+  for (struct disposition *record = records; record; record = record->next) {
+    uintptr_t entry = (uintptr_t)record->entry;
+    if (entry &&
+        (token ? token == (uintptr_t)record : pc >= entry && pc - entry < 32)) {
+      return record;
+    }
+  }
+  return NULL;
+}
+
+static inline __attribute__((always_inline)) uintptr_t
+frame_pc(const ucontext_t *frame) {
+#if defined(__x86_64__)
+  return frame->uc_mcontext.gregs[REG_RIP];
+#else
+  return frame->uc_mcontext.pc;
+#endif
+}
+
+static inline __attribute__((always_inline)) int shared_prefix(uintptr_t pc) {
+  return pc >= (uintptr_t)domain_signal_entry &&
+         pc < (uintptr_t)domain_signal_masked;
+}
+
+static inline __attribute__((always_inline)) const ucontext_t *prefix_parent(
+    const ucontext_t *frame, int shared, uintptr_t pc) {
+  uintptr_t start = (uintptr_t)domain_signal_entry;
+#if defined(__x86_64__)
+  return (const void *)
+      frame->uc_mcontext.gregs[shared && pc != start ? REG_R9 : REG_RDX];
+#else
+  return (const void *)frame->uc_mcontext.regs[shared && pc != start ? 15 : 2];
+#endif
+}
+
+static inline __attribute__((always_inline)) uintptr_t
+prefix_token(const ucontext_t *frame, uintptr_t pc) {
+#if defined(__x86_64__)
+  (void)pc;
+  return frame->uc_mcontext.gregs[REG_RCX];
+#else
+  return frame->uc_mcontext
+      .regs[pc < (uintptr_t)domain_signal_token_saved ? 3 : 17];
+#endif
+}
+
+static inline __attribute__((always_inline)) uint64_t
+mask_bits(const sigset_t *mask) {
+  uint64_t bits;
+  __builtin_memcpy(&bits, mask, sizeof bits);
+  return bits;
+}
+
+static __attribute__((no_stack_protector)) int inspect_prefix(
+    ucontext_t *interrupted, uint64_t *entry_mask) {
+  if (!atomic_load_explicit(&routing_complete, memory_order_acquire)) {
+    return 0;
+  }
+
+  const ucontext_t *frame = interrupted;
+  uint64_t added = 0, requested = 0;
+  int found = 0;
+  for (;;) {
+    uintptr_t pc = frame_pc(frame);
+    int shared = shared_prefix(pc);
+    if (!shared && (pc & 4095) >= 32) {
+      /* Entry mappings start on a system page boundary, at least 4 KiB. */
+      break;
+    }
+    uintptr_t token = shared ? prefix_token(frame, pc) : 0;
+    while (atomic_flag_test_and_set_explicit(&writer, memory_order_acquire)) {
+    }
+    struct disposition *record = find_prefix(reclaim_batch, pc, token);
+    if (!record) {
+      record = find_prefix(allocations, pc, token);
+    }
+    int before_binding = shared || record;
+    if (entry_mask && record) {
+      /* The nested handler can save its interrupted ucontext. The owning
+       * native continuation barrier decides when that saved PC is dead. */
+      if (record->ordinary) {
+        record->exposed_context = 1;
+      }
+      added |= record->prefix_mask;
+      requested |= mask_bits(&record->action.sa_mask);
+    }
+    atomic_flag_clear_explicit(&writer, memory_order_release);
+
+    if (!before_binding) {
+      break;
+    }
+    found = 1;
+    if (!entry_mask) {
+      break;
+    }
+    /* Linux can stack several entries before executing the first one. The
+     * interrupted prefix still has its original kernel ucontext argument. */
+    frame = prefix_parent(frame, shared, pc);
+  }
+  if (added) {
+    /* The older entries are now pinned. Strip their synthetic private bits
+     * before either presenting or restoring the interrupted native frame. */
+    uint64_t prior = mask_bits(&frame->uc_sigmask);
+    if (gw_signal_wait_entry_mask) {
+      prior = gw_signal_wait_entry_mask(frame, prior);
+    }
+    uint64_t synthetic = added & ~(requested | prior);
+    uint64_t saved = mask_bits(&interrupted->uc_sigmask) & ~synthetic;
+    __builtin_memcpy(&interrupted->uc_sigmask, &saved, sizeof saved);
+    *entry_mask &= ~synthetic;
+  }
+  return found;
+}
+
+__attribute__((no_stack_protector, visibility("hidden"))) void
+signal_router_expose_prefix(void *frame, uint64_t *entry_mask) {
+  inspect_prefix(frame, entry_mask);
+}
+
+__attribute__((no_stack_protector, visibility("hidden"))) int
+signal_router_probe_prefix(void *frame) {
+  return inspect_prefix(frame, NULL);
+}
+
+__attribute__((no_stack_protector)) uint64_t
+signal_router_entry_mask(void *token, uint64_t mask, uint64_t interrupted) {
+  const struct disposition *record = token;
+  uint64_t extra = record ? record->prefix_mask : 0;
+  return (mask & ~extra) | (interrupted & extra);
+}
+
 static void unlock_writer(uint64_t previous) {
   atomic_flag_clear_explicit(&writer, memory_order_release);
   if (syscall(SYS_rt_sigprocmask, SIG_SETMASK, &previous, NULL, 8)) {
@@ -437,6 +590,7 @@ int signal_router_init_with_backend(signal_router_backend backend) {
    * Host TLS restoration; owning GNU Host NPTL entries remain native. Late
    * adapters separately route the reviewed owning-libc imports and adopt
    * pre-existing handlers with the reviewed outer-chain requirement. */
+  int complete = domain_signal_masked != NULL;
   memset(managed, 0, sizeof managed);
   for (int number = 1; number < NSIG; ++number) {
     if (number == SIGKILL || number == SIGSTOP ||
@@ -452,6 +606,10 @@ int signal_router_init_with_backend(signal_router_backend backend) {
     atomic_store(&current[number], NULL);
     atomic_store(&ignore_state[number], original[number].sa_handler == SIG_IGN);
     managed[number] = 1;
+    if (original[number].sa_handler != SIG_DFL &&
+        original[number].sa_handler != SIG_IGN) {
+      complete = 0;
+    }
   }
   struct disposition *baseline =
       mmap(NULL, sizeof *baseline * NSIG, PROT_READ | PROT_WRITE,
@@ -463,6 +621,7 @@ int signal_router_init_with_backend(signal_router_backend backend) {
     baseline[number].action = original[number];
   }
   initial = baseline;
+  atomic_store_explicit(&routing_complete, complete, memory_order_release);
   atomic_store_explicit(&enabled, 1, memory_order_release);
   return 0;
 }
@@ -481,6 +640,10 @@ int signal_router_lease_guest_nptl(void) {
   if (atomic_load_explicit(&guest_private, memory_order_acquire)) {
     unlock_writer(mask);
     return 0;
+  }
+  if (reclaim_batch) {
+    unlock_writer(mask);
+    return EBUSY;
   }
 
   const int numbers[] = {63, 64};
@@ -644,6 +807,8 @@ int signal_router_adopt_chain(void *reviewed_chain_base) {
       return errno;
     }
   }
+  atomic_store_explicit(&routing_complete, domain_signal_masked != NULL,
+                        memory_order_release);
   return 0;
 }
 
@@ -932,6 +1097,21 @@ static int router_action(int number, const struct sigaction *action,
     wide_fault_mask(&installed);
   }
 
+  if (next->entry && !internal && lane < 0 &&
+      atomic_load_explicit(&routing_complete, memory_order_acquire) &&
+      !kernel_mask_is_full(&installed)) {
+    /* Any nested public handler comes through the entry inspection. Native
+     * libc-private handlers have their own gateways and must wait until the
+     * entry snapshot. This changes only private bits while binding the entry.
+     */
+    next->prefix_mask = native_prefix_mask();
+    uint64_t bits;
+    memcpy(&bits, &installed.sa_mask, sizeof bits);
+    bits |= next->prefix_mask;
+    memcpy(&installed.sa_mask, &bits, sizeof bits);
+    next->ordinary = 1;
+  }
+
   struct sigaction replaced;
   int status = system_action(number, &installed, &replaced);
   int error = errno;
@@ -957,6 +1137,13 @@ static int router_action(int number, const struct sigaction *action,
                       kernel_mask_is_full(&actual))) &&
         (lane < 0 || (!system_action(notifications[lane], NULL, &actual) &&
                       kernel_mask_is_full(&actual)));
+  }
+  if (!status && next->ordinary && next->prefix_mask) {
+    struct sigaction actual = {0};
+    uint64_t mask;
+    int read = system_action(number, NULL, &actual);
+    memcpy(&mask, &actual.sa_mask, sizeof mask);
+    next->ordinary = !read && (mask & next->prefix_mask) == next->prefix_mask;
   }
   if (!status) {
     next->next = allocations;
@@ -1395,7 +1582,9 @@ static int verify_locked(void) {
         for (int blocked = 1; blocked < NSIG; ++blocked) {
           if (blocked != SIGKILL && blocked != SIGSTOP &&
               sigismember(&actual.sa_mask, blocked) !=
-                  sigismember(&record->action.sa_mask, blocked)) {
+                  ((record->prefix_mask & (UINT64_C(1) << (blocked - 1)))
+                       ? 1
+                       : sigismember(&record->action.sa_mask, blocked))) {
             return EBUSY;
           }
         }
@@ -1525,6 +1714,10 @@ int signal_router_restore(void) {
 
   uint64_t previous;
   lock_writer(&previous);
+  if (reclaim_batch) {
+    unlock_writer(previous);
+    return EBUSY;
+  }
   int error = verify_locked();
   struct restore_step steps[NSIG];
   unsigned count = 0, changed = 0;
@@ -1565,6 +1758,11 @@ int signal_router_restore(void) {
   }
 
   atomic_store_explicit(&deferred_faults, 0, memory_order_release);
+  atomic_store_explicit(&routing_complete, 0, memory_order_release);
+  for (struct disposition *record = allocations; record;
+       record = record->next) {
+    record->ordinary = 0;
+  }
   atomic_store(&enabled, 0);
   atomic_store(&guest_faults, 0);
 #ifdef __GLIBC__
@@ -1609,8 +1807,9 @@ unsigned signal_router_retained(void) {
   return atomic_load_explicit(&retained, memory_order_relaxed);
 }
 
-static struct disposition *detach_retired(int guarded_only) {
+static struct disposition *detach_retired(int online) {
   int live = atomic_load_explicit(&enabled, memory_order_acquire);
+  uint64_t native = native_prefix_mask();
   struct disposition *batch = NULL;
   struct disposition **link = &allocations;
   while (*link) {
@@ -1625,7 +1824,10 @@ static struct disposition *detach_retired(int guarded_only) {
         }
       }
     }
-    if (published || (guarded_only && record->entry && !record->guarded)) {
+    int ordinary = record->ordinary && !record->exposed_context &&
+                   (record->prefix_mask & native) == native;
+    if (published ||
+        (online && record->entry && !record->guarded && !ordinary)) {
       link = &record->next;
       continue;
     }
@@ -1633,7 +1835,7 @@ static struct disposition *detach_retired(int guarded_only) {
     record->next = batch;
     batch = record;
   }
-  if (!live && !guarded_only) {
+  if (!live && !online) {
     for (int number = 1; number < NSIG; ++number) {
       atomic_store_explicit(&current[number], NULL, memory_order_relaxed);
     }
@@ -1716,6 +1918,7 @@ int gw_host_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed) {
     error = signal_router_enabled() ? verify_locked() : ENOTSUP;
   }
   struct disposition *batch = error ? NULL : detach_retired(1);
+  reclaim_batch = batch;
   /* Freeze this batch, then let pending deliveries select their actions and
    * leave the masked prefix. They can need the writer to reach that point. */
   unlock_writer(UINT64_MAX);
@@ -1725,20 +1928,25 @@ int gw_host_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed) {
 
   uint64_t masked;
   lock_writer(&masked);
+  reclaim_batch = NULL;
   if (!error) {
     error = signal_router_error();
   }
   if (!error && batch && signal_host_relay_busy && signal_host_relay_busy()) {
     error = EBUSY;
   }
-  if (error) {
-    while (batch) {
-      struct disposition *record = batch;
-      batch = record->next;
+  struct disposition **link = &batch;
+  while (*link) {
+    struct disposition *record = *link;
+    if (error || record->exposed_context) {
+      *link = record->next;
       record->next = allocations;
       allocations = record;
+    } else {
+      link = &record->next;
     }
-  } else {
+  }
+  if (!error) {
     *reclaimed = release_retired(batch);
   }
   atomic_flag_clear_explicit(&reclaimer, memory_order_release);

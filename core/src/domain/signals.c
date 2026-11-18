@@ -502,6 +502,10 @@ __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
     gw_raw3(SYS_exit_group, 96, 0, 0);
     __builtin_unreachable();
   }
+  const ucontext_t *frame = context;
+  uint64_t interrupted;
+  __builtin_memcpy(&interrupted, &frame->uc_sigmask, sizeof interrupted);
+  mask = signal_router_entry_mask(token, mask, interrupted);
   int selected;
   if (!signal_host_relay(number, info, context, token, mask, &selected)) {
     struct gw_signal_target *(*target)(void) =
@@ -700,8 +704,10 @@ static void forward_host(int number, siginfo_t *info, void *context,
      * See sigmask_to_save(), including current->saved_sigmask. */
     int wide = signal_router_fault_notifications() &&
                (gw_signal_fault_bits() & (UINT64_C(1) << (number - 1)));
+    uint64_t interrupted = mask_wait ? execution : mask;
     uint64_t effective = signal_host_logical_mask(
-        wide ? (mask_wait ? execution : mask) : entry_mask);
+        wide ? interrupted
+             : signal_router_entry_mask(token, entry_mask, interrupted));
     signal_router_forward_selected_domain(
         number, info, context, token, effective, &frame->uc_stack,
         gw_signal_interrupted_sp(frame), 0, selected);

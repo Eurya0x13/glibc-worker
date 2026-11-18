@@ -3,6 +3,9 @@
 #include "vm-start.h"
 #ifdef GW_EXPERIMENT_LATE_SIGNAL
 #include "signal_profile.h"
+#ifdef __ANDROID__
+void domain_check_art_reclaim(void);
+#endif
 #endif
 static pthread_barrier_t loaded, finished;
 static JavaVM *vm;
@@ -147,6 +150,12 @@ int main(int argc, char **argv) {
          mode ? mode : "default", session.domain ? "domain" : "worker");
   mode = session.domain ? "domain" : "worker";
   measuring = getenv("GW_BENCH") && !strcmp(getenv("GW_BENCH"), "1");
+#if defined(GW_EXPERIMENT_LATE_SIGNAL) && defined(__ANDROID__)
+  int check_art_reclaim = getenv("GW_INLINE_VM") && !measuring;
+  if (check_art_reclaim) {
+    REQUIRE(!domain_late_signal_reclaim_enable(47));
+  }
+#endif
   threads = getenv("GW_THREADS") ? atoi(getenv("GW_THREADS")) : 1;
   REQUIRE(threads > 0 && threads <= 64);
 #ifndef GW_EXPERIMENT_LATE_SIGNAL
@@ -180,6 +189,11 @@ int main(int argc, char **argv) {
   session.guest_thread = signal_guest_lifecycle;
   start_owner(argv);
   REQUIRE(full_host_ready() == JNI_OK);
+#if defined(GW_EXPERIMENT_LATE_SIGNAL) && defined(__ANDROID__)
+  if (check_art_reclaim) {
+    domain_check_art_reclaim();
+  }
+#endif
   loader = gw_loader_query(GW_LOADER_ABI_V1, sizeof *loader);
   REQUIRE(loader);
 #ifdef GW_EXPERIMENT_SYSTEM_LOAD

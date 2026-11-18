@@ -99,9 +99,10 @@ After installing the selected profile, use
 signal before starting Guest or relay helpers. Call
 `domain_late_signal_reclaim` from a normal Host control thread. The proof
 checks actual Linux recipients, including native VM threads. The result is
-the number of retired guarded registrations released. A missing
-acknowledgement returns `EBUSY`. Ordinary registrations with narrower
-kernel masks still require a full shutdown barrier. See the
+the number of retired registrations released. A missing acknowledgement
+returns `EBUSY`. Ordinary generations published under complete routing are
+eligible for this proof. A saved native context that names an unbound entry
+requires the embedding's full barrier. See the
 [core contract](../../../core/docs/en/DOMAINS.md#reclaiming-host-registrations).
 
 `tests/signal_profile.py` reuses an explicitly prepared installed Android late
@@ -113,7 +114,7 @@ repeated `--rejection-prefix` arguments select separately built SDKs with
 intentionally missing Host fields, a wrong Bionic digest or an invalid import
 offset; each must reject with `ENOTSUP` before enabling the router and still
 destroy the VM. The reclaim case installs the reviewed profile, releases a
-replaced guarded registration with JRE17 running, then destroys the VM and
+replaced ordinary registration with JRE17 running, then destroys the VM and
 restores the router. The script retains input hashes and per-case output under
 `build/tests/signal-profile-android`.
 
@@ -121,9 +122,14 @@ restores the router. The script retains input hashes and per-case output under
 using a process-owned test signal. Pass `--core-prefix` and `--jdk`. The
 ARM64 variant also takes `--serial`, `--ndk` and `--d8`. It verifies a
 blocked recipient, mapping release while the old callback is parked,
-successful return and subsequent delivery. The ART run uses `dalvikvm64`
-and keeps ART's own installed signal chain in place. Late import patching
-of an app's ART artifact remains a separate profile check.
+successful return and subsequent delivery. The shell ART run uses
+`dalvikvm64` and keeps ART's installed chain in place. The
+[inline application fixture](../../experiments/same-thread/LATE_SIGNALS.md)
+additionally installs the reviewed ART and Bionic imports after VM startup.
+It replaces an ordinary registration through ART's public entrypoints and
+releases the old mapping while the application's main ART thread runs its
+old callback. The callback returns and the same thread receives the new
+generation.
 
 ## Runtime composition
 

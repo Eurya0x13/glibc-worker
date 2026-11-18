@@ -11,8 +11,8 @@ uses its existing worker build while its separate migration is pending.
 
 The embedding application must serialize installation against signal
 registration, ART chain repair, and application JNI work. This is a bootstrap
-operation, not a general attach-to-running-game API. VM/bridge code and immutable
-signal records stay mapped until process disposal. Shutdown tests destroy the
+operation, not a general attach-to-running-game API. VM/bridge code stays
+mapped until process disposal. Shutdown tests destroy the
 test HotSpot and then dispose of the process; resuming an arbitrary application
 after unloading this bridge is not supported.
 
@@ -62,9 +62,9 @@ that failed before this correction.
   The stripped desktop JDK used in earlier tests does not supply it, so this
   builder rejects that late configuration. Desktop tests cover the independent
   routing contract, not late HotSpot integration.
-- Host-reserved signals still reject Guest registrations with `EBUSY`. This
-  change does not implement independent Host/Guest signal virtualization,
-  process-directed Guest-only delivery or general disposition reclamation.
+- Host-reserved signals still reject Guest registrations with `EBUSY`.
+  [Live reclamation](../../../core/docs/en/DOMAINS.md#reclaiming-host-registrations)
+  uses the actual native recipients in the application.
 
 The platform implementation used for review is
 [Android 13 sigchain](https://android.googlesource.com/platform/art/+/refs/tags/android-13.0.0_r1/sigchainlib/sigchain.cc).
@@ -82,6 +82,7 @@ The optional ART profile is for the recorded device artifact only:
 python3 android-jni/experiments/same-thread/build.py \
   --abi arm64-v8a --system-load --late-signal \
   --art-signal-profile jvm-jni/experiments/same-thread/profiles/vivo-android13-sigchain.json \
+  --host-libc-signal-profile jvm-jni/experiments/same-thread/profiles/vivo-android13-bionic.json \
   --ndk "$ANDROID_NDK" --jdk "$JDK17" --runtime "$DOMAIN_RUNTIME_ARM64"
 
 python3 jvm-jni/experiments/same-thread/system-load.py \
@@ -105,6 +106,12 @@ python3 jvm-jni/experiments/same-thread/late-signal-contract.py \
 application process. Without it, the APK runs the native executable in an
 application-UID exec child. Both are disposable fixtures; neither modifies
 Pojav, accounts, game instances or saves.
+
+The inline run also requires an `ART_SIGNAL_RECLAIM` report. Both public ART
+registration entrypoints pass through the installed profile. The app's main
+ART thread pauses in the first ordinary-mask callback while the collector
+releases its retired mapping. That thread then returns and receives the
+replacement.
 
 The shell runner checks both worker and domain transports, then injects a
 failure after each standalone binding write to check rollback and VM destruction.

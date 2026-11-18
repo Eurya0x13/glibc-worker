@@ -7,6 +7,11 @@
 .global domain_signal_entry
 .type domain_signal_entry,@function
 domain_signal_entry:
+#ifdef GW_DOMAIN_CHAIN
+    /* Before masking, a nested entry can recover this original ucontext
+     * argument from R9 and the disposition token from RCX. */
+    mov %rdx, %r9
+#endif
     push %rbx
     sub $64, %rsp
     mov %rdi, 0(%rsp)
@@ -21,8 +26,14 @@ domain_signal_entry:
     lea 48(%rsp), %rdx
     mov $8, %r10d
     syscall
+.global domain_signal_masked
+.hidden domain_signal_masked
+domain_signal_masked:
     test %rax, %rax
     jnz .Lbad_signal
+    mov 16(%rsp), %rdi
+    lea 48(%rsp), %rsi
+    call signal_router_expose_prefix
 #endif
     mov $158, %eax
     mov $0x1003, %edi
@@ -181,6 +192,15 @@ domain_fault_resume:
 .global domain_signal_entry
 .type domain_signal_entry,%function
 domain_signal_entry:
+#ifdef GW_DOMAIN_CHAIN
+    /* Keep the original ucontext and disposition token in scratch registers
+     * while preparing the full mask syscall. */
+    mov x15, x2
+    mov x17, x3
+.global domain_signal_token_saved
+.hidden domain_signal_token_saved
+domain_signal_token_saved:
+#endif
     sub sp, sp, #80
     stp x19, x30, [sp]
     mrs x9, tpidr_el0
@@ -197,7 +217,13 @@ domain_signal_entry:
     mov x3, #8
     mov x8, #135
     svc #0
+.global domain_signal_masked
+.hidden domain_signal_masked
+domain_signal_masked:
     cbnz x0, .Lbad_signal
+    ldr x0, [sp, #48]
+    add x1, sp, #64
+    bl signal_router_expose_prefix
 #endif
     ldr x0, [sp, #16]
     bl domain_signal_lookup

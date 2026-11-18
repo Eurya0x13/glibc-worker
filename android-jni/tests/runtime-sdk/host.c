@@ -1721,9 +1721,8 @@ static void reclaim_fixture_action(int number) {
 static void check_live_reclaim(void) {
   struct sigaction action = {.sa_handler = reclaim_fixture_action,
                              .sa_flags = SA_RESTART};
-  uint64_t mask = UINT64_MAX;
   sigemptyset(&action.sa_mask);
-  memcpy(&action.sa_mask, &mask, sizeof mask);
+  sigaddset(&action.sa_mask, SIGALRM);
   assert(!sigaction(48, &action, NULL));
   action.sa_handler = SIG_DFL;
   assert(!sigaction(48, &action, NULL));

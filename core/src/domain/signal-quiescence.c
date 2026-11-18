@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "signal-quiescence.h"
+#include "signal-router.h"
 #include "../bootstrap/raw_syscall.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -24,6 +25,7 @@ static _Atomic uint64_t pending;
 static _Atomic int recipient;
 static _Atomic unsigned progress;
 extern void gw_signal_quiescence_hide_wait(void *) __attribute__((weak));
+#define ACK_PREFIX (UINT64_C(1) << 63)
 
 __attribute__((no_stack_protector)) void gw_signal_quiescence_ack(
     int number, siginfo_t *info, void *context) {
@@ -41,11 +43,14 @@ __attribute__((no_stack_protector)) void gw_signal_quiescence_ack(
   if (cookie &&
       atomic_load_explicit(&pending, memory_order_acquire) == cookie &&
       atomic_load_explicit(&recipient, memory_order_relaxed) ==
-          gw_raw3(SYS_gettid, 0, 0, 0) &&
-      atomic_compare_exchange_strong_explicit(
-          &pending, &cookie, 0, memory_order_release, memory_order_relaxed)) {
-    atomic_fetch_add_explicit(&progress, 1, memory_order_release);
-    gw_raw3(SYS_futex, (long)&progress, FUTEX_WAKE_PRIVATE, 1);
+          gw_raw3(SYS_gettid, 0, 0, 0)) {
+    uint64_t reply = signal_router_probe_prefix(context) ? ACK_PREFIX : 0;
+    if (atomic_compare_exchange_strong_explicit(&pending, &cookie, reply,
+                                                memory_order_release,
+                                                memory_order_relaxed)) {
+      atomic_fetch_add_explicit(&progress, 1, memory_order_release);
+      gw_raw3(SYS_futex, (long)&progress, FUTEX_WAKE_PRIVATE, 1);
+    }
   }
 }
 
@@ -214,7 +219,7 @@ static int acknowledge_task(int process, int number, const struct task *task,
       (now.tv_sec == deadline->tv_sec && now.tv_nsec >= deadline->tv_nsec)) {
     return EBUSY;
   }
-  if (next_cookie == UINT64_MAX) {
+  if (next_cookie == ACK_PREFIX - 1) {
     return EOVERFLOW;
   }
   uint64_t cookie = ++next_cookie;
@@ -231,8 +236,9 @@ static int acknowledge_task(int process, int number, const struct task *task,
 
   for (;;) {
     unsigned observed = atomic_load_explicit(&progress, memory_order_acquire);
-    if (!atomic_load_explicit(&pending, memory_order_acquire)) {
-      return 0;
+    uint64_t reply = atomic_load_explicit(&pending, memory_order_acquire);
+    if (reply != cookie) {
+      return reply == ACK_PREFIX ? -1 : 0;
     }
     if (syscall(SYS_futex, &progress, FUTEX_WAIT_BITSET_PRIVATE, observed,
                 deadline, NULL, FUTEX_BITSET_MATCH_ANY) &&
@@ -258,7 +264,9 @@ int gw_signal_quiescence_check(int number, unsigned timeout_ms) {
   for (size_t i = 0; !error && i < tasks.count; ++i) {
     const struct task *task = &tasks.items[i];
     if (task->tid != self) {
-      error = acknowledge_task(process, number, task, &deadline);
+      do {
+        error = acknowledge_task(process, number, task, &deadline);
+      } while (error == -1);
     }
     if (!error) {
       /* A numeric TID may now refer to a different thread. Reading through

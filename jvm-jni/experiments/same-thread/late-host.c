@@ -3,7 +3,6 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <signal.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,9 +61,8 @@ static int check_reclaim(JavaVM *vm, JNIEnv *env, void *bridge) {
   }
   struct sigaction action = {.sa_handler = receive_reclaim_test,
                              .sa_flags = SA_RESTART};
-  uint64_t mask = UINT64_MAX;
   sigemptyset(&action.sa_mask);
-  memcpy(&action.sa_mask, &mask, sizeof mask);
+  sigaddset(&action.sa_mask, SIGALRM);
   if (registration(48, &action, NULL) || registration(48, &action, NULL)) {
     return 3;
   }

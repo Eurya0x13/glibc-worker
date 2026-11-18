@@ -95,8 +95,9 @@ core；ART 保留已审阅的公开前端和底层路由。两个导入纳入原
 安装所选 profile 后，在启动 Guest 或转交线程前调用
 `domain_late_signal_reclaim_enable`，预留一个未使用的公开实时信号。
 在正常 Host 控制线程调用 `domain_late_signal_reclaim`。证明检查实际
-Linux 接收线程，包括 VM 内部原生线程，结果为已释放的受保护旧注册数量。
-缺少回执时返回 `EBUSY`。原始内核掩码范围较窄的普通注册仍需完整停机屏障。
+Linux 接收线程，包括 VM 内部原生线程，结果为已释放的旧注册数量。
+缺少回执时返回 `EBUSY`。路由完整接管后发布的普通旧代可使用这一证明。
+仍被保存的原生上下文指向未绑定入口时，由接入方通过完整屏障回收。
 见 [core 契约](../../../core/docs/zh/DOMAINS.md#reclaiming-host-registrations)。
 
 `tests/signal_profile.py` 复用显式准备的 Android late SDK payload 和匹配的
@@ -105,15 +106,17 @@ VM 启动头文件。传入 `--payload`、`--vm-startup-profile`、`--ndk` 和
 要求五个原值全部恢复、路由器关闭，并正常完成 `DestroyJavaVM`。可重复传入
 `--rejection-prefix`，选择单独构建、故意缺少 Host 字段、Bionic 摘要错误或
 导入偏移非法的 SDK；每个都必须在启用路由器前以 `ENOTSUP` 拒绝，并仍可销毁
-VM。回收用例安装已审阅的 profile，在 JRE17 运行时释放一代已被替换的受保护
+VM。回收用例安装已审阅的 profile，在 JRE17 运行时释放一代已被替换的普通掩码
 注册，随后销毁 VM 并还原路由器。输入摘要和各用例输出保存在
 `build/tests/signal-profile-android`。
 
 `tests/signal_reclaim.py` 使用进程自有测试信号验证运行中的 HotSpot 和
 Android ART 接收线程。传入 `--core-prefix` 和 `--jdk`，ARM64 另需
 `--serial`、`--ndk` 和 `--d8`。用例覆盖接收线程屏蔽回执、旧回调暂停
-期间释放映射、正常返回及再次投递。ART 通过 `dalvikvm64` 运行，并保留
-ART 自己安装的信号链。应用内 ART 制品的后加载导入补丁需单独验证对应 profile。
+期间释放映射、正常返回及再次投递。Shell 通过 `dalvikvm64` 保留 ART 自己安装
+的信号链。[应用内夹具](../../experiments/same-thread/LATE_SIGNALS.md) 在 VM 启动后
+安装已审阅的 ART 和 Bionic 导入适配，通过 ART 公开入口替换一代普通掩码注册，
+在应用 ART 主线程的旧回调暂停时释放旧映射，再验证同一线程返回并收到新注册。
 
 ## 运行时组合
 

@@ -135,6 +135,7 @@ host_sources = [
     core / "signal-stack.S",
     core / "signal-router.c",
     core / "signal-quiescence.c",
+    core / "nonlocal.c",
     core / "signal-relay.c",
     core / "signal-interpose.c",
     root / "core/src/bootstrap/clone.S",
@@ -326,6 +327,8 @@ if args.late_signal:
 
     host_sources = [p for p in host_sources if p not in launcher]
     host_sources += [root / "jvm-jni/src/native/signal_profile.c"]
+    if android:
+        host_sources.append(source / "signal-reclaim.c")
     compile(
         host_cc,
         "late-bridge.so",
@@ -334,6 +337,7 @@ if args.late_signal:
             *host_flags,
             "-shared",
             "-Wl,-Bsymbolic-functions",
+            "-Wl,-z,defs",
             "-DGW_EXPERIMENT_LATE_SIGNAL",
             out / "host_store.o",
             host_ffi / "lib/libffi.a",

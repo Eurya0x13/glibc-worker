@@ -146,16 +146,25 @@ acknowledgement must belong to the same pinned identity. A missing reply or an
 unstable census returns `EBUSY` without freeing the batch. A subsequent
 attempt takes a fresh census.
 
-This live proof covers generations with a fully masked kernel entry, including
-new registrations through the deferred fault channel, and records that never
-published an entry. The entry mask orders the acknowledgement after the last
-registration read. Handlers and parked callbacks resume using their local
-action snapshots. Open registrations and older entries published with other
-masks stay pinned until the embedding supplies a full barrier through
-`signal_router_reclaim`. The router preserves those entries' original
-delivery masks. The native census assumes one Linux thread group and ordinary
-thread creation, where new tasks start without their parent's saved signal
-frames.
+With complete routing, ordinary generations can enter the live batch even if
+their registration predates the realtime lease. The probe inspects the actual
+interrupted PC and retries when it finds an entry that has yet to bind. Linux
+may build several signal frames before executing the first entry. Before a
+nested callback can see its native context, the gateway follows those frames
+and keeps the corresponding unbound generations alive. The embedding's full
+barrier accounts for any copies of those saved PCs. [Linux x86 return to userspace](https://github.com/torvalds/linux/blob/v5.15/kernel/entry/common.c),
+[Linux ARM64 signal frames](https://github.com/torvalds/linux/blob/v5.15/arch/arm64/kernel/signal.c).
+
+Ordinary routes preserve the action's public mask, kernel restart and one-shot
+flags, and the actual temporary mask in effect at delivery. Native libc-private
+signals are held through the entry prefix and their original mask is restored
+before the callback. Callbacks and parked stacks use local action snapshots
+after binding. Fully masked fault entries and data-only records remain eligible
+under their existing proof. The embedding's full `signal_router_reclaim`
+barrier also covers entries published before the router fully owned the native
+chain or before it acquired the necessary libc-private masks. The native census
+assumes one Linux thread group and ordinary thread creation, where new tasks
+start without their parent's saved signal frames.
 
 Wrapped Host waits handle the private acknowledgement as a hidden
 notification. Enable live collection where the embedding can accept

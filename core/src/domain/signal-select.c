@@ -521,6 +521,27 @@ static inline __attribute__((always_inline)) enum wait_location locate_wait(
   return WAIT_OUTSIDE;
 }
 
+static struct sleep_record *wait_at_stack(const ucontext_t *frame) {
+  uintptr_t stack = gw_signal_interrupted_sp(frame);
+  struct sleep_record *record =
+      atomic_load_explicit(&waiting, memory_order_acquire);
+  while (record && (record->retired || record->syscall_stack != stack)) {
+    record = record->previous;
+  }
+  return record;
+}
+
+__attribute__((no_stack_protector)) uint64_t
+gw_signal_wait_entry_mask(const ucontext_t *frame, uint64_t saved) {
+  /* A stack of unentered prefixes still has the interrupted TLS. A PC in
+   * the Host wait gateway identifies the owning domain before TLS access. */
+  if (locate_wait(frame) == WAIT_OUTSIDE) {
+    return saved;
+  }
+  struct sleep_record *record = wait_at_stack(frame);
+  return record ? record->execution_mask : saved;
+}
+
 static struct sleep_record *interrupted_wait(void *context, int hidden) {
   ucontext_t *frame = context;
   enum wait_location location = locate_wait(frame);
@@ -528,12 +549,7 @@ static struct sleep_record *interrupted_wait(void *context, int hidden) {
     return NULL;
   }
 
-  uintptr_t stack = gw_signal_interrupted_sp(frame);
-  struct sleep_record *record =
-      atomic_load_explicit(&waiting, memory_order_acquire);
-  while (record && (record->retired || record->syscall_stack != stack)) {
-    record = record->previous;
-  }
+  struct sleep_record *record = wait_at_stack(frame);
   if (location == WAIT_SETUP && !hidden) {
     /* A visible handler before native entry must leave an unstarted sleep
      * intact. It restores the caller's cancellation mode before user code;
