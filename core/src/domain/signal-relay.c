@@ -14,7 +14,7 @@ enum relay_state { STOPPED, STARTING, RUNNING, STOPPING, EXITING };
 
 struct relay_request {
   struct relay_request *next;
-  int number;
+  int number, selected;
   siginfo_t *information;
   void *context, *token;
   uint64_t mask;
@@ -70,9 +70,11 @@ static void deliver(struct relay_request *request) {
   /* The dispatcher starts with no alternate stack. SA_ONSTACK consequently
    * falls back to its real pthread stack, as native delivery does. The source
    * kernel frame stays on its GNU recipient and must not become our stack. */
-  signal_router_forward_domain(request->number, request->information,
-                               request->context, request->token, request->mask,
-                               &stack, 0, 0);
+  request->selected = signal_router_select(
+      request->number, request->information, request->token);
+  signal_router_forward_selected_domain(
+      request->number, request->information, request->context, request->token,
+      request->mask, &stack, 0, 0, request->selected);
 
   _Atomic int *complete = &request->complete;
   atomic_store_explicit(complete, 1, memory_order_release);
@@ -172,7 +174,7 @@ int signal_host_relay_stop(void) {
 
 __attribute__((no_stack_protector)) int signal_host_relay(
     int number, siginfo_t *information, void *context, void *token,
-    uint64_t mask) {
+    uint64_t mask, int *selected) {
   unsigned observed = atomic_load_explicit(&admission, memory_order_relaxed);
   do {
     if (observed & RELAY_CLOSED) {
@@ -201,6 +203,7 @@ __attribute__((no_stack_protector)) int signal_host_relay(
   wake(&notification);
 
   wait_value(&request.complete, 0);
+  *selected = request.selected;
   atomic_fetch_sub_explicit(&admission, 1, memory_order_release);
   return 0;
 }

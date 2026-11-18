@@ -33,14 +33,19 @@ add_library(signal_interpose STATIC src/domain/signal-interpose.c
   src/domain/signal-fd-kernel.c src/domain/signal-fd-entry.S
   src/domain/signal-stdio.c src/domain/signal-select.c
   src/domain/signal-user-copy.c src/domain/signal-sleep-interpose.c
+  src/domain/guest-fd-host.c src/domain/guest-signalfd.c
+  src/domain/guest-ready.c src/domain/guest-epoll.c src/domain/guest-fd-lease.c
   src/domain/signal-mask-wait.S)
 add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 if(NOT ANDROID)
   # C forced-unwind cleanup, without publishing a pthread cleanup stack record.
-  set_source_files_properties(src/domain/signal-sleep-interpose.c PROPERTIES
+  set_source_files_properties(
+    src/domain/signal-sleep-interpose.c src/domain/guest-fd-host.c
+    src/domain/guest-signalfd.c src/domain/guest-ready.c PROPERTIES
     COMPILE_OPTIONS -fexceptions)
 endif()
 target_link_libraries(signal_interpose PUBLIC domains)
+target_include_directories(signal_interpose PRIVATE src/runtime)
 # Libc and sanitizer runtimes can already satisfy a libc-named undefined
 # symbol. Retain each interposition object through its project-owned entry.
 target_link_options(signal_interpose INTERFACE
@@ -214,6 +219,7 @@ install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/domain/signal-execution.c
         src/domain/signal-consuming.c src/domain/signal-user-copy.c
         src/domain/guest-signalfd.c src/runtime/signalfd-hook.h
+        src/domain/job-control.h
         src/domain/guest-ready.c src/domain/guest-epoll.c
         src/domain/guest-fd-lease.c
         src/runtime/signal-consume-hook.h src/runtime/thread-create.h

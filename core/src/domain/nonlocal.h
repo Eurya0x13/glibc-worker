@@ -22,6 +22,7 @@ int gw_nonlocal_ready(void);
 void gw_nonlocal_enter(struct gw_nonlocal_scope *);
 void gw_nonlocal_leave(struct gw_nonlocal_scope *);
 int gw_nonlocal_pending(void);
+const void *gw_nonlocal_scope_current(void);
 /* Select between live Host scope chains on this carrier. Delivery is masked
  * and both chains stay pinned throughout this operation. */
 int gw_nonlocal_select(struct gw_nonlocal_scope *, struct gw_nonlocal_scope *);

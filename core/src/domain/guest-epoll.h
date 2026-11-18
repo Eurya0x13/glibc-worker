@@ -4,7 +4,7 @@
 #include <poll.h>
 #include <sys/epoll.h>
 
-int gw_guest_epoll_ctl(struct gw_signal_target *, int, int, int,
+int gw_guest_epoll_ctl(struct gw_signal_targets *, int, int, int,
                        const struct epoll_event *);
 int gw_guest_epoll_reap(void);
 int gw_guest_epoll_stop(void);

@@ -249,6 +249,46 @@ def execute_case(
         )
         or (
             mode in ("adopted-signals", "worker-signals")
+            and [r for r in rows if r.get("stage") == "guest-signalfd-combined"]
+            != [
+                {
+                    "stage": "guest-signalfd-combined",
+                    "gnu_syscall": True,
+                    "restart_action_snapshot": True,
+                    "stale_notification": True,
+                    "shared_job_mask": True,
+                    "native_fds": True,
+                }
+            ]
+        )
+        or (
+            mode in ("adopted-signals", "worker-signals")
+            and [r for r in rows if r.get("stage") == "host-guest-signalfd"]
+            != [
+                {
+                    "stage": "host-guest-signalfd",
+                    "directed_owner": True,
+                    "shared_wait": True,
+                    "close_wake": True,
+                    "blocked_cleanup": True,
+                    "stdio": mode == "adopted-signals",
+                }
+            ]
+        )
+        or (
+            mode in ("adopted-signals", "worker-signals")
+            and [r for r in rows if r.get("stage") == "guest-job-control"]
+            != [
+                {
+                    "stage": "guest-job-control",
+                    "native_stops": 3,
+                    "resumed": True,
+                    "host_disposition": True,
+                }
+            ]
+        )
+        or (
+            mode in ("adopted-signals", "worker-signals")
             and [r for r in rows if r.get("stage") == "guest-signalfd-ready"]
             != [
                 {

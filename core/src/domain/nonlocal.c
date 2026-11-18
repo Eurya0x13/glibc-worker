@@ -20,6 +20,13 @@ static _Thread_local struct gw_nonlocal_scope *top;
 static _Thread_local uint64_t generation;
 extern int gw_nonlocal_interposed(void) __attribute__((weak));
 extern void signal_host_prune_notifications(void) __attribute__((weak));
+extern void gw_guest_fd_lease_end(const void *) __attribute__((weak));
+extern void gw_guest_fd_lease_unwind(uintptr_t, uintptr_t)
+    __attribute__((weak));
+extern void gw_guest_fd_lease_context(uintptr_t, uintptr_t, size_t)
+    __attribute__((weak));
+extern int signal_host_stack_bounds(uintptr_t *, size_t *)
+    __attribute__((weak));
 #ifndef __ANDROID__
 static int (*native_setcontext)(const ucontext_t *);
 extern uint64_t signal_host_logical_mask(uint64_t) __attribute__((weak));
@@ -69,6 +76,7 @@ static _Thread_local struct {
   struct gw_nonlocal_scope *target;
   uint64_t target_generation;
   uint64_t mask;
+  uintptr_t jump_sp;
 } pending;
 
 int gw_nonlocal_init(void) {
@@ -170,11 +178,11 @@ static void record_capture(void *buffer, unsigned kind, uintptr_t sp,
         (struct gw_nonlocal_checkpoint){.buffer = buffer,
                                         .scope = top,
                                         .generation = top ? top->generation : 0,
-                                        .kind = kind};
+                                        .kind = kind,
+                                        .sp = sp,
+                                        .pc = pc};
     if (kind >= CONTEXT_CAPTURE) {
       r->kind = CONTEXT_CAPTURE;
-      r->sp = sp;
-      r->pc = pc;
     }
     if (top) {
       r->next = top->captures;
@@ -216,6 +224,10 @@ int gw_nonlocal_pending(void) {
   return pending.active;
 }
 
+const void *gw_nonlocal_scope_current(void) {
+  return top;
+}
+
 int gw_nonlocal_select(struct gw_nonlocal_scope *from,
                        struct gw_nonlocal_scope *to) {
   if (top != from || !to || !to->generation || pending.active) {
@@ -223,6 +235,18 @@ int gw_nonlocal_select(struct gw_nonlocal_scope *from,
   }
   top = to;
   return 0;
+}
+
+static void retire_jumped_descriptors(uintptr_t sp) {
+  if (sp && gw_guest_fd_lease_unwind) {
+    uintptr_t low;
+    size_t size;
+    uintptr_t top =
+        signal_host_stack_bounds && signal_host_stack_bounds(&low, &size)
+            ? low + size
+            : 0;
+    gw_guest_fd_lease_unwind(sp, top);
+  }
 }
 
 static _Noreturn void continue_transfer(void) {
@@ -243,6 +267,7 @@ static _Noreturn void continue_transfer(void) {
       restores[0](target->landing, 1);
       __builtin_unreachable();
     }
+    retire_jumped_descriptors(pending.jump_sp);
     gw_nonlocal_mask_restore(mask);
     restore(buffer, value);
   } else if (top) {
@@ -255,6 +280,9 @@ void gw_nonlocal_leave(struct gw_nonlocal_scope *scope) {
   uint64_t mask = gw_nonlocal_mask_block();
   if (top != scope) {
     _exit(125);
+  }
+  if (gw_guest_fd_lease_end) {
+    gw_guest_fd_lease_end(scope);
   }
   while (scope->captures) {
     struct gw_nonlocal_checkpoint *r = scope->captures;
@@ -288,6 +316,7 @@ static _Noreturn void transfer(const struct gw_nonlocal_checkpoint *record,
   pending.target = record->scope;
   pending.target_generation = record->generation;
   pending.mask = mask;
+  pending.jump_sp = record->kind == CONTEXT_CAPTURE ? 0 : record->sp;
   continue_transfer();
 }
 
@@ -299,6 +328,7 @@ _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind) {
   struct gw_nonlocal_checkpoint *r = find_checkpoint(buffer, 0);
   if (!top || (r && r->kind != CONTEXT_CAPTURE && r->scope == top &&
                r->generation == top->generation)) {
+    retire_jumped_descriptors(r ? r->sp : 0);
     prepare_native_restore();
     gw_nonlocal_mask_restore(mask);
     restores[kind](buffer, value);
@@ -348,6 +378,14 @@ static struct gw_nonlocal_checkpoint *find_context(const ucontext_t *context) {
 }
 
 static int restore_context(ucontext_t *context, uint64_t mask) {
+  /* Saved makecontext stacks can still be resumed. Limit lease retirement to
+   * a known stack containing the destination and the waiter. */
+  uintptr_t low, sp = gw_signal_interrupted_sp(context);
+  size_t size;
+  if (gw_guest_fd_lease_context && signal_host_stack_bounds &&
+      signal_host_stack_bounds(&low, &size) && sp - low < size) {
+    gw_guest_fd_lease_context(sp, low, size);
+  }
   prepare_native_restore();
   if (signal_host_logical_mask && signal_host_physical_mask) {
     uint64_t saved;

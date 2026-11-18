@@ -15,6 +15,8 @@ enum { DOMAIN_ROUNDS = 10000, DOMAIN_NESTING = 8 };
  * checks that both actions are unused instead of assuming signal ownership. */
 enum { DOMAIN_NOTIFY_SIGNAL = 50, DOMAIN_NESTED_SIGNAL = 51 };
 
+struct gw_signal_target;
+
 struct exchange {
   struct domain host, guest;
   void (*swap)(struct domain *, struct domain *);
@@ -42,6 +44,7 @@ struct exchange {
   /* Reserved physical bits for Guest execution can differ from Host's logical
    * mask when fault delivery uses deferred Host notifications. */
   uint64_t guest_execution_mask;
+  struct gw_signal_target *guest_signal_target;
 };
 
 /* Private signal-entry call frame; both architecture stubs use these offsets.

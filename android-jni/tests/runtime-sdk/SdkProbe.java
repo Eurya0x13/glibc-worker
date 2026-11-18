@@ -5,6 +5,7 @@ public final class SdkProbe {
   static native int probe(int value, byte[] data);
   static native long tid();
   static native int workerSignals();
+  static native int guestDescriptor(int operation, int value);
   static native void prepareAdoptedSignal(long address);
   static native int finishAdoptedSignal();
   static native int jumpAdoptedSignal(long address);

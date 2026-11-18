@@ -399,6 +399,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     return JNI_ERR;
   }
   extern jint sdk_worker_signal_probe(JNIEnv *, jclass);
+  extern jint sdk_guest_descriptor_probe(JNIEnv *, jclass, jint, jint);
   extern void sdk_adopted_signal_prepare(JNIEnv *, jclass, jlong);
   extern jint sdk_adopted_signal_finish(JNIEnv *, jclass);
   extern jint sdk_adopted_signal_jump(JNIEnv *, jclass, jlong);
@@ -406,6 +407,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
       {"probe", "(I[B)I", (void *)probe},
       {"tid", "()J", (void *)tid},
       {"workerSignals", "()I", (void *)sdk_worker_signal_probe},
+      {"guestDescriptor", "(II)I", (void *)sdk_guest_descriptor_probe},
       {"prepareAdoptedSignal", "(J)V", (void *)sdk_adopted_signal_prepare},
       {"finishAdoptedSignal", "()I", (void *)sdk_adopted_signal_finish},
       {"jumpAdoptedSignal", "(J)I", (void *)sdk_adopted_signal_jump}};

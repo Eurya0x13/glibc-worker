@@ -44,10 +44,17 @@ static void await(_Atomic int *state) {
 }
 
 void test_private_threads(void) {
+  waiting = cleaned = timed = 0;
+#ifdef GW_TEST_GNU_HOST
+  assert(SIGRTMIN == 34 && SIGRTMAX == 64);
+  const int cancel = 32, setxid = 33;
+#else
   assert(SIGRTMIN == 34 && SIGRTMAX == 62);
+  const int cancel = 63, setxid = 64;
+#endif
   private_tls = 717;
   struct sigaction action;
-  for (int number = 63; number <= 64; ++number) {
+  for (int number = cancel; number <= setxid; ++number) {
     errno = 0;
     assert(sigaction(number, NULL, &action) == -1 && errno == EINVAL);
     assert(pthread_kill(pthread_self(), number) == EINVAL);

@@ -310,7 +310,13 @@ static void serve(void *argument) {
   /* Host has not polled or entered Guest during PHASE_BUSY/PHASE_WAIT. This
    * later call tests native Guest interruption using the same physical wake. */
   assert(atomic_load(&carrier->phase) == PHASE_GUEST);
-  gw_nonlocal_mask_restore(exchange->host_execution_mask);
+  gw_nonlocal_mask_restore(exchange->guest_execution_mask);
+  if (control->gnu_host) {
+    uint64_t mask;
+    assert(!syscall(SYS_rt_sigprocmask, SIG_SETMASK, NULL, &mask, sizeof mask));
+    assert(mask & (UINT64_C(1) << 31));
+    assert(!(mask & (UINT64_C(1) << 32)));
+  }
   while (!atomic_load_explicit(&carrier->self_allowed, memory_order_acquire)) {
     wait_word(&carrier->self_allowed, 0);
   }
@@ -341,7 +347,7 @@ static void resolve(void) {
   } while (0)
   unsigned long (*capabilities)(void);
   RESOLVE(capabilities, "__gw_domain_capabilities");
-  assert(capabilities() == 0x4757440100000011UL);
+  assert(capabilities() == 0x4757440100000012UL);
   RESOLVE(allocate_domain, "__gw_domain_alloc");
   RESOLVE(bind_domain, "__gw_domain_bind");
   RESOLVE(run_domain, "__gw_domain_run");

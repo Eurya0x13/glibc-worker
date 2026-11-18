@@ -6,6 +6,7 @@
 #include "nonlocal-mask.h"
 #include "nonlocal.h"
 #include "signal-execution.h"
+#include "signal-targets.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -385,16 +386,37 @@ int signal_guest_carrier_detach(struct signal_slot *slot) {
   return error;
 }
 
+static _Atomic(struct gw_signal_target *(*)(void)) guest_signal_target;
+
+static __attribute__((no_stack_protector)) void note_host_interruption(
+    struct gw_signal_target *target, int selected, int restart) {
+  if (target) {
+    atomic_fetch_add_explicit(&target->host_wakes, 1, memory_order_relaxed);
+    if (selected) {
+      atomic_fetch_add_explicit(&target->host_deliveries, 1,
+                                memory_order_relaxed);
+      if (!restart) {
+        atomic_fetch_add_explicit(&target->host_interruptions, 1,
+                                  memory_order_relaxed);
+      }
+    }
+  }
+}
+
 /* The pinned GNU service installs this before admitting module constructors
  * or pthreads. Called with Guest TP; no Host libc, TLS or errno access. */
 __attribute__((no_stack_protector)) int signal_guest_kernel_bind(
-    void (*entry)(int, void *, void *)) {
+    void (*entry)(int, void *, void *),
+    struct gw_signal_target *(*target)(void)) {
   uintptr_t expected = 0;
-  return entry && atomic_compare_exchange_strong_explicit(
-                      &guest_kernel_entry, &expected, (uintptr_t)entry,
-                      memory_order_release, memory_order_relaxed)
-             ? 0
-             : EINVAL;
+  if (!entry || !target ||
+      !atomic_compare_exchange_strong_explicit(
+          &guest_kernel_entry, &expected, (uintptr_t)entry,
+          memory_order_release, memory_order_relaxed)) {
+    return EINVAL;
+  }
+  atomic_store_explicit(&guest_signal_target, target, memory_order_release);
+  return 0;
 }
 
 /* TLS/libc-free selection before the assembly tail transfer. A GNU unwind
@@ -441,7 +463,14 @@ __attribute__((no_stack_protector)) void domain_guest_thread_dispatch(
     gw_raw3(SYS_exit_group, 96, 0, 0);
     __builtin_unreachable();
   }
-  if (!signal_host_relay(number, info, context, token, mask)) {
+  int selected;
+  if (!signal_host_relay(number, info, context, token, mask, &selected)) {
+    struct gw_signal_target *(*target)(void) =
+        atomic_load_explicit(&guest_signal_target, memory_order_acquire);
+    if (target) {
+      note_host_interruption(target(), selected,
+                             signal_router_token_restart(token));
+    }
     return;
   }
 
@@ -585,6 +614,10 @@ static void forward_host(int number, siginfo_t *info, void *context,
   if (selected < 0) {
     selected = signal_router_select(number, info, token);
   }
+  if (slot && interrupted_tp != slot->host_tp) {
+    note_host_interruption(slot->exchange->guest_signal_target, selected,
+                           signal_router_token_restart(token));
+  }
   void *selection_frame = slot && interrupted_tp != slot->host_tp &&
                                   host_anchor && host_anchor->slot == slot
                               ? host_anchor->frame
@@ -645,6 +678,16 @@ static uint64_t synchronize_deferred(struct signal_slot *);
 
 static struct signal_slot *host_slot(void) {
   return host_recipient;
+}
+
+int signal_host_stack_bounds(uintptr_t *low, size_t *size) {
+  struct signal_slot *slot = host_slot();
+  if (!slot || !slot->host_stack_low) {
+    return 0;
+  }
+  *low = slot->host_stack_low;
+  *size = slot->host_stack_high - slot->host_stack_low;
+  return 1;
 }
 
 struct gw_signal_deferred *signal_host_consumer(void) {
@@ -747,6 +790,14 @@ int signal_host_defer(struct signal_slot *slot, const siginfo_t *information) {
 
 uint64_t signal_carrier_mask(struct signal_slot *slot, uint64_t logical,
                              int guest) {
+#ifdef __GLIBC__
+  /* The Host cancellation handler can force-unwind a native Host stack.
+   * Deliver it only after the carrier has restored its Host thread pointer.
+   * https://github.com/bminor/glibc/blob/glibc-2.42/nptl/pthread_cancel.c */
+  if (guest) {
+    logical |= UINT64_C(1) << (GW_GNU_HOST_CANCEL - 1);
+  }
+#endif
   if (slot && slot->guest_async) {
     logical &= ~guest_notification_bit();
   }
@@ -1034,6 +1085,12 @@ static void dispatch_core(int number, siginfo_t *info, void *context,
 #endif
 #ifdef GW_DOMAIN_CHAIN
   if (signal_router_dispatch_internal(number, info, context, token)) {
+#ifdef __GLIBC__
+    if (number == GW_GNU_HOST_SETXID && slot &&
+        interrupted_tp != slot->host_tp) {
+      note_host_interruption(slot->exchange->guest_signal_target, 1, 1);
+    }
+#endif
     return;
   }
   if (dispatch_deferred(number, info, context, slot, interrupted_tp, entry_mask,

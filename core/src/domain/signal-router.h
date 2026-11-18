@@ -28,6 +28,10 @@ int signal_router_adopt_chain(void *reviewed_chain_base);
  * Host sends to leased channels are outside the signal ownership contract. */
 #define GW_GUEST_NPTL_SIGNALS ((UINT64_C(1) << 62) | (UINT64_C(1) << 63))
 int signal_router_lease_guest_nptl(void);
+/* Keep GNU Host setxid handlers on their own TCB across adopted execution. */
+int signal_router_route_host_setxid(void);
+#define GW_GNU_HOST_CANCEL 32
+#define GW_GNU_HOST_SETXID 33
 #ifdef __ANDROID__
 int signal_router_action64(int, const struct sigaction64 *,
                            struct sigaction64 *);

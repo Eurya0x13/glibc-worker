@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 
 static __thread struct gw_guest_fd_lease *loans;
+extern const void *gw_guest_fd_scope(void) __attribute__((weak));
 
 int gw_guest_fd_lease_open(struct gw_guest_fd_lease **out,
                            struct gw_signal_target *target, int fd,
@@ -27,11 +28,12 @@ int gw_guest_fd_lease_open(struct gw_guest_fd_lease **out,
     return -error;
   }
 
-  *loan = (struct gw_guest_fd_lease){.target = target,
-                                     .next = loans,
-                                     .scope = gw_guest_fd_scope(),
-                                     .stack = stack,
-                                     .fd = copy};
+  *loan = (struct gw_guest_fd_lease){
+      .target = target,
+      .next = loans,
+      .scope = gw_guest_fd_scope ? gw_guest_fd_scope() : NULL,
+      .stack = stack,
+      .fd = copy};
   loans = loan;
   *out = loan;
   return fd < 0 ? 0 : copy;
@@ -56,10 +58,43 @@ void *gw_guest_fd_lease_reserve(struct gw_guest_fd_lease *loan, size_t bytes) {
   return buffer;
 }
 
+int gw_guest_fd_lease_poll(struct gw_guest_fd_lease *loan, int fd,
+                           uint32_t sequence, struct timespec *timeout,
+                           gw_libc_poll_wait poll) {
+  struct gw_signal_target *target = loan->target;
+  int wake;
+  struct gw_signal_poll_sample sample;
+  uint64_t physical = gw_nonlocal_mask_block();
+  int error = gw_signal_target_poll_arm(target, &sample, &wake);
+  loan->subscribed = !error;
+  gw_nonlocal_mask_restore(physical);
+  if (error) {
+    return -error;
+  }
+
+  int result = 0;
+  if (atomic_load_explicit(&target->registry->wait_sequence,
+                           memory_order_acquire) == sequence) {
+    struct pollfd fds[] = {{.fd = fd, .events = POLLIN},
+                           {.fd = wake, .events = POLLIN}};
+    result = poll(fds, 2, timeout, NULL);
+    result = result < 0 ? -errno : result ? 0 : -ETIMEDOUT;
+  }
+
+  physical = gw_nonlocal_mask_block();
+  gw_signal_target_poll_disarm(target);
+  loan->subscribed = 0;
+  gw_nonlocal_mask_restore(physical);
+  return result;
+}
+
 static void release(struct gw_guest_fd_lease **link) {
   struct gw_guest_fd_lease *loan = *link;
   *link = loan->next;
 
+  if (loan->subscribed) {
+    gw_signal_target_poll_disarm(loan->target);
+  }
   if (loan->fd >= 0) {
     gw_guest_fds_lock();
     syscall(SYS_close, loan->fd);
@@ -69,6 +104,9 @@ static void release(struct gw_guest_fd_lease **link) {
       gw_signal_targets_wake_waiters(loan->target->registry);
     }
     gw_guest_fds_unlock();
+  }
+  if (loan->retire) {
+    loan->retire(loan);
   }
   if (loan->storage) {
     munmap(loan->storage, loan->size);

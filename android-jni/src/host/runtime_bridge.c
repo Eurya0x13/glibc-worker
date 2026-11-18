@@ -6,6 +6,8 @@
 #include <errno.h>
 
 static int owned_runtime, owned_relay;
+extern int gw_guest_fds_attach(struct gw_guest_fd_state *)
+    __attribute__((weak));
 
 int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
   if (!env || !c ||
@@ -88,6 +90,9 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
     owned_relay = !error;
   }
 #ifdef GW_DOMAIN_NONLOCAL
+  if (!error && session.domain) {
+    error = signal_router_route_host_setxid();
+  }
   if (!error) {
     error = signal_router_guest_faults();
   }
@@ -101,6 +106,9 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
   if (!error) {
     error =
         domain_owner_start(c->loader_path, c->library_path, c->service_path);
+  }
+  if (!error && session.guest_fds && gw_guest_fds_attach) {
+    error = gw_guest_fds_attach(session.guest_fds);
   }
   if (!error && full_host_ready() != JNI_OK) {
     error = EPROTO;

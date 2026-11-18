@@ -71,6 +71,15 @@ static struct sigaction notification_original[GW_SIGNAL_FAULT_LANES];
 static _Atomic int deferred_faults, damaged;
 static uint64_t notification_initial_mask;
 static long notification_owner;
+#ifdef __GLIBC__
+struct kernel_action {
+  uintptr_t handler, flags, restorer;
+  uint64_t mask;
+};
+
+static struct kernel_action native_setxid, routed_setxid;
+static _Atomic int host_setxid_active;
+#endif
 static void lock_writer(uint64_t *);
 static void unlock_writer(uint64_t);
 static int make_entry(struct disposition *);
@@ -414,6 +423,8 @@ int signal_router_init_with_backend(signal_router_backend backend) {
   for (int number = 32; number < SIGRTMIN; ++number) {
     host_reservations |= UINT64_C(1) << (number - 1);
   }
+#elif defined(__GLIBC__)
+  host_reservations |= UINT64_C(3) << (GW_GNU_HOST_CANCEL - 1);
 #endif
   /* Routing a Host registration is not an exclusive VM reservation. Untagged
    * external packets belong to Host on every public signal, including USR1,
@@ -598,6 +609,99 @@ static int make_entry(struct disposition *record) {
   record->entry = code;
   record->entry_size = page;
   return 0;
+}
+
+#ifdef __GLIBC__
+static int setxid_action(const struct kernel_action *action,
+                         struct kernel_action *previous) {
+  return syscall(SYS_rt_sigaction, GW_GNU_HOST_SETXID, action, previous,
+                 sizeof(uint64_t))
+             ? errno
+             : 0;
+}
+
+static int verify_setxid(void) {
+  if (!atomic_load_explicit(&host_setxid_active, memory_order_acquire)) {
+    return 0;
+  }
+  struct kernel_action actual = {0};
+  int error = setxid_action(NULL, &actual);
+  return error                                                 ? error
+         : memcmp(&actual, &routed_setxid, sizeof actual) != 0 ? EBUSY
+                                                               : 0;
+}
+
+static int install_setxid(void) {
+  struct kernel_action action = {0};
+  int error = setxid_action(NULL, &action);
+  if (error) {
+    return error;
+  }
+
+  /* GNU initializes setxid before application execution and only sends it
+   * to its own live pthread descriptors. The handler must update the same
+   * descriptor and acknowledge the owning libc's broadcast futex.
+   * https://github.com/bminor/glibc/blob/glibc-2.42/nptl/nptl_setxid.c */
+  Dl_info owner, expected;
+  void *libc = dlsym(RTLD_NEXT, "pthread_self");
+  if (action.handler <= 1 ||
+      (action.flags & (SA_SIGINFO | SA_RESTART)) != (SA_SIGINFO | SA_RESTART) ||
+      !libc || !dladdr(libc, &expected) ||
+      !dladdr((void *)action.handler, &owner) ||
+      owner.dli_fbase != expected.dli_fbase) {
+    return ENOTSUP;
+  }
+
+  struct disposition *record =
+      mmap(NULL, sizeof *record, PROT_READ | PROT_WRITE,
+           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (record == MAP_FAILED) {
+    return errno;
+  }
+  record->internal = 1;
+  record->action.sa_sigaction =
+      (void (*)(int, siginfo_t *, void *))action.handler;
+  if (make_entry(record)) {
+    error = errno;
+    munmap(record, sizeof *record);
+    return error;
+  }
+
+  native_setxid = action;
+  routed_setxid = action;
+  routed_setxid.handler = (uintptr_t)record->entry;
+  error = setxid_action(&routed_setxid, NULL);
+  if (error) {
+    munmap(record->entry, record->entry_size);
+    munmap(record, sizeof *record);
+    return error;
+  }
+
+  record->next = allocations;
+  allocations = record;
+  atomic_fetch_add_explicit(&retained, 1, memory_order_relaxed);
+  atomic_store_explicit(&current[GW_GNU_HOST_SETXID], record,
+                        memory_order_release);
+  atomic_store_explicit(&host_setxid_active, 1, memory_order_release);
+  return 0;
+}
+#endif
+
+int signal_router_route_host_setxid(void) {
+#ifdef __GLIBC__
+  if (!signal_router_enabled() || signal_router_error()) {
+    return EINVAL;
+  }
+  uint64_t mask;
+  lock_writer(&mask);
+  int error = atomic_load_explicit(&host_setxid_active, memory_order_acquire)
+                  ? verify_setxid()
+                  : install_setxid();
+  unlock_writer(mask);
+  return error;
+#else
+  return 0; /* Other Host libcs use their own registration integration. */
+#endif
 }
 
 /* Exported by the experiment executable so libjvm's public sigaction calls
@@ -958,9 +1062,9 @@ static void host_delivery_run(void *argument) {
   if (delivery->stack) {
     gw_signal_stack_set(delivery->stack);
   }
-  extern void gw_signal_wait_host_delivery(void) __attribute__((weak));
+  extern void gw_signal_wait_host_delivery(int) __attribute__((weak));
   if (gw_signal_wait_host_delivery) {
-    gw_signal_wait_host_delivery();
+    gw_signal_wait_host_delivery(signal_router_token_restart(delivery->token));
   }
   gw_nonlocal_mask_restore(signal_host_physical_mask
                                ? signal_host_physical_mask(delivery->mask)
@@ -1109,6 +1213,12 @@ int signal_router_verify(void) {
       return error;
     }
   }
+#ifdef __GLIBC__
+  int private_error = verify_setxid();
+  if (private_error) {
+    return private_error;
+  }
+#endif
 
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
@@ -1306,6 +1416,13 @@ int signal_router_restore(void) {
   if (!error) {
     error = apply_restore(steps, count, &changed);
   }
+#ifdef __GLIBC__
+  int private_written = 0;
+  if (!error && atomic_load(&host_setxid_active)) {
+    error = setxid_action(&native_setxid, NULL);
+    private_written = !error;
+  }
+#endif
   if (!error && notifications && signal_stdio_disable) {
     error = signal_stdio_disable();
     if (error == EIO) {
@@ -1315,6 +1432,11 @@ int signal_router_restore(void) {
 
   if (error) {
     int rollback = rollback_restore(steps, changed);
+#ifdef __GLIBC__
+    if (private_written && setxid_action(&routed_setxid, NULL)) {
+      rollback = EIO;
+    }
+#endif
     if (rollback) {
       atomic_store_explicit(&damaged, 1, memory_order_release);
       error = EIO;
@@ -1326,6 +1448,11 @@ int signal_router_restore(void) {
   atomic_store_explicit(&deferred_faults, 0, memory_order_release);
   atomic_store(&enabled, 0);
   atomic_store(&guest_faults, 0);
+#ifdef __GLIBC__
+  atomic_store_explicit(&host_setxid_active, 0, memory_order_release);
+  atomic_store_explicit(&current[GW_GNU_HOST_SETXID], NULL,
+                        memory_order_release);
+#endif
 
   /* Caller has joined recipients, destroyed the VM and frozen descriptor
    * owners. Preserve all non-private mask changes across runtime shutdown. */

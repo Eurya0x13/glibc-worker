@@ -305,6 +305,9 @@ run(
         "-I" + str(core / "src/runtime"),
         source / "consume-control.c",
         core / "src/domain/signal-consuming.c",
+        core / "src/domain/guest-fd-lease.c",
+        core / "src/domain/guest-signalfd.c",
+        core / "src/domain/guest-epoll.c",
         core / "src/domain/signal-user-copy.c",
         core / "src/domain/signal-actions.c",
         core / "src/domain/signal-pending.c",
@@ -612,6 +615,7 @@ try:
     assert data.pop("retired_async_entries") == 36
     assert data.pop("production_ready") is False
     assert data.pop("bionic_private_routes") is bool(args.ndk)
+    assert data.pop("gnu_host_private_lifecycle") is not bool(args.ndk)
     assert data and all(value is True for value in data.values()), data
 except Exception as error:
     if isinstance(error, subprocess.TimeoutExpired):

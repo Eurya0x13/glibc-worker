@@ -50,7 +50,8 @@ unsigned signal_deferred_recipients(void);
 void signal_guest_lifecycle(int);
 /* GNU pthread signals tail-enter this Guest-owned kernel handler, with no
  * Host C/assembly frame left underneath native forced unwind. */
-int signal_guest_kernel_bind(void (*)(int, void *, void *));
+int signal_guest_kernel_bind(void (*)(int, void *, void *),
+                             struct gw_signal_target *(*)(void));
 /* Reserve an internal notifier for native GNU recipients. Install before
  * their loader starts. The number stays leased until router shutdown. */
 int signal_guest_kernel_notify_enable(int, void (*)(int, siginfo_t *, void *));
@@ -79,6 +80,7 @@ uint64_t signal_host_logical_mask(uint64_t);
 uint64_t signal_host_pending(uint64_t);
 uint64_t signal_host_wait_mask(uint64_t);
 void signal_host_prune_notifications(void);
+int signal_host_stack_bounds(uintptr_t *, size_t *);
 /* Host TLS and the current thread's registered recipient are required. */
 int signal_host_defer(struct signal_slot *, const siginfo_t *);
 int signal_host_take_notification(int, siginfo_t *);

@@ -20,5 +20,5 @@ int signal_host_relay_busy(void);
 
 /* Called with all catchable signals blocked, possibly under GNU TLS. Uses
  * only lock-free atomics and raw syscalls, never Host libc/TLS/allocation. */
-int signal_host_relay(int, siginfo_t *, void *, void *, uint64_t);
+int signal_host_relay(int, siginfo_t *, void *, void *, uint64_t, int *);
 #endif

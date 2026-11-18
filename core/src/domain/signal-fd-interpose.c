@@ -5,6 +5,9 @@
 #include "signal-fd-kernel.h"
 #include "signal-fd-adapter.h"
 #include "nonlocal-mask.h"
+#include "guest-fd-host.h"
+#include "guest-fd-state.h"
+#include "guest-signalfd.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -30,6 +33,7 @@ enum backend_index {
   B_DUP2,
   B_DUP3,
   B_FCNTL,
+  B_FCLOSE,
   B_COUNT
 };
 
@@ -56,14 +60,46 @@ static void *resolve(enum backend_index index, const char *name) {
 #endif
 
 int signal_fd_prepare(void) {
-  const char *names[B_COUNT] = {SIGNALFD_NATIVE, "read", "readv", "close",
-                                "dup",           "dup2", "dup3",  "fcntl"};
+  const char *names[B_COUNT] = {SIGNALFD_NATIVE, "read",  "readv",
+                                "close",         "dup",   "dup2",
+                                "dup3",          "fcntl", "fclose"};
   for (int i = 0; i < B_COUNT; ++i) {
     if (!resolve(i, names[i])) {
       return ENOSYS;
     }
   }
   return signal_select_prepare();
+}
+
+int fclose(FILE *file) {
+  typedef int (*function_type)(FILE *);
+  function_type function = (function_type)resolve(B_FCLOSE, "fclose");
+  if (!function) {
+    return EOF;
+  }
+  if (!gw_guest_fds_active()) {
+    return function(file);
+  }
+
+  int saved = errno;
+  uint64_t physical = gw_nonlocal_mask_block();
+  gw_guest_fds_lock();
+  uint64_t guest = gw_guest_signalfd_cookie(fileno(file));
+  gw_guest_fds_unlock();
+  errno = saved;
+  gw_nonlocal_mask_restore(physical);
+  int result = function(file);
+  if (guest) {
+    saved = errno;
+    physical = gw_nonlocal_mask_block();
+    gw_guest_fds_lock();
+    gw_guest_signalfd_reap();
+    gw_signal_targets_wake_waiters(gw_guest_fds_state()->targets);
+    gw_guest_fds_unlock();
+    errno = saved;
+    gw_nonlocal_mask_restore(physical);
+  }
+  return result;
 }
 
 int signal_fd_channel_ready(void) {
@@ -101,6 +137,14 @@ static int translated_descriptor(int descriptor) {
 }
 
 int signalfd(int descriptor, const sigset_t *mask, int flags) {
+  if (descriptor >= 0 && gw_guest_fds_active()) {
+    int handled;
+    int result = gw_guest_signalfd(NULL, descriptor, mask, flags, &handled);
+    if (handled) {
+      return result;
+    }
+  }
+
   typedef int (*function_type)(int, const sigset_t *, int);
   function_type function = (function_type)resolve(B_SIGNALFD, SIGNALFD_NATIVE);
   if (!function) {
@@ -126,6 +170,13 @@ int signalfd64(int descriptor, const sigset64_t *mask, int flags) {
 #endif
 
 int close(int descriptor) {
+  int handled;
+  int logical = gw_host_guest_descriptor(GW_DESCRIPTOR_CLOSE, descriptor, 0, 0,
+                                         GW_IO_CANCELLABLE, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int);
   function_type function = (function_type)resolve(B_CLOSE, "close");
   if (!function) {
@@ -151,12 +202,26 @@ int dup(int descriptor) {
 }
 
 int dup2(int source, int target) {
+  int handled;
+  int logical = gw_host_guest_descriptor(GW_DESCRIPTOR_DUP2, source, target, 0,
+                                         GW_IO_NOCANCEL, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int, int);
   function_type function = (function_type)resolve(B_DUP2, "dup2");
   return function ? function(source, target) : -1;
 }
 
 int dup3(int source, int target, int flags) {
+  int handled;
+  int logical = gw_host_guest_descriptor(GW_DESCRIPTOR_DUP3, source, target,
+                                         flags, GW_IO_NOCANCEL, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int, int, int);
   function_type function = (function_type)resolve(B_DUP3, "dup3");
   return function ? function(source, target, flags) : -1;
@@ -441,6 +506,20 @@ static ssize_t consuming_read(int descriptor, const struct iovec *vectors,
 
 ssize_t gw_signal_fd_read_backend(int descriptor, void *buffer, size_t size,
                                   gw_signal_fd_reader backend, void *cookie) {
+  return gw_signal_fd_read_policy(descriptor, buffer, size, backend, cookie,
+                                  GW_IO_CANCELLABLE);
+}
+
+ssize_t gw_signal_fd_read_policy(int descriptor, void *buffer, size_t size,
+                                 gw_signal_fd_reader backend, void *cookie,
+                                 enum gw_libc_io_policy policy) {
+  int handled;
+  ssize_t result =
+      gw_host_guest_read(descriptor, buffer, size, policy, &handled);
+  if (handled) {
+    return result;
+  }
+
   int translated = translated_descriptor(descriptor);
   if (translated < 0) {
     return -1;
@@ -560,6 +639,12 @@ ssize_t read(int descriptor, void *buffer, size_t size) {
 }
 
 ssize_t readv(int descriptor, const struct iovec *vectors, int count) {
+  int handled;
+  ssize_t logical = gw_host_guest_readv(descriptor, vectors, count, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef ssize_t (*function_type)(int, const struct iovec *, int);
   function_type function = (function_type)resolve(B_READV, "readv");
   if (!function) {

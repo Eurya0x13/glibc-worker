@@ -33,7 +33,7 @@ int gw_signal_selection_interrupt(void *, void *, uint64_t *);
 /* Host TP is restored and catchable signals are blocked. Hidden notifications
  * do not become Host handler interruptions. A later real Host delivery wins. */
 int gw_signal_selection_hidden(void *, uint64_t *);
-void gw_signal_wait_host_delivery(void);
+void gw_signal_wait_host_delivery(int restart);
 /* Begin leaves delivery blocked until the caller's raw atomic mask-wait.
  * End restores the caller mask/valid handler edits and retires the stable row.
  */
@@ -57,6 +57,7 @@ void gw_signal_native_wait_cancel_end(void *);
 void gw_signal_native_wait_rearm(void *);
 __int128 gw_signal_native_wait_host_shift(void *);
 int gw_signal_native_wait_retry(void *, int result, int error);
+int gw_signal_native_read_retry(void *, int result, int error, int cancellable);
 int gw_signal_wait_result(long);
 void *gw_signal_mask_wait_begin(uint64_t);
 void *gw_signal_mask_wait_current_begin(void);

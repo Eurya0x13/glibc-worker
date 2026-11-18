@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "common.h"
+#include "private-threads.h"
 #include "loader_image.h"
 #include "nonlocal-mask.h"
 #include "signal-router.h"
@@ -59,6 +60,30 @@ static void private_host_routes(void) {
    */
   assert(run_on_all(private_callback, &private_callbacks));
   assert(atomic_load(&private_callbacks) == previous + TEST_CARRIERS + 1);
+}
+#endif
+
+#ifdef GW_TEST_GNU_HOST
+static _Atomic int adopted_cancelled;
+
+static void finish_adopted_cancel(void *opaque) {
+  struct async_carrier *carrier = opaque;
+  assert(carrier == &carriers[0] && current == carrier && host_tls == 17);
+  assert((uintptr_t)__builtin_thread_pointer() == carrier->exchange.host.tp);
+  assert(carrier->closed && atomic_load(&carrier->phase) == PHASE_DONE);
+  atomic_store_explicit(&adopted_cancelled, 1, memory_order_release);
+}
+
+static void check_credentials(void) {
+  gid_t real, effective, saved;
+  assert(!getresgid(&real, &effective, &saved));
+  /* The genuine GNU Host NPTL broadcast must get all its acknowledgements,
+   * even while both registered Host recipients execute with GNU Guest TLS. */
+  assert(!setresgid(real, effective, saved));
+  gid_t current_real, current_effective, current_saved;
+  assert(!getresgid(&current_real, &current_effective, &current_saved));
+  assert(current_real == real && current_effective == effective &&
+         current_saved == saved);
 }
 #endif
 
@@ -230,6 +255,12 @@ static void notification(int number, siginfo_t *information, void *context) {
 static void *carrier_main(void *argument) {
   struct async_carrier *carrier = argument;
   current = carrier;
+#ifdef GW_TEST_GNU_HOST
+  int cancel_state = PTHREAD_CANCEL_ENABLE;
+  if (!carrier->index) {
+    assert(!pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state));
+  }
+#endif
   struct exchange *exchange = &carrier->exchange;
   exchange->host_tid = syscall(SYS_gettid);
   exchange->swap = domain_swap;
@@ -361,6 +392,7 @@ static void *carrier_main(void *argument) {
   host_check();
   host_mask = gw_nonlocal_mask_block();
   exchange->host_execution_mask = host_mask;
+  exchange->guest_execution_mask = signal_carrier_mask(recipient, host_mask, 1);
   exchange->host_mask_valid = 1;
   gw_signal_stack_get(&exchange->host_altstack);
   atomic_store_explicit(&carrier->phase, PHASE_GUEST, memory_order_release);
@@ -388,6 +420,15 @@ static void *carrier_main(void *argument) {
   assert(!signal_prepare_release(recipient, 0));
   signal_release(recipient);
   assert(!pthread_sigmask(SIG_SETMASK, &previous, NULL));
+#ifdef GW_TEST_GNU_HOST
+  if (!carrier->index) {
+    pthread_cleanup_push(finish_adopted_cancel, carrier);
+    assert(!pthread_setcancelstate(cancel_state, NULL));
+    pthread_testcancel();
+    pthread_cleanup_pop(0);
+    assert(!"Host cancellation remained pending after carrier retirement");
+  }
+#endif
   return carrier;
 }
 
@@ -530,7 +571,10 @@ static void send_wait_packets(void) {
   }
 }
 
-static void send_guest_packets_and_close(void) {
+static void send_guest_packets_and_close(pthread_t threads[TEST_CARRIERS]) {
+#ifndef GW_TEST_GNU_HOST
+  (void)threads;
+#endif
   for (int i = 0; i < TEST_CARRIERS; ++i) {
     atomic_store_explicit(&carriers[i].self_allowed, 1, memory_order_release);
     wake(&carriers[i].self_allowed);
@@ -539,6 +583,18 @@ static void send_guest_packets_and_close(void) {
 #ifdef __ANDROID__
     if (!i) {
       private_host_routes();
+    }
+#endif
+#ifdef GW_TEST_GNU_HOST
+    if (!i) {
+      for (int j = 0; j < TEST_CARRIERS; ++j) {
+        wait_value(&carriers[j].phase, PHASE_GUEST);
+      }
+      check_credentials();
+      if (!carriers[i].index) {
+        assert(!pthread_cancel(threads[i]));
+        test_private_threads();
+      }
     }
 #endif
     assert(!owner_command(&carriers[i], OWNER_SEND,
@@ -568,7 +624,13 @@ static void join_carriers(pthread_t threads[TEST_CARRIERS],
                           struct totals *sum) {
   for (int i = 0; i < TEST_CARRIERS; ++i) {
     void *result;
-    assert(!pthread_join(threads[i], &result) && result == &carriers[i]);
+    void *expected = &carriers[i];
+#ifdef GW_TEST_GNU_HOST
+    if (!carriers[i].index) {
+      expected = PTHREAD_CANCELED;
+    }
+#endif
+    assert(!pthread_join(threads[i], &result) && result == expected);
     assert(carriers[i].guest_handlers == 1 && carriers[i].host_handlers >= 2);
     assert(carriers[i].self_handlers == 6);
     assert(carriers[i].nested_host_count == TEST_PACKETS + 1);
@@ -598,6 +660,13 @@ int main(int argc, char **argv) {
   control.notification = atoi(argv[4]);
   test_layout(control.layout);
   prepare_routes();
+#ifdef GW_TEST_GNU_HOST
+  control.gnu_host = 1;
+  test_private_threads();
+  struct kernel_action native[9];
+  snapshot_private(native);
+#endif
+  assert(!signal_router_route_host_setxid());
   assert(!signal_router_lease_guest_nptl());
   struct kernel_action before[9], after[9];
   snapshot_private(before);
@@ -621,12 +690,18 @@ int main(int argc, char **argv) {
     send_busy_packets();
     send_wait_packets();
     send_recovery_packets();
-    send_guest_packets_and_close();
+    send_guest_packets_and_close(threads);
     join_carriers(threads, &sum);
   }
   assert(!signal_router_verify());
   assert(!signal_host_retirement_busy());
   assert(!signal_router_restore());
+#ifdef GW_TEST_GNU_HOST
+  snapshot_private(after);
+  assert(!memcmp(native, after, 2 * sizeof *native) && adopted_cancelled);
+  test_private_threads();
+  check_credentials();
+#endif
   printf(
       "{\"result\":\"PASS\",\"packets\":%d,\"self_packets\":%d,"
       "\"host_entries\":%d,"
@@ -651,8 +726,10 @@ int main(int argc, char **argv) {
       "\"nptl_signal_isolation\":true,\"guest_cancel_timer\":true,"
 #ifdef __ANDROID__
       "\"bionic_private_routes\":true,"
+      "\"gnu_host_private_lifecycle\":false,"
 #else
       "\"bionic_private_routes\":false,"
+      "\"gnu_host_private_lifecycle\":true,"
 #endif
       "\"recipient_close\":true,\"production_ready\":false}\n",
       sum.packets, sum.self_packets, sum.host_entries, sum.guest_entries,

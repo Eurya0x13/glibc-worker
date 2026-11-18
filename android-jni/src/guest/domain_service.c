@@ -351,6 +351,7 @@ static int setup_signals(void) {
       return error;
     }
     session->signal_cookie = gw_guest_signal_cookie();
+    session->guest_fds = gw_guest_worker_fds();
     session->guest_virtual_signals = gw_guest_virtual_mask();
     if (session->domain) {
       gw_guest_signal_entries(&session->signal_entries);
@@ -364,7 +365,7 @@ static int setup_signals(void) {
 
   if (install_sigaction_hook(gw_guest_sigaction) ||
       !session->bind_guest_kernel ||
-      session->bind_guest_kernel(guest_kernel_entry)) {
+      session->bind_guest_kernel(guest_kernel_entry, gw_guest_worker_target)) {
     return EINVAL;
   }
   if (gw_domain_jump_init() || install_jump_hook(gw_domain_jump_event) ||

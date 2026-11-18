@@ -3,6 +3,8 @@
 #include "signals.h"
 #include "signal-select.h"
 #include "signal-libc-mask.h"
+#include "guest-fd-host.h"
+#include "guest-fd-state.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <poll.h>
@@ -224,6 +226,27 @@ static void *resolve(_Atomic(void *) *cache, const char *name) {
 #define NATIVE(name) #name
 #endif
 
+static int guest_fd_wait(struct pollfd *fds, nfds_t count,
+                         struct timespec *timeout, const void *kernel_mask) {
+  sigset_t mask = {0};
+  memcpy(&mask, kernel_mask, sizeof(uint64_t));
+  if (!signal_router_enabled()) {
+    typedef int (*function_type)(struct pollfd *, nfds_t,
+                                 const struct timespec *, const sigset_t *);
+    function_type function = (function_type)resolve(&caches[1], NATIVE(ppoll));
+    return function ? function(fds, count, timeout, &mask) : -1;
+  }
+
+  void *record = begin_wait(&mask, 0);
+  if (!record) {
+    return -1;
+  }
+  uint64_t bits = gw_signal_mask_wait_execution(record);
+  long arguments[] = {(long)fds,   count,       (long)timeout,
+                      (long)&bits, sizeof bits, 0};
+  return transparent_wait(record, SYS_ppoll, arguments, timeout, 2, 0, NULL);
+}
+
 int signal_suspend_prepare(void) {
   const char *names[] = {NATIVE(sigsuspend),
                          NATIVE(ppoll),
@@ -268,6 +291,13 @@ int sigsuspend(const sigset_t *mask) {
 
 int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
           const sigset_t *mask) {
+  int handled;
+  int logical =
+      gw_host_guest_poll(fds, count, timeout, mask, guest_fd_wait, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(struct pollfd *, nfds_t, const struct timespec *,
                                const sigset_t *);
   function_type function = (function_type)resolve(&caches[1], NATIVE(ppoll));
@@ -293,6 +323,18 @@ int ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
 
 int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
             const struct timespec *timeout, const sigset_t *mask) {
+  struct timespec logical_interval;
+  if (timeout) {
+    logical_interval = *timeout;
+  }
+  int handled;
+  int logical = gw_host_guest_select(count, read, write, except,
+                                     timeout ? &logical_interval : NULL, mask,
+                                     guest_fd_wait, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int, fd_set *, fd_set *, fd_set *,
                                const struct timespec *, const sigset_t *);
   function_type function = (function_type)resolve(&caches[2], NATIVE(pselect));
@@ -324,6 +366,16 @@ int pselect(int count, fd_set *read, fd_set *write, fd_set *except,
 
 int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
                 const sigset_t *mask) {
+  struct timespec logical_interval = {timeout / 1000,
+                                      (timeout % 1000) * 1000000L};
+  int handled;
+  int logical = gw_host_guest_epoll_wait(fd, events, count,
+                                         timeout < 0 ? NULL : &logical_interval,
+                                         mask, guest_fd_wait, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int, struct epoll_event *, int, int,
                                const sigset_t *);
   function_type function =
@@ -350,6 +402,13 @@ int epoll_pwait(int fd, struct epoll_event *events, int count, int timeout,
 
 int epoll_pwait2(int fd, struct epoll_event *events, int count,
                  const struct timespec *timeout, const sigset_t *mask) {
+  int handled;
+  int logical = gw_host_guest_epoll_wait(fd, events, count, timeout, mask,
+                                         guest_fd_wait, &handled);
+  if (handled) {
+    return logical;
+  }
+
   typedef int (*function_type)(int, struct epoll_event *, int,
                                const struct timespec *, const sigset_t *);
   function_type function = (function_type)resolve(&caches[4],
@@ -391,7 +450,7 @@ int poll(struct pollfd *fds, nfds_t count, int timeout) {
   if (!function) {
     return -1;
   }
-  if (mask_wait_enabled()) {
+  if (mask_wait_enabled() || gw_guest_readiness_active()) {
     struct timespec duration = {timeout / 1000, (timeout % 1000) * 1000000L};
     return ppoll(fds, count, timeout < 0 ? NULL : &duration, NULL);
   }
@@ -444,7 +503,22 @@ int select(int count, fd_set *read, fd_set *write, fd_set *except,
     return -1;
   }
   struct timespec duration = {0};
-  if (!mask_wait_enabled() || !select_duration(timeout, &duration)) {
+  int valid_timeout = select_duration(timeout, &duration);
+  if (valid_timeout) {
+    int handled;
+    struct timespec remaining = duration;
+    int logical = gw_host_guest_select(count, read, write, except,
+                                       timeout ? &remaining : NULL, NULL,
+                                       guest_fd_wait, &handled);
+    if (handled) {
+      if (timeout) {
+        timeout->tv_sec = remaining.tv_sec;
+        timeout->tv_usec = remaining.tv_nsec / 1000;
+      }
+      return logical;
+    }
+  }
+  if (!mask_wait_enabled() || !valid_timeout) {
     signal_host_prune_notifications();
     return function(count, read, write, except, timeout);
   }
@@ -483,11 +557,19 @@ int epoll_wait(int fd, struct epoll_event *events, int count, int timeout) {
   if (!function) {
     return -1;
   }
-  if (mask_wait_enabled()) {
+  if (mask_wait_enabled() || gw_guest_fds_state()->targets) {
     return epoll_pwait(fd, events, count, timeout, NULL);
   }
   signal_host_prune_notifications();
   return function(fd, events, count, timeout);
+}
+
+int epoll_ctl(int fd, int operation, int watched, struct epoll_event *event) {
+  int handled;
+  int logical =
+      gw_host_guest_epoll_ctl(fd, operation, watched, event, &handled);
+  return handled ? logical
+                 : syscall(SYS_epoll_ctl, fd, operation, watched, event);
 }
 
 #ifdef __ANDROID__

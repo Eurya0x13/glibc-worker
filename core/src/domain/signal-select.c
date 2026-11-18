@@ -680,7 +680,7 @@ int gw_signal_selection_hidden(void *context, uint64_t *execution) {
   return 1;
 }
 
-void gw_signal_wait_host_delivery(void) {
+void gw_signal_wait_host_delivery(int restart) {
   struct sleep_record *record =
       atomic_load_explicit(&waiting, memory_order_acquire);
   for (; record; record = record->previous) {
@@ -691,6 +691,7 @@ void gw_signal_wait_host_delivery(void) {
           !clock_gettime(record->native_clock, &record->native_host_begin);
     }
     if (!record->retired && record->hidden) {
+      record->restart = restart && (!record->interrupted || record->restart);
       note_visible(record);
     }
   }
@@ -716,36 +717,44 @@ void gw_signal_wait_host_return(void) {
   }
 }
 
-static int retry_wait(void *argument, int result, int error, int native) {
+static int retry_wait(void *argument, int result, int error, int native,
+                      int restart, int cancellable) {
   struct sleep_record *record = argument;
-  if (result >= 0 || error != EINTR || !record->hidden) {
+  if (result >= 0 || error != EINTR ||
+      (!record->hidden && !(restart && record->restart))) {
     return 0;
   }
 
   uint64_t returned = gw_nonlocal_mask_block();
-  if (record->interrupted) {
+  if (record->interrupted && !(restart && record->restart)) {
     gw_nonlocal_mask_restore(returned);
     return 0;
   }
   record->hidden = 0;
+  record->interrupted = record->restart = 0;
   record->native_mask_valid = 0;
   record->native_hidden_valid = record->native_visible_valid = 0;
   record->syscall_stack = 0;
   atomic_store_explicit(&waiting, record, memory_order_release);
-  if (native) {
+  if (native && cancellable) {
     test_cancel(NULL); /* The caller owns a compiler unwind-only cleanup. */
-  } else {
+  } else if (!native) {
     gw_signal_mask_wait_cancel_check(record);
   }
   return 1;
 }
 
 int gw_signal_mask_wait_retry(void *argument, int result, int error) {
-  return retry_wait(argument, result, error, 0);
+  return retry_wait(argument, result, error, 0, 0, 1);
 }
 
 int gw_signal_native_wait_retry(void *argument, int result, int error) {
-  return retry_wait(argument, result, error, 1);
+  return retry_wait(argument, result, error, 1, 0, 1);
+}
+
+int gw_signal_native_read_retry(void *argument, int result, int error,
+                                int cancellable) {
+  return retry_wait(argument, result, error, 1, 1, cancellable);
 }
 
 int gw_signal_selection_sleep(int descriptor, uint64_t wanted,

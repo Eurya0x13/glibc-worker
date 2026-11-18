@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include "nonlocal_probe.h"
 #include "adopted-signals.h"
+#include "guest-fd-probe.h"
 #include "internal/domain_unwind.h"
 #ifdef __ANDROID__
 #include "vm-start.h"
@@ -1581,6 +1582,10 @@ static void *application_run(void *argument) {
   if (app->adopted_signals) {
     adopted_signals(env, cls);
   }
+  if (app->adopted_signals || app->worker_signals) {
+    extern void sdk_host_guest_fds(JNIEnv *, jclass, int, int);
+    sdk_host_guest_fds(env, cls, worker, app->adopted_signals);
+  }
   jmethodID probe = (*env)->GetStaticMethodID(env, cls, "probe", "(I[B)I");
   jmethodID tid = (*env)->GetStaticMethodID(env, cls, "tid", "()J");
   assert(probe && tid);
@@ -1637,6 +1642,12 @@ static void retry_preclaim_failure(JNIEnv *env,
 int main(int argc, char **argv) {
   assert(argc == 9);
   int test_adopted_signals = !strcmp(argv[8], "adopted-signals");
+  int test_guest_signalfd =
+      test_adopted_signals || !strcmp(argv[8], "worker-signals");
+  if (test_guest_signalfd) {
+    extern void sdk_job_control_child(void);
+    sdk_job_control_child();
+  }
 #ifdef GW_TEST_NATIVE_UNWIND
   assert(!gw_nonlocal_init());
 #endif
@@ -1730,7 +1741,18 @@ int main(int argc, char **argv) {
   }
   retry_preclaim_failure(env, &config, borrowed_relay);
 
+  sigset_t original_guest_signals;
+  if (test_guest_signalfd) {
+    sigset_t blocked;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SDK_FD_PACKET);
+    sigaddset(&blocked, SDK_FD_OTHER);
+    assert(!pthread_sigmask(SIG_BLOCK, &blocked, &original_guest_signals));
+  }
   int result = gw_host_runtime_start(env, &config);
+  if (test_guest_signalfd) {
+    assert(!pthread_sigmask(SIG_SETMASK, &original_guest_signals, NULL));
+  }
   if (getenv("GW_EXPECT_RUNTIME_REJECTION")) {
     assert(result == ELIBBAD || result == EPROTO);
     assert(full_host_state() == GW_HOST_QUARANTINED);

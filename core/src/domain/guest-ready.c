@@ -2,6 +2,7 @@
 #include "guest-ready.h"
 #include "guest-epoll.h"
 #include "guest-fd-lease.h"
+#include "guest-fd-state.h"
 #include "guest-signalfd.h"
 #include "nonlocal-mask.h"
 #include "signal-user-copy.h"
@@ -48,13 +49,24 @@ static int finish(int status, int saved) {
   return status < 0 ? -1 : status;
 }
 
-int gw_guest_descriptor(struct gw_signal_target *target,
+static void test_cancel(void) {
+#ifndef __ANDROID__
+  pthread_testcancel();
+#endif
+}
+
+int gw_guest_descriptor(struct gw_signal_targets *targets,
                         enum gw_libc_descriptor_op op, int fd, int new_fd,
                         int flags, enum gw_libc_io_policy policy,
                         int *handled) {
+  *handled = 0;
+  if (!gw_guest_readiness_active()) {
+    return 0;
+  }
+
   int saved = errno;
   if (policy == GW_IO_CANCELLABLE) {
-    pthread_testcancel();
+    test_cancel();
   }
 
   int changed = op == GW_DESCRIPTOR_CLOSE ? fd : new_fd;
@@ -77,7 +89,7 @@ int gw_guest_descriptor(struct gw_signal_target *target,
     }
     gw_guest_signalfd_reap();
     gw_guest_epoll_reap();
-    gw_signal_targets_wake_waiters(target->registry);
+    gw_signal_targets_wake_waiters(targets);
   }
   gw_guest_fds_unlock();
   gw_nonlocal_mask_restore(physical);
@@ -132,12 +144,14 @@ static int remaining(struct wait_clock *time, struct timespec *left) {
 }
 
 static int begin(struct descriptor_wait *wait, const struct timespec *timeout,
-                 const sigset_t *mask) {
+                 const sigset_t *mask, enum gw_libc_io_policy policy) {
   int status = start_clock(&wait->clock, timeout);
   if (status) {
     return status;
   }
-  pthread_testcancel();
+  if (policy == GW_IO_CANCELLABLE) {
+    test_cancel();
+  }
   wait->physical = gw_nonlocal_mask_block();
   wait->active = 1;
   wait->kernel = wait->physical;
@@ -151,7 +165,6 @@ static void end(struct descriptor_wait *wait) {
   if (wait->active) {
     int saved = errno;
     wait->active = 0;
-    gw_signal_target_poll_disarm(wait->target);
     gw_guest_fd_lease_drop(&wait->lease);
     errno = saved;
     gw_nonlocal_mask_restore(wait->physical);
@@ -170,8 +183,12 @@ static void expose_ready_mask(struct descriptor_wait *wait,
 }
 
 static int sample(struct descriptor_wait *wait, int arm) {
-  return -gw_signal_target_poll_arm(wait->target, &wait->sample,
-                                    arm ? &wait->wake_fd : NULL);
+  int result = gw_signal_target_poll_arm(wait->target, &wait->sample,
+                                         arm ? &wait->wake_fd : NULL);
+  if (!result && arm) {
+    wait->lease->subscribed = 1;
+  }
+  return -result;
 }
 
 static int by_descriptor(const void *left, const void *right) {
@@ -225,7 +242,9 @@ static int sleep_until_change(struct descriptor_wait *wait, struct pollfd *fds,
   }
   wait->interrupted =
       after.deliveries != wait->sample.deliveries ||
-      (error && after.notifications == wait->sample.notifications);
+      after.host_deliveries != wait->sample.host_deliveries ||
+      (error && after.notifications == wait->sample.notifications &&
+       after.host_wakes == wait->sample.host_wakes);
   return 0;
 }
 
@@ -252,7 +271,8 @@ static int poll_plan(struct poll_table *table, struct descriptor_wait *wait) {
       uint64_t mask;
       gw_guest_signalfd_mask(cookie, &mask);
       user->revents = wait->sample.pending & mask ? user->events & POLLIN : 0;
-      kernel->fd = -1;
+      kernel->events &= POLLIN;
+      kernel->fd = kernel->events ? gw_guest_signalfd_native(cookie) : -1;
       managed = 1;
     } else if ((user->events & (POLLIN | POLLRDNORM)) &&
                gw_guest_epoll_valid(user->fd) == 1) {
@@ -555,7 +575,9 @@ static int wait_table(struct descriptor_wait *wait, struct pollfd *user,
 
 int gw_guest_poll(struct gw_signal_target *target, struct pollfd *fds,
                   nfds_t count, const struct timespec *timeout,
-                  const sigset_t *mask, gw_libc_poll_wait poll, int *handled) {
+                  const sigset_t *mask, gw_libc_poll_wait poll,
+                  enum gw_libc_io_policy policy, struct timespec *remainder,
+                  int *handled) {
   *handled = 0;
   if (!count || !fds) {
     return 0;
@@ -570,9 +592,12 @@ int gw_guest_poll(struct gw_signal_target *target, struct pollfd *fds,
 
   struct descriptor_wait wait
       __attribute__((cleanup(end))) = {.target = target, .poll = poll};
-  int status = begin(&wait, timeout, mask);
+  int status = begin(&wait, timeout, mask, policy);
   if (!status) {
     status = wait_table(&wait, fds, count, (struct fd_sets){0}, handled);
+    if (remainder && *handled && timeout) {
+      remaining(&wait.clock, remainder);
+    }
     if (*handled) {
       expose_ready_mask(&wait, mask, status);
     }
@@ -585,7 +610,7 @@ int gw_guest_poll(struct gw_signal_target *target, struct pollfd *fds,
 int gw_guest_select(struct gw_signal_target *target, int nfds, fd_set *read,
                     fd_set *write, fd_set *except, struct timespec *timeout,
                     const sigset_t *mask, gw_libc_poll_wait poll,
-                    int *handled) {
+                    enum gw_libc_io_policy policy, int *handled) {
   *handled = 0;
   if (nfds <= 0 || (!read && !write && !except)) {
     return 0;
@@ -594,7 +619,7 @@ int gw_guest_select(struct gw_signal_target *target, int nfds, fd_set *read,
   int saved = errno;
   struct descriptor_wait wait
       __attribute__((cleanup(end))) = {.target = target, .poll = poll};
-  int status = begin(&wait, timeout, mask);
+  int status = begin(&wait, timeout, mask, policy);
   if (!status) {
     size_t number = select_descriptors(nfds);
     struct fd_sets sets = {.user = {read, write, except},
@@ -661,7 +686,7 @@ static int wait_epoll(struct descriptor_wait *wait, int epfd,
 int gw_guest_epoll_wait(struct gw_signal_target *target, int fd,
                         struct epoll_event *events, int maximum,
                         const struct timespec *timeout, const sigset_t *mask,
-                        gw_libc_poll_wait poll) {
+                        gw_libc_poll_wait poll, enum gw_libc_io_policy policy) {
   if (maximum <= 0 || (unsigned)maximum > INT_MAX / sizeof *events) {
     return finish(-EINVAL, 0);
   }
@@ -673,7 +698,7 @@ int gw_guest_epoll_wait(struct gw_signal_target *target, int fd,
   int saved = errno;
   struct descriptor_wait wait
       __attribute__((cleanup(end))) = {.target = target, .poll = poll};
-  int status = begin(&wait, timeout, mask);
+  int status = begin(&wait, timeout, mask, policy);
   if (!status) {
     int epfd =
         gw_guest_fd_lease_open(&wait.lease, target, fd, (uintptr_t)&wait);

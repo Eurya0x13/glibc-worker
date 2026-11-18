@@ -291,8 +291,28 @@ def patch_readiness(linux, replace):
     )
 
 
+def patch_raw_libc_entry(linux, replace):
+    for arch, branch in (("x86_64", "jmp"), ("aarch64", "b")):
+        path = linux / arch / "syscall.S"
+        replace(
+            path,
+            "ENTRY (syscall)",
+            "#if IS_IN (libc)\n"
+            "ENTRY (syscall)\n"
+            f"\t{branch}\t__gw_domain_descriptor_syscall\n"
+            "END (syscall)\n"
+            "# define GW_KERNEL_SYSCALL __gw_domain_kernel_syscall\n"
+            "#else\n"
+            "# define GW_KERNEL_SYSCALL syscall\n"
+            "#endif\n"
+            "ENTRY (GW_KERNEL_SYSCALL)",
+        )
+        replace(path, "PSEUDO_END (syscall)", "PSEUDO_END (GW_KERNEL_SYSCALL)")
+
+
 def patch_signalfd(source: Path, replace):
     linux = source / "sysdeps/unix/sysv/linux"
     patch_descriptors(linux, replace)
     patch_private_io(linux, replace)
     patch_readiness(linux, replace)
+    patch_raw_libc_entry(linux, replace)

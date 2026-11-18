@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "guest-epoll.h"
+#include "guest-fd-state.h"
 #include "guest-signalfd.h"
 #include "nonlocal-mask.h"
 #include "signal-user-copy.h"
@@ -25,12 +26,6 @@ struct epoll_file {
   int normal_first;
 };
 
-static struct epoll_file *files;
-static int monitor = -1;
-static struct stat identity;
-static uint64_t revision;
-static off_t last_label = INT64_C(0x4757000000000000);
-
 static int label(int fd, int command, off_t offset) {
   struct flock lock = {
       .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = offset, .l_len = 1};
@@ -47,10 +42,12 @@ static int label(int fd, int command, off_t offset) {
  * https://github.com/torvalds/linux/blob/v5.4/fs/locks.c
  */
 static int present(const struct epoll_file *file) {
-  return label(monitor, F_OFD_GETLK, file->label) == F_WRLCK;
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
+  return label(state->monitor, F_OFD_GETLK, file->label) == F_WRLCK;
 }
 
 int gw_guest_epoll_valid(int fd) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   struct stat observed;
   if (fstat(fd, &observed)) {
     return -errno;
@@ -59,22 +56,25 @@ int gw_guest_epoll_valid(int fd) {
     return -EINVAL;
   }
 
-  if (monitor < 0) {
-    monitor = syscall(SYS_epoll_create1, EPOLL_CLOEXEC);
-    if (monitor < 0) {
+  if (state->monitor < 0) {
+    state->monitor = syscall(SYS_epoll_create1, EPOLL_CLOEXEC);
+    if (state->monitor < 0) {
       return -errno;
     }
-    if (fstat(monitor, &identity)) {
+    struct stat identity;
+    if (fstat(state->monitor, &identity)) {
       int error = errno;
-      syscall(SYS_close, monitor);
-      monitor = -1;
+      syscall(SYS_close, state->monitor);
+      state->monitor = -1;
       return -error;
     }
+    state->monitor_device = identity.st_dev;
+    state->monitor_inode = identity.st_ino;
   }
 
   /* An unused private epoll, watched by no application, distinguishes a real
    * eventpoll from other anon_inode files sharing its st_dev/st_ino. */
-  if (syscall(SYS_epoll_ctl, fd, EPOLL_CTL_DEL, monitor, NULL) < 0 &&
+  if (syscall(SYS_epoll_ctl, fd, EPOLL_CTL_DEL, state->monitor, NULL) < 0 &&
       errno == ENOENT) {
     return 1;
   }
@@ -82,12 +82,14 @@ int gw_guest_epoll_valid(int fd) {
 }
 
 static struct epoll_file *find(int fd) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   struct stat observed;
-  if (!files || fstat(fd, &observed) || observed.st_dev != identity.st_dev ||
-      observed.st_ino != identity.st_ino) {
+  if (!state->epolls || fstat(fd, &observed) ||
+      observed.st_dev != state->monitor_device ||
+      observed.st_ino != state->monitor_inode) {
     return NULL;
   }
-  for (struct epoll_file *file = files; file; file = file->next) {
+  for (struct epoll_file *file = state->epolls; file; file = file->next) {
     if (label(fd, F_OFD_GETLK, file->label) == F_UNLCK && present(file)) {
       return file;
     }
@@ -100,6 +102,7 @@ int gw_guest_epoll_known(int fd) {
 }
 
 static int attach(int fd, struct epoll_file **output) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   struct epoll_file *file = find(fd);
   if (file) {
     *output = file;
@@ -114,12 +117,12 @@ static int attach(int fd, struct epoll_file **output) {
 
   int status;
   do {
-    if (last_label == INT64_MAX - 1) {
+    if (state->epoll_label == INT64_MAX - 1) {
       status = -EOVERFLOW;
       break;
     }
-    file->label = ++last_label;
-    status = label(monitor, F_OFD_GETLK, file->label);
+    file->label = ++state->epoll_label;
+    status = label(state->monitor, F_OFD_GETLK, file->label);
   } while (status == F_WRLCK || status == F_RDLCK);
 
   if (status >= 0) {
@@ -130,8 +133,9 @@ static int attach(int fd, struct epoll_file **output) {
     return status;
   }
 
-  file->next = files;
-  files = file;
+  file->next = state->epolls;
+  state->epolls = file;
+  atomic_fetch_add_explicit(&state->epoll_count, 1, memory_order_release);
   *output = file;
   return 0;
 }
@@ -166,8 +170,9 @@ static void destroy(struct epoll_file *file) {
 }
 
 int gw_guest_epoll_reap(void) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   int removed = 0;
-  for (struct epoll_file **link = &files; *link;) {
+  for (struct epoll_file **link = &state->epolls; *link;) {
     struct epoll_file *file = *link;
     if (present(file)) {
       link = &file->next;
@@ -175,8 +180,10 @@ int gw_guest_epoll_reap(void) {
     }
 
     *link = file->next;
+    atomic_fetch_sub_explicit(&state->epoll_count, 1, memory_order_release);
     removed = 1;
-    for (struct epoll_file *parent = files; parent; parent = parent->next) {
+    for (struct epoll_file *parent = state->epolls; parent;
+         parent = parent->next) {
       for (size_t i = parent->count; i; --i) {
         if (parent->watches[i - 1].child == file) {
           erase(parent, i - 1);
@@ -227,30 +234,37 @@ static int native_ctl(int epfd, int op, int fd, const struct epoll_event *ev) {
   return syscall(SYS_epoll_ctl, epfd, op, fd, ev) < 0 ? -errno : 0;
 }
 
-static int update_probe(int epfd, int op, struct epoll_source *watch,
-                        const struct epoll_event *ev) {
-  /* The real parent validates and owns the child link, including Linux's
-   * loop and nesting limits. The probe keeps native child readiness distinct
-   * until it can be combined with the child's logical readiness exactly once.
-   * Neither epoll registration retains an open reference to the child.
+static int update_probe(int epfd, int op, struct epoll_source *watch) {
+  /* Keep one native watch for the user-visible open file description and
+   * one private watch for native readiness. The poll adapter merges logical
+   * and native readiness into a single report, including edge and oneshot.
    * https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c
    */
   struct epoll_event quiet = {0};
+  if (watch->cookie) {
+    quiet.events = watch->event.events &
+                   (EPOLLET | EPOLLONESHOT | EPOLLEXCLUSIVE | EPOLLWAKEUP);
+  }
   int result = native_ctl(epfd, op, watch->number, &quiet);
-  if (result || op != EPOLL_CTL_ADD) {
+  if (result || op == EPOLL_CTL_DEL) {
     return result;
   }
 
-  watch->probe = syscall(SYS_epoll_create1, EPOLL_CLOEXEC);
+  int backing =
+      watch->cookie ? gw_guest_signalfd_native(watch->cookie) : watch->number;
+  int interested =
+      watch->event.events & (watch->child ? EPOLLIN | EPOLLRDNORM : EPOLLIN);
+  struct epoll_event event = {
+      .events = interested ? EPOLLIN | (watch->event.events & EPOLLET) : 0};
+  if (op == EPOLL_CTL_ADD) {
+    watch->probe = syscall(SYS_epoll_create1, EPOLL_CLOEXEC);
+  }
   if (watch->probe < 0) {
     result = -errno;
   } else {
-    struct epoll_event interested = {.events =
-                                         EPOLLIN | (ev->events & EPOLLET)};
-    result =
-        native_ctl(watch->probe, EPOLL_CTL_ADD, watch->number, &interested);
+    result = native_ctl(watch->probe, op, backing, &event);
   }
-  if (result) {
+  if (result && op == EPOLL_CTL_ADD) {
     if (watch->probe >= 0) {
       syscall(SYS_close, watch->probe);
       watch->probe = -1;
@@ -263,6 +277,7 @@ static int update_probe(int epfd, int op, struct epoll_source *watch,
 static int change_watch(int epfd, struct epoll_file *file, int op,
                         struct epoll_source source,
                         const struct epoll_event *user) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   prune_signals(file);
   size_t index = 0;
   while (index < file->count && (file->watches[index].number != source.number ||
@@ -303,22 +318,8 @@ static int change_watch(int epfd, struct epoll_file *file, int op,
   } else {
     source.probe = file->watches[index].probe;
   }
-  if (!status && source.cookie) {
-    /* A quiet kernel watch owns the actual (file, fd) key and quota. Only
-     * the calling Guest recipient can make the corresponding watch ready. */
-    struct epoll_event quiet = {
-        .events = source.event.events &
-                  (EPOLLET | EPOLLONESHOT | EPOLLEXCLUSIVE | EPOLLWAKEUP)};
-    status = native_ctl(epfd, op, source.number, &quiet);
-  }
-  if (!status && source.child) {
-    status = update_probe(epfd, op, &source, &source.event);
-    if (!status && op == EPOLL_CTL_MOD) {
-      struct epoll_event interested = {
-          .events = EPOLLIN | (source.event.events & EPOLLET)};
-      status =
-          native_ctl(source.probe, EPOLL_CTL_MOD, source.number, &interested);
-    }
+  if (!status) {
+    status = update_probe(epfd, op, &source);
   }
   if (status) {
     return status;
@@ -326,7 +327,7 @@ static int change_watch(int epfd, struct epoll_file *file, int op,
   if (op == EPOLL_CTL_DEL) {
     erase(file, index);
   } else {
-    source.revision = ++revision;
+    source.revision = ++state->epoll_revision;
     file->watches[index] = source;
     file->count += !exists;
   }
@@ -364,15 +365,20 @@ static int control(int epfd, int op, int fd, const struct epoll_event *event) {
   return change_watch(epfd, file, op, source, event);
 }
 
-int gw_guest_epoll_ctl(struct gw_signal_target *target, int epfd, int op,
+int gw_guest_epoll_ctl(struct gw_signal_targets *targets, int epfd, int op,
                        int fd, const struct epoll_event *event) {
   uint64_t physical = gw_nonlocal_mask_block();
   gw_guest_fds_lock();
+  if (gw_guest_fds_state()->closed) {
+    gw_guest_fds_unlock();
+    gw_nonlocal_mask_restore(physical);
+    return native_ctl(epfd, op, fd, event);
+  }
   gw_guest_signalfd_reap();
   gw_guest_epoll_reap();
   int result = control(epfd, op, fd, event);
   if (!result) {
-    gw_signal_targets_wake_waiters(target->registry);
+    gw_signal_targets_wake_waiters(targets);
   }
   gw_guest_fds_unlock();
   gw_nonlocal_mask_restore(physical);
@@ -404,13 +410,13 @@ static int watch_ready(struct epoll_source *watch,
   int logical;
   if (watch->child) {
     *child_revision = ready_revision(watch->child, sample);
-    if (probe_ready(watch->probe)) {
-      return 1;
-    }
     logical = *child_revision != 0;
   } else {
     logical = gw_guest_signalfd_mask(watch->cookie, &mask) &&
               (sample->pending & mask);
+  }
+  if (probe_ready(watch->probe)) {
+    return 1;
   }
 
   /* Linux signalfd uses a shared waitqueue. Each actual enqueue or mask
@@ -472,10 +478,8 @@ static int logical_events(struct epoll_file *file, struct epoll_event *user,
     if (error) {
       return written ? written : -error;
     }
-    if (watch->child) {
-      struct epoll_event ignored;
-      native_events(watch->probe, &ignored, 1);
-    }
+    struct epoll_event ignored;
+    native_events(watch->probe, &ignored, 1);
     watch->generation = sample->generation;
     watch->observed = child_revision;
     watch->seen = 1;
@@ -517,13 +521,16 @@ static size_t collect_probes(struct epoll_file *file, struct pollfd *out,
   size_t count = 0;
   for (size_t i = 0; i < file->count; ++i) {
     struct epoll_source *watch = &file->watches[i];
-    if (!watch->child || watch->disabled || !readable_events(watch)) {
+    if (watch->disabled || !readable_events(watch)) {
       continue;
     }
     if (count < cap) {
       out[count] = (struct pollfd){.fd = watch->probe, .events = POLLIN};
     }
     ++count;
+    if (!watch->child) {
+      continue;
+    }
     size_t added =
         collect_probes(watch->child, count < cap ? out + count : NULL,
                        count < cap ? cap - count : 0);
@@ -541,21 +548,23 @@ size_t gw_guest_epoll_probes(int fd, struct pollfd *out, size_t capacity) {
 }
 
 int gw_guest_epoll_stop(void) {
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
   gw_guest_epoll_reap();
-  for (struct epoll_file *file = files; file; file = file->next) {
+  for (struct epoll_file *file = state->epolls; file; file = file->next) {
     prune_signals(file);
     if (file->count) {
       return EBUSY;
     }
   }
-  while (files) {
-    struct epoll_file *file = files;
-    files = file->next;
+  while (state->epolls) {
+    struct epoll_file *file = state->epolls;
+    state->epolls = file->next;
     destroy(file);
   }
-  if (monitor >= 0) {
-    syscall(SYS_close, monitor);
-    monitor = -1;
+  atomic_store_explicit(&state->epoll_count, 0, memory_order_release);
+  if (state->monitor >= 0) {
+    syscall(SYS_close, state->monitor);
+    state->monitor = -1;
   }
   return 0;
 }

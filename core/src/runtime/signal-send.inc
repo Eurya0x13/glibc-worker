@@ -29,8 +29,13 @@ int __gw_domain_signal_send(void *thread, int tid, int number, int code,
   *handled = 0;
   gw_libc_signal_sender sender =
       __atomic_load_n(&gw_signal_sender, __ATOMIC_ACQUIRE);
+  /* The kernel applies stop/continue to the entire job and removes opposite
+   * pending signals across its thread queues. There is one native disposition.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c */
   if (!sender || number < 0 || number >= NSIG || number == SIGKILL ||
-      number == SIGSTOP || is_internal_signal(number) || (!thread && !number)) {
+      number == SIGSTOP || number == SIGTSTP || number == SIGTTIN ||
+      number == SIGTTOU || number == SIGCONT || is_internal_signal(number) ||
+      (!thread && !number)) {
     return 0;
   }
 

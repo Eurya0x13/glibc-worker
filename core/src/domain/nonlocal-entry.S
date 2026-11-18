@@ -10,10 +10,9 @@
     push %rsi
     sub $8, %rsp
     mov $\kind, %esi
-    .if \kind >= 3
+    /* Capture the owning libc's saved caller SP for jump cleanup. */
     lea 32(%rsp), %rdx
     mov 24(%rsp), %rcx
-    .endif
     call gw_nonlocal_capture
     add $8, %rsp
     pop %rsi
@@ -40,14 +39,12 @@ CAPTURE _setjmp, 2
     stp x0, x1, [sp]
     str x30, [sp, #16]
     mov w1, #\kind
-    .if \kind >= 3
     add x2, sp, #32
-    .if \kind == 3
-    mov x3, x30
-    .else
+    .if \kind == 4
     /* ARM64 swapcontext stores an internal return trampoline as its PC. */
     mov x3, xzr
-    .endif
+    .else
+    mov x3, x30
     .endif
     bl gw_nonlocal_capture
     mov x9, x0

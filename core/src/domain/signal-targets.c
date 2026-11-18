@@ -333,6 +333,24 @@ static int discard_pending(struct gw_signal_targets *registry, int number) {
   return error;
 }
 
+struct gw_signal_target *gw_signal_targets_pin_tid(
+    struct gw_signal_targets *registry, int tid) {
+  struct gw_signal_target *result = NULL;
+  lock(registry);
+  for (size_t i = 0; !registry->closed && i < registry->count; ++i) {
+    struct gw_signal_target *target = registry->active[i];
+    if (target->tid == tid && !target->receiver.closed) {
+      if (target->pins < SIZE_MAX) {
+        ++target->pins;
+        result = target;
+      }
+      break;
+    }
+  }
+  unlock(registry);
+  return result;
+}
+
 static void cancel_opposite_pending(struct gw_signal_targets *registry,
                                     int number) {
   /* Linux prepare_signal cancels opposing pending job-control signals at
@@ -471,12 +489,19 @@ int gw_signal_target_wait_take(struct gw_signal_target *target,
       result = -ESRCH;
     } else {
       enum gw_signal_queue_source source;
-      result = gw_signal_inbox_take(&target->receiver, eligible, information,
+      struct gw_signal_target *owner =
+          target->selection ? target->selection : target;
+      result = gw_signal_inbox_take(&owner->receiver, eligible, information,
                                     &source);
       sample->sequence =
           atomic_load_explicit(&registry->wait_sequence, memory_order_relaxed);
       sample->deliveries = target->deliveries;
       sample->interrupted_io = target->interrupted_io;
+      sample->notifications = target->notifications;
+      sample->host_wakes =
+          atomic_load_explicit(&target->host_wakes, memory_order_relaxed);
+      sample->host_interruptions = atomic_load_explicit(
+          &target->host_interruptions, memory_order_relaxed);
     }
   }
   unlock(registry);
@@ -528,11 +553,17 @@ int gw_signal_target_poll_arm(struct gw_signal_target *target,
       }
       *fd = target->wait_fd;
     }
+    struct gw_signal_target *owner =
+        target->selection ? target->selection : target;
     *sample = (struct gw_signal_poll_sample){
-        .pending = gw_signal_inbox_pending(&target->receiver),
+        .pending = gw_signal_inbox_pending(&owner->receiver),
         .generation = registry->poll_generation,
         .deliveries = target->deliveries,
-        .notifications = target->notifications};
+        .notifications = target->notifications,
+        .host_wakes =
+            atomic_load_explicit(&target->host_wakes, memory_order_relaxed),
+        .host_deliveries = atomic_load_explicit(&target->host_deliveries,
+                                                memory_order_relaxed)};
   }
   unlock(registry);
   return error;

@@ -77,6 +77,7 @@ struct async_carrier {
 };
 
 struct async_control {
+  int gnu_host;
   uint32_t layout[TEST_LAYOUT_WORDS];
   _Atomic int request, response, ready;
   struct async_carrier *carrier;

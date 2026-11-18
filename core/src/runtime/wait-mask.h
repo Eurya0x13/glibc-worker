@@ -7,11 +7,7 @@
 #include <stdint.h>
 #include <signal-consume-hook.h>
 
-struct gw_domain_wait_mask {
-  sigset_t kernel;
-  uint64_t physical, logical;
-  int active;
-};
+#include <gw-signalfd-hook.h>
 
 int __gw_domain_wait_begin(const sigset_t *, struct gw_domain_wait_mask *);
 int __gw_domain_wait_end(struct gw_domain_wait_mask *);

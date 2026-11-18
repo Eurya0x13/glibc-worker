@@ -33,8 +33,13 @@ static ssize_t invoke_native(void *stream, void *buffer, size_t size) {
 }
 
 static ssize_t translated_read(FILE *stream, void *buffer, ssize_t size) {
-  return gw_signal_fd_read_backend(fileno(stream), buffer, (size_t)size,
-                                   invoke_native, stream);
+  /* This GNU profile already verifies the owning FILE read tables. Its
+   * _IO_FLAGS2_NOTCANCEL is part of the reviewed GNU libio layout.
+   * https://github.com/bminor/glibc/blob/glibc-2.42/libio/libio.h */
+  enum gw_libc_io_policy policy =
+      stream->_flags2 & 2 ? GW_IO_NOCANCEL : GW_IO_CANCELLABLE;
+  return gw_signal_fd_read_policy(fileno(stream), buffer, (size_t)size,
+                                  invoke_native, stream, policy);
 }
 
 struct readonly_range {

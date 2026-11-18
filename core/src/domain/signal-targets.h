@@ -14,9 +14,11 @@ struct gw_signal_target {
   uintptr_t key;
   uint64_t real_blocked;
   uint64_t deliveries, interrupted_io, notifications;
+  _Atomic uint64_t host_wakes, host_deliveries, host_interruptions;
   int tid;
   void *context;
   size_t index, pins;
+  struct gw_signal_target *selection;
   struct gw_signal_target *wait_next, **wait_link;
   int wait_fd;
 };
@@ -52,6 +54,10 @@ int gw_signal_target_prepare(struct gw_signal_targets *, uintptr_t, uint64_t,
  * TID is harmless; a different TID returns EALREADY. Initial notification
  * failure stays in targets_error(), separate from committed admission. */
 int gw_signal_target_activate(struct gw_signal_target *, int);
+/* Pin the registered recipient of the current native TID. A caller running
+ * outside Guest can otherwise consume only the process-shared queue. */
+struct gw_signal_target *gw_signal_targets_pin_tid(struct gw_signal_targets *,
+                                                   int);
 struct gw_signal_publication gw_signal_targets_send(struct gw_signal_targets *,
                                                     uintptr_t, int,
                                                     const siginfo_t *);
@@ -79,7 +85,8 @@ int gw_signal_targets_enable_waits(struct gw_signal_targets *);
 
 struct gw_signal_wait_sample {
   uint32_t sequence;
-  uint64_t deliveries, interrupted_io;
+  uint64_t deliveries, interrupted_io, notifications;
+  uint64_t host_wakes, host_interruptions;
 };
 
 int gw_signal_target_wait_take(struct gw_signal_target *, uint64_t, siginfo_t *,
@@ -89,6 +96,7 @@ int gw_signal_targets_wake_waiters(struct gw_signal_targets *);
 
 struct gw_signal_poll_sample {
   uint64_t pending, generation, deliveries, notifications;
+  uint64_t host_wakes, host_deliveries;
 };
 
 /* The readiness caller samples and arms in the same transaction. Each

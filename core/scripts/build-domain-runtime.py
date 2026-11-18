@@ -175,7 +175,7 @@ if not (root / "patched").exists():
         "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;",
         "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;\n"
         "    __gw_domain_signal_consume_hook; __gw_domain_context_hook;\n"
-        "    __gw_domain_signalfd_hook;",
+        "    __gw_domain_signalfd_hook; __gw_domain_kernel_syscall;",
     )
     mask = src / "nptl/pthread_sigmask.c"
     replace(
@@ -373,7 +373,7 @@ for origin, name in [
                 "pre-clone-recipient-admission-v1",
                 "optional-logical-consuming-waits-v1",
                 "optional-native-context-events-v3",
-                "optional-guest-signalfd-v3",
+                "optional-guest-signalfd-v4",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()
