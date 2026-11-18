@@ -55,7 +55,36 @@ Guest 信号描述符仍打开或 Host 描述符等待仍在进行时，在关�
 桥提交关闭后，如果 STOP 或分发线程 join 失败，返回终止性 `EIO` 并保留剩余资源。
 私有传输支持描述符预检和静默 STOP 确认，旧服务在激活前被拒绝。
 
-`build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及 domain-runtime.json 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI 或收养版本错误的清单。低层 full_host_start 仍供自备 worker 启动机制的宿主使用，不会静默创建 runtime。
+`build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及
+`domain-runtime.json` 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI
+或收养版本错误的清单。
+
+### 打包后的 glibc 库名
+
+打包时校验每个内置 glibc 库的架构与完整 `DT_SONAME`。`domain-runtime.json` 中的
+`glibc_aliases` 记录 ABI 库名及其打包文件。两个 ABI 的 `libdl.so.2` 均对应
+`libguest_dl.so`。解包使用时，将 `compat/glibc-libs` 加入 `library_path`。移动制品时保留
+目录中的相对符号链接。
+
+打 APK 时，将匹配的 `libguest_*.so` 部署为安装时解包的原生库，并保持文件内容不变。
+将对应 ABI 的 `glibc-libs.tsv` 加入 assets。宿主启动运行时前，调用
+`GuestLibraries.prepare(privateStorage, nativeLibraryDir, catalogStream)`。辅助类按清单校验已
+安装文件，在应用私有目录中创建可复用的链接。把返回目录加入 `library_path`，
+`loader_path` 和 `service_path` 继续使用已安装的 loader 和服务路径。
+
+GNU loader 通过搜索路径处理裸库名和 `DT_NEEDED`。按路径装载时，使用实际存在的别名路径，
+例如 `<别名目录>/libdl.so.2`。内置别名采用完整 ABI 名称。应用按需提供其他依赖，GNU loader
+按宿主配置的目录及依赖的 RUNPATH 查找。
+
+下面的回归使用打包的 GNU loader 和辅助 JAR。在 x86_64 上测试 arm64-v8a 制品时，使用
+GNU 交叉编译器，并附加 `--runner qemu-aarch64`。
+
+```sh
+python3 android-jni/tests/runtime-aliases.py --package "$GW_PACKAGE" \
+  --helpers "$GW_PACKAGE/glibc-bridge-helpers.jar"
+```
+
+低层 `full_host_start` API 仍供自备 worker 启动机制的宿主使用。
 
 `tests/runtime_sdk.py` 仅通过安装的 CMake 包和头构建消费者，检查默认/worker 选择、JNI 装载/回调/数组/TLS、生命周期与普通 libc 拒绝。依赖路径均由命令行显式提供；日志、清单与结构化结果在 android-jni/build/tests/runtime-sdk/。`tests/runtime_sdk_android.py` 使用显式审阅的 JRE 启动夹具/profile 在 ARM64 重复检查，并未把 VM 创建移入 android-jni；结果在 android-jni/build/tests/runtime-sdk-android/。
 

@@ -82,14 +82,17 @@ foreach(target android_jni android_jni_static)
   set_target_properties(${target} PROPERTIES OUTPUT_NAME gw_android_jni)
 endforeach()
 find_package(Java COMPONENTS Development REQUIRED)
+set(helper_sources
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/BridgeTypes.java
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/GuestImages.java
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/GuestLibraries.java)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/classes
   COMMAND ${Java_JAVAC_EXECUTABLE} --release 8 -d ${CMAKE_CURRENT_BINARY_DIR}/classes
-          ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/BridgeTypes.java
-          ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/GuestImages.java
+          ${helper_sources}
   COMMAND ${Java_JAR_EXECUTABLE} cf ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar
           -C ${CMAKE_CURRENT_BINARY_DIR}/classes .
-  DEPENDS src/java/dev/glibc/worker/BridgeTypes.java src/java/dev/glibc/worker/GuestImages.java VERBATIM)
+  DEPENDS ${helper_sources} VERBATIM)
 add_custom_target(android_jni_helpers ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/android-jni-helpers.jar DESTINATION share/glibc-worker/android-jni)
 

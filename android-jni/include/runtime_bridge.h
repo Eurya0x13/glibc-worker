@@ -23,6 +23,7 @@ struct gw_host_runtime_config {
   };
 
   const char *loader_path;
+  /* GNU loader search path. Include the packaged glibc alias directory. */
   const char *library_path;
   const char *service_path;
   const struct gw_host_bridge_config *bridge;

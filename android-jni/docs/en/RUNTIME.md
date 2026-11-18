@@ -90,6 +90,40 @@ The bridge's [lifecycle contract](LIFECYCLE.md) applies to both backends.
 stages it with the adoption-enabled libc and a `domain-runtime.json` manifest.
 `GW_DOMAIN_RUNTIME` can select an explicitly built matching runtime directory.
 The package script rejects a manifest with the wrong ABI or adoption version.
+
+### Packaged glibc library names
+
+The package validates the architecture and exact `DT_SONAME` of each bundled
+glibc image. The `glibc_aliases` object in `domain-runtime.json` records the
+ABI names and their packaged files. For example, `libdl.so.2` maps to
+`libguest_dl.so` on both ABIs. Use `compat/glibc-libs` in `library_path` for an
+unpacked compatibility package. Keep its relative symlinks when relocating
+the package.
+
+For an APK, deploy the matching `libguest_*.so` files as installed native
+libraries and keep their bytes unchanged during packaging. Include the
+ABI-matched `glibc-libs.tsv` as an asset. Before starting the runtime, call
+`GuestLibraries.prepare(privateStorage, nativeLibraryDir, catalogStream)` from
+the Host. The helper checks the installed files against the asset and creates
+reusable links in app-private storage. Use the returned directory in
+`library_path` and use the installed loader and service for `loader_path` and
+`service_path`. The latter paths can still use the packaged filenames.
+
+GNU lookup resolves bare names, including `DT_NEEDED`, through the search
+path. For a path-based open, use an existing alias entry, such as
+`<alias-directory>/libdl.so.2`. The built-in aliases use the complete ABI
+names. App-supplied dependencies use the normal GNU search rules in the
+directories and RUNPATHs supplied by the embedder or the dependency.
+
+Run the regression against the packaged loader and helper JAR. Add
+`--runner qemu-aarch64` for an arm64-v8a package on an x86_64 machine with the
+GNU cross compiler installed.
+
+```sh
+python3 android-jni/tests/runtime-aliases.py --package "$GW_PACKAGE" \
+  --helpers "$GW_PACKAGE/glibc-bridge-helpers.jar"
+```
+
 The low-level `full_host_start` API remains available for embedders that supply
 their own worker bootstrap; it does not silently create a runtime.
 

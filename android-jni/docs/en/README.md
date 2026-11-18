@@ -6,7 +6,7 @@ A bridge using public JNI APIs: real Host VM reference ownership, exceptions, JN
 
 `src/host/`, `src/guest/`, `src/common/` and `src/java/` contain Host, GNU service, shared internal protocols and Java helpers; `include/` contains public interfaces.
 
-Host and Guest link their own bionic/GNU libc and libffi. The runtime API defaults to independent stacks/TCBs on the same carrier thread; worker execution is explicit. Low-level APIs also allow caller-owned worker bootstrap. See [runtime integration](RUNTIME.md) for startup, artifact handshake and signals. VM-neutral Java helpers are `BridgeTypes` and `GuestImages`; Guest JavaVM/JNIEnv are bridge interfaces.
+Host and Guest link their own bionic/GNU libc and libffi. The runtime API defaults to independent stacks/TCBs on the same carrier thread; worker execution is explicit. Low-level APIs also allow caller-owned worker bootstrap. Guest JavaVM/JNIEnv are bridge interfaces. The VM-neutral Java helpers provide bridge types, image policy and glibc library staging. See [runtime integration](RUNTIME.md) for startup, artifact handshake and signals.
 
 ## Standalone build
 

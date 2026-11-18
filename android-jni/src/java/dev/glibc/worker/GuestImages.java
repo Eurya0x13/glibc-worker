@@ -3,6 +3,7 @@ package dev.glibc.worker;
 import java.io.*;
 import java.nio.file.*;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 /** Host-side image policy; the launcher explicitly chooses catalog or direct mode. */
@@ -46,8 +47,8 @@ public final class GuestImages {
    * Streams the file through SHA-256 and returns lowercase hex; the identity used for
    * content-matched catalog lookups.
    */
-  public static String sha256(File file) throws Exception {
-    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+  public static String sha256(File file) throws IOException {
+    MessageDigest digest = newDigest();
     try (InputStream in = new FileInputStream(file)) {
       byte[] buffer = new byte[65536];
       int n;
@@ -55,6 +56,18 @@ public final class GuestImages {
         digest.update(buffer, 0, n);
       }
     }
+    return digestHex(digest);
+  }
+
+  static MessageDigest newDigest() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  static String digestHex(MessageDigest digest) {
     StringBuilder out = new StringBuilder();
     for (byte b : digest.digest()) {
       out.append(String.format(Locale.ROOT, "%02x", b & 255));

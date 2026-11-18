@@ -6,7 +6,7 @@
 
 `src/host/`、`src/guest/`、`src/common/` 和 `src/java/` 分别保存 Host、GNU service、共享内部协议与 Java 辅助类；`include/` 保存公开接口。
 
-Host 与 Guest 分别链接 bionic/GNU libc 和各自的 libffi。正式 runtime 接口默认以独立栈/TCB 在同一载体线程切换，可显式选用 worker；低层组件 API 仍可由调用者自行提供 worker bootstrap。接入、制品握手和信号边界见 [runtime 接口](RUNTIME.md)。Java 辅助类只有 VM 中立的 `BridgeTypes`、`GuestImages`；Guest 的 JavaVM/JNIEnv 是桥接接口。
+Host 与 Guest 分别链接 bionic/GNU libc 和各自的 libffi。正式 runtime 接口默认以独立栈/TCB 在同一载体线程切换，可显式选用 worker；低层组件 API 仍可由调用者自行提供 worker bootstrap。Guest 的 JavaVM/JNIEnv 是桥接接口。VM 中立的 Java 辅助类提供桥接类型、映像策略和 glibc 库准备功能。接入、制品握手和信号边界见 [runtime 接口](RUNTIME.md)。
 
 ## 独立构建
 
