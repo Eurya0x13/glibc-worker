@@ -209,6 +209,7 @@ run(
         source / "guest-signal-unwind.c",
         source / "guest-worker-signals.c",
         source / "guest-adopted-signals.c",
+        source / "guest-signalfd.c",
         "-o",
         out / "module.so",
         "-lm",

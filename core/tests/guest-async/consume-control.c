@@ -72,7 +72,8 @@ static void helper(int number) {
   int received = gw_signal_actions_deliver(&actions, current, &delivery);
   assert(received == GUEST_INTERRUPT);
   assert(delivery.selected.action.sa_handler == guest_interrupt);
-  gw_signal_target_note_delivery(current);
+  gw_signal_target_note_delivery(
+      current, delivery.selected.action.sa_flags & SA_RESTART);
   delivery.selected.action.sa_handler(received);
   errno = saved;
 }

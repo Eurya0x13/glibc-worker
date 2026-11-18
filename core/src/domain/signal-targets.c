@@ -437,18 +437,28 @@ int gw_signal_target_wait_take(struct gw_signal_target *target,
       sample->sequence =
           atomic_load_explicit(&registry->wait_sequence, memory_order_relaxed);
       sample->deliveries = target->deliveries;
+      sample->interrupted_io = target->interrupted_io;
     }
   }
   unlock(registry);
   return result;
 }
 
-void gw_signal_target_note_delivery(struct gw_signal_target *target) {
+void gw_signal_target_note_delivery(struct gw_signal_target *target,
+                                    int restart) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
   ++target->deliveries;
+  target->interrupted_io += !restart;
   wake_waiters(registry);
   unlock(registry);
+}
+
+int gw_signal_targets_wake_waiters(struct gw_signal_targets *registry) {
+  lock(registry);
+  int error = wake_waiters(registry);
+  unlock(registry);
+  return error;
 }
 
 uint64_t gw_signal_target_blocked_pending(struct gw_signal_target *target) {

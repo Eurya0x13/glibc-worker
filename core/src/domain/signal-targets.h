@@ -13,7 +13,7 @@ struct gw_signal_target {
   struct gw_signal_targets *registry;
   uintptr_t key;
   uint64_t real_blocked;
-  uint64_t deliveries;
+  uint64_t deliveries, interrupted_io;
   int tid;
   void *context;
   size_t index, pins;
@@ -75,12 +75,13 @@ int gw_signal_targets_enable_waits(struct gw_signal_targets *);
 
 struct gw_signal_wait_sample {
   uint32_t sequence;
-  uint64_t deliveries;
+  uint64_t deliveries, interrupted_io;
 };
 
 int gw_signal_target_wait_take(struct gw_signal_target *, uint64_t, siginfo_t *,
                                struct gw_signal_wait_sample *);
-void gw_signal_target_note_delivery(struct gw_signal_target *);
+void gw_signal_target_note_delivery(struct gw_signal_target *, int restart);
+int gw_signal_targets_wake_waiters(struct gw_signal_targets *);
 uint64_t gw_signal_target_blocked_pending(struct gw_signal_target *);
 /* Flush all pending instances of one signal under the registry writer,
  * releasing aggregate quota. Disposition owners must also serialize the new

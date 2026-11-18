@@ -359,6 +359,10 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
   struct guest_observation *o = &observation;
   assert(!o->probe);
   o->probe = (void *)(uintptr_t)address;
+  if (o->probe->mode == SIGNAL_JAVA) {
+    extern void sdk_guest_signalfd_probe(void);
+    sdk_guest_signalfd_probe();
+  }
   assert(o->probe->tid == syscall(SYS_gettid));
   o->recipient = pthread_self();
   o->tp = (uintptr_t)__builtin_thread_pointer();

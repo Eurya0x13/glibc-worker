@@ -396,5 +396,32 @@ Selection that finds a matching packet wins over a concurrent interruption.
 The GNU-only control through `core/tests/guest_async.py` checks public wait
 entrypoints, pointer faults, real kernel pending isolation, blocking producer
 wake, cancellation and visible Guest interruption. The installed JNI worker
-can opt in to the same consuming hook. Guest signalfd and the adopted
-carrier's consuming integration remain separate work.
+and adopted-carrier services can opt in to the same consuming hook.
+
+## Guest signalfd consumption
+
+The matching GNU libc routes `signalfd`, `read` and `readv` to the logical
+recipient when the application uses a Guest-created signal descriptor.
+The requested mask follows the open file description, so updating a `dup`
+alias also changes a blocked reader's selection. The reader uses its own
+private queue followed by the shared Guest queue. Updating the mask preserves
+the descriptor's existing nonblocking status and close-on-exec flag.
+Each open description keeps one private socket endpoint to observe final close.
+
+The adapter copies complete Linux `signalfd_siginfo` records through the
+kernel. It preserves queued values, `SI_TKILL`, `EFAULT` and partial byte
+counts. It probes the running kernel to select the legacy per-vector behavior
+or the newer scatter behavior. `readv` snapshots up to the kernel's `IOV_MAX`
+vector entries on the calling stack. A blocked read uses the owning libc's
+cancellation point. A non-restarting Guest handler interrupts the read, and
+`SA_RESTART` lets it keep waiting. Closing the last alias retires the backing
+description. Raw closes and replacements are collected at later descriptor
+creation or runtime shutdown.
+
+The installed worker and adopted-carrier fixtures exercise these APIs with
+their own GNU libc. Public readiness through `poll`, `select` and `epoll`,
+raw/private I/O, use from Host and full concurrent descriptor retirement
+remain part of the signal compatibility work.
+
+Upstream selection and copy rules are in [Linux signalfd](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
+and [legacy VFS vector reads](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c).

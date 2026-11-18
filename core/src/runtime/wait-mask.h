@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
-#include <gw-signal-consume-hook.h>
+#include <signal-consume-hook.h>
 
 struct gw_domain_wait_mask {
   sigset_t kernel;

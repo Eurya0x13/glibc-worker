@@ -5,6 +5,7 @@
 #include "domain_transport.h"
 #include "nonlocal-mask.h"
 #include "signal-consuming.h"
+#include "guest-signalfd.h"
 #include "signal-stack.h"
 #include "signal-user-copy.h"
 #include "thread-create.h"
@@ -83,6 +84,30 @@ static int consuming(const sigset_t *set, siginfo_t *information,
              : 0;
 }
 
+static int open_signalfd(int descriptor, const sigset_t *set, int flags,
+                         int *handled) {
+  *handled = 0;
+  return current ? gw_guest_signalfd(current, descriptor, set, flags, handled)
+                 : 0;
+}
+
+static ssize_t read_signalfd(int descriptor, void *buf, size_t size,
+                             gw_libc_wait_event wait, int *handled) {
+  *handled = 0;
+  return current ? gw_guest_signalfd_read(current, descriptor, buf, size, wait,
+                                          handled)
+                 : 0;
+}
+
+static ssize_t readv_signalfd(int descriptor, const struct iovec *vectors,
+                              int count, gw_libc_wait_event wait,
+                              int *handled) {
+  *handled = 0;
+  return current ? gw_guest_signalfd_readv(current, descriptor, vectors, count,
+                                           wait, handled)
+                 : 0;
+}
+
 static int prepare_child(void *key, uint64_t inherited, uint64_t kernel,
                          void **cookie) {
   (void)kernel;
@@ -152,8 +177,11 @@ static int install_hooks(void) {
       dlsym(RTLD_DEFAULT, "__gw_domain_signal_send_hook");
   int (*consume_hook)(unsigned, const struct gw_libc_signal_consume_hook *) =
       dlsym(RTLD_DEFAULT, "__gw_domain_signal_consume_hook");
+  int (*signalfd_hook)(unsigned, const struct gw_libc_signalfd_hook *) =
+      dlsym(RTLD_DEFAULT, "__gw_domain_signalfd_hook");
   bind_mask = dlsym(RTLD_DEFAULT, "__gw_domain_mask_bind");
-  if (!thread_hook || !mask_hook || !send_hook || !consume_hook || !bind_mask) {
+  if (!thread_hook || !mask_hook || !send_hook || !consume_hook ||
+      !signalfd_hook || !bind_mask) {
     return ELIBBAD;
   }
 
@@ -165,10 +193,17 @@ static int install_hooks(void) {
       .leave = leave_child};
   const struct gw_libc_signal_consume_hook wait = {
       .size = sizeof wait, .pending = pending, .wait = consuming};
+  const struct gw_libc_signalfd_hook fd = {.size = sizeof fd,
+                                           .open = open_signalfd,
+                                           .read = read_signalfd,
+                                           .readv = readv_signalfd,
+                                           .closing = gw_guest_signalfd_closing,
+                                           .closed = gw_guest_signalfd_closed};
   int error = bind_mask(&logical, &physical, &binding_active, virtual_mask);
   if (error || (error = mask_hook(1, mask_changed)) ||
       (error = thread_hook(1, &admission)) ||
-      (error = send_hook(1, send_signal)) || (error = consume_hook(1, &wait))) {
+      (error = send_hook(1, send_signal)) || (error = consume_hook(1, &wait)) ||
+      (error = signalfd_hook(1, &fd))) {
     return error;
   }
   return 0;
@@ -388,9 +423,13 @@ int gw_guest_workers_stop(void) {
   if (current != owner || !gw_signal_targets_only(&targets, owner)) {
     return EBUSY;
   }
+  int error = gw_guest_signalfd_stop();
+  if (error) {
+    return error;
+  }
   gw_signal_actions_close(&gw_guest_actions);
   current = NULL;
   gw_signal_targets_close(&targets);
-  int error = gw_signal_target_release(owner);
+  error = gw_signal_target_release(owner);
   return error ? error : gw_signal_targets_destroy(&targets);
 }

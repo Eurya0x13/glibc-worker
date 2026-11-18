@@ -18,6 +18,7 @@ if [[ ${GW_NATIVE_UNWIND_INTEGRATION:-0} == 1 ]]; then
     "$project_root/src/guest/domain_signal_workers.c"
     "$GW_CORE_INCLUDE/internal/signal-actions.c"
     "$GW_CORE_INCLUDE/internal/signal-consuming.c"
+    "$GW_CORE_INCLUDE/internal/guest-signalfd.c"
     "$GW_CORE_INCLUDE/internal/signal-execution.c"
     "$GW_CORE_INCLUDE/internal/signal-execution-guest.c"
     "$GW_CORE_INCLUDE/internal/start.S"

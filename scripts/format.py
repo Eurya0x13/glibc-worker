@@ -18,6 +18,7 @@ C_FRAGMENTS = {
     "core/src/runtime/signal-mask.inc",
     "core/src/runtime/context-mask.inc",
     "core/src/runtime/wait-mask.inc",
+    "core/src/runtime/signalfd-hook.inc",
     "core/src/runtime/jump-hook.inc",
     "core/src/runtime/thread-create.inc",
     "core/src/domain/signal-registry.inc",

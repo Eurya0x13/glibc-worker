@@ -20,6 +20,25 @@ static int descriptor = -1;
 static struct stat identity;
 static atomic_flag writer = ATOMIC_FLAG_INIT;
 
+static uint64_t lock(void) {
+  uint64_t mask = gw_nonlocal_mask_block();
+  while (atomic_flag_test_and_set_explicit(&writer, memory_order_acquire)) {
+  }
+  return mask;
+}
+
+static void unlock(uint64_t mask) {
+  atomic_flag_clear_explicit(&writer, memory_order_release);
+  gw_nonlocal_mask_restore(mask);
+}
+
+static int available(void) {
+  struct stat observed;
+  return descriptor >= 0 && !fstat(descriptor, &observed) &&
+         observed.st_dev == identity.st_dev &&
+         observed.st_ino == identity.st_ino;
+}
+
 int gw_signal_user_copy_prepare(void) {
   if (descriptor >= 0) {
     return 0; /* Serialized bootstrap; the OFD remains process-pinned. */
@@ -50,15 +69,8 @@ static int copy(void *destination, const void *source, size_t length, int out) {
   }
 
   int saved = errno;
-  uint64_t mask = gw_nonlocal_mask_block();
-  while (atomic_flag_test_and_set_explicit(&writer, memory_order_acquire)) {
-  }
-  struct stat observed;
-  int error = descriptor < 0 || fstat(descriptor, &observed) ||
-                      observed.st_dev != identity.st_dev ||
-                      observed.st_ino != identity.st_ino
-                  ? ENOTSUP
-                  : 0;
+  uint64_t mask = lock();
+  int error = available() ? 0 : ENOTSUP;
   if (!error &&
       syscall(SYS_pwrite64, descriptor, source, length, 0) != (long)length) {
     error = out ? EIO : EFAULT;
@@ -68,10 +80,35 @@ static int copy(void *destination, const void *source, size_t length, int out) {
     error = out ? EFAULT : EIO;
   }
 
-  atomic_flag_clear_explicit(&writer, memory_order_release);
-  gw_nonlocal_mask_restore(mask);
+  unlock(mask);
   errno = saved;
   return error;
+}
+
+/* A raw read at the end of the scratch file runs the kernel's range/import
+ * checks without touching the caller's output bytes or selecting a signal.
+ * https://github.com/torvalds/linux/blob/v6.12/fs/read_write.c
+ */
+static int validate(long number, const void *buffer, size_t count) {
+  int saved = errno;
+  uint64_t mask = lock();
+  int error = ENOTSUP;
+  if (available()) {
+    long result =
+        syscall(number, descriptor, buffer, count, sizeof(siginfo_t), 0L);
+    error = result < 0 ? errno : result ? EIO : 0;
+  }
+  unlock(mask);
+  errno = saved;
+  return error;
+}
+
+int gw_signal_user_validate_read(void *buffer, size_t size) {
+  return validate(SYS_pread64, buffer, size);
+}
+
+int gw_signal_user_validate_readv(const struct iovec *vectors, int count) {
+  return validate(SYS_preadv, vectors, (unsigned int)count);
 }
 
 int gw_signal_user_copy_in(void *destination, const void *source,

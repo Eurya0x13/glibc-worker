@@ -229,6 +229,22 @@ def execute_case(
             != [{"stage": "adopted-scope-overlap", "rejected": True}]
         )
         or (
+            mode in ("adopted-signals", "worker-signals")
+            and [r for r in rows if r.get("stage") == "guest-signalfd"]
+            != [
+                {
+                    "stage": "guest-signalfd",
+                    "aliases": True,
+                    "copyout": True,
+                    "vectors": True,
+                    "mask_update": True,
+                    "interruption": True,
+                    "restart": True,
+                    "cancellation": True,
+                }
+            ]
+        )
+        or (
             mode == "worker-signals"
             and [r for r in rows if r.get("stage") == "worker-signals"]
             != [

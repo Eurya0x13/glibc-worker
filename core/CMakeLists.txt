@@ -213,6 +213,7 @@ install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/domain/signal-actions.c src/domain/signal-execution-guest.c
         src/domain/signal-execution.c
         src/domain/signal-consuming.c src/domain/signal-user-copy.c
+        src/domain/guest-signalfd.c src/runtime/signalfd-hook.h
         src/runtime/signal-consume-hook.h src/runtime/thread-create.h
         src/runtime/context-events.h
         src/domain/start.S DESTINATION

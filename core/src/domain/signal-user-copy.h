@@ -1,6 +1,7 @@
 #ifndef GW_SIGNAL_USER_COPY_H
 #define GW_SIGNAL_USER_COPY_H
 #include <stddef.h>
+#include <sys/uio.h>
 
 /* Bootstrap prepares one process-owned, preallocated scratch OFD. Every copy
  * physically blocks catchable signals and holds its short writer. Raw kernel
@@ -10,4 +11,6 @@
 int gw_signal_user_copy_prepare(void);
 int gw_signal_user_copy_in(void *, const void *, size_t);
 int gw_signal_user_copy_out(void *, const void *, size_t);
+int gw_signal_user_validate_read(void *, size_t);
+int gw_signal_user_validate_readv(const struct iovec *, int);
 #endif

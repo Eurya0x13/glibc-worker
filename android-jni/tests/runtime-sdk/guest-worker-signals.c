@@ -144,6 +144,8 @@ jint sdk_worker_signal_probe(JNIEnv *env, jclass cls) {
   (void)cls;
   check_one_shot();
   check_child_admission();
+  extern void sdk_guest_signalfd_probe(void);
+  sdk_guest_signalfd_probe();
 
   assert(raise(SIGUSR2) == -1 && errno == EBUSY);
   return (*env)->GetVersion(env) >= JNI_VERSION_1_6

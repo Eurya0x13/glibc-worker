@@ -12,6 +12,7 @@ from wait_mask import patch_wait_masks
 from signal_send import patch_signal_sends
 from private_signals import patch_private_signals
 from mask_lifecycle import patch_mask_lifecycle
+from signalfd_hook import patch_signalfd
 from thread_lifecycle import patch_thread_lifecycle
 
 source = Path(__file__).resolve().parent
@@ -41,11 +42,15 @@ inputs = [
     fragments / "wait-mask.h",
     fragments / "signal-consume-hook.h",
     fragments / "signal-consume-hook.inc",
+    fragments / "signalfd-hook.h",
+    fragments / "signalfd-hook.inc",
+    fragments / "signalfd-ops.h",
     fragments / "jump-hook.inc",
     fragments / "thread-create.h",
     fragments / "thread-create.inc",
     core / "scripts/context_mask.py",
     core / "scripts/wait_mask.py",
+    core / "scripts/signalfd_hook.py",
     core / "scripts/signal_send.py",
     core / "scripts/private_signals.py",
     core / "scripts/mask_lifecycle.py",
@@ -155,16 +160,22 @@ if not (root / "patched").exists():
     shutil.copyfile(fragments / "wait-mask.h", src / "include/gw-wait-mask.h")
     shutil.copyfile(
         fragments / "signal-consume-hook.h",
-        src / "include/gw-signal-consume-hook.h",
+        src / "include/signal-consume-hook.h",
     )
     shutil.copyfile(
         fragments / "signal-consume-hook.inc", src / "nptl/gw-consume-hook.inc"
+    )
+    for name in ("signalfd-hook.h", "signalfd-ops.h"):
+        shutil.copyfile(fragments / name, src / "include" / ("gw-" + name))
+    shutil.copyfile(
+        fragments / "signalfd-hook.inc", src / "nptl/gw-signalfd-hook.inc"
     )
     replace(
         versions,
         "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;",
         "__gw_domain_mask_inherited; __gw_domain_signal_send_hook;\n"
-        "    __gw_domain_signal_consume_hook; __gw_domain_context_hook;",
+        "    __gw_domain_signal_consume_hook; __gw_domain_context_hook;\n"
+        "    __gw_domain_signalfd_hook;",
     )
     mask = src / "nptl/pthread_sigmask.c"
     replace(
@@ -172,7 +183,7 @@ if not (root / "patched").exists():
         "#include <shlib-compat.h>",
         '#include <shlib-compat.h>\n#include "gw-signal-mask.inc"\n'
         '#include "gw-context-mask.inc"\n#include "gw-wait-mask.inc"\n'
-        '#include "gw-consume-hook.inc"',
+        '#include "gw-consume-hook.inc"\n#include "gw-signalfd-hook.inc"',
     )
     replace(
         mask,
@@ -183,6 +194,7 @@ if not (root / "patched").exists():
     )
     patch_context_masks(src)
     patch_wait_masks(src)
+    patch_signalfd(src, replace)
     # Keep each libc's native register, mask and fortified restore code.
     shutil.copyfile(
         fragments / "jump-hook.inc", src / "setjmp/gw-jump-hook.inc"
@@ -358,6 +370,7 @@ for origin, name in [
                 "pre-clone-recipient-admission-v1",
                 "optional-logical-consuming-waits-v1",
                 "optional-native-context-events-v3",
+                "optional-guest-signalfd-v1",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

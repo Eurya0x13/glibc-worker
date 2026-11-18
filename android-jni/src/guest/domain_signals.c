@@ -180,7 +180,7 @@ static void dispatch_action(int number, void *information, ucontext_t *context,
   uint64_t physical = gw_nonlocal_mask_block();
   publish_mask(effective, state);
   if (state.target) {
-    gw_signal_target_note_delivery(state.target);
+    gw_signal_target_note_delivery(state.target, action->sa_flags & SA_RESTART);
   }
 
   struct guest_delivery delivery = {action,  number, information,

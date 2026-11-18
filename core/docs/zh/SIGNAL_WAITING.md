@@ -301,4 +301,26 @@ libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等
 
 `core/tests/guest_async.py` 的 GNU 原生对照检查公开等待入口、指针错误、与
 真实内核待决队列隔离、发布唤醒阻塞者、取消及 Guest 可见中断。已安装 JNI worker
-可以启用同一钩子。Guest signalfd 与收养载体的消费接入仍需另行实现。
+和收养载体都可以启用同一钩子。
+
+## Guest signalfd 消费
+
+匹配的 GNU libc 在访问 Guest 创建的信号描述符时，将 `signalfd`、`read` 和
+`readv` 路由到逻辑接收者。请求掩码归打开文件描述所有。通过 `dup` 的别名更新掩码，
+阻塞中的读取也会按新掩码选择。读取先查调用线程的私有队列，再查 Guest 共享队列。
+更新掩码时保留已有的非阻塞状态和 close-on-exec 标志。
+每个打开文件描述保留一个私有套接字端点，用于观察最后一个别名关闭。
+
+适配层经内核复制完整的 Linux `signalfd_siginfo` 记录，保留排队值、`SI_TKILL`、
+`EFAULT` 和部分成功时的字节数。首次 `readv` 探测实际内核，选择旧版的逐向量读取或新版的
+跨向量分散复制。`readv` 在调用栈保存向量快照，最多为内核的 `IOV_MAX` 项。
+阻塞读取保留所属 libc 的取消点。Guest 处理器未设置 `SA_RESTART`
+时中断读取，设置后继续等待。最后一个别名关闭时回收底层描述。裸系统调用关闭或替换
+的描述符会在后续创建描述符或关闭运行时时回收。
+
+已安装的 worker 和收养载体回归用其所属 GNU libc 测试上述接口。`poll`、`select`、
+`epoll` 的就绪通知、私有或裸 I/O、Host 使用 Guest 描述符及完整的并发描述符退休
+仍属于信号兼容性待办。
+
+上游规则见 [Linux signalfd](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
+和 [旧版 VFS 向量读取](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c)。
