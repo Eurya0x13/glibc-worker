@@ -271,10 +271,18 @@ def run(mode, threads, measure, label, fatal=False, reject=False):
             or len(coop) != 1
             or coop[0]["samples"] != 20
             or coop[0]["overlaps"] <= 0
+            or coop[0].get("sr_deliveries", 0) <= 0
             or guests != [{"created": 32, "passed": 32}]
         ):
+            observed = {
+                "coverage": coverage,
+                "conformance": contracts,
+                "vm_cooperation": coop,
+                "guest_threads": guests,
+            }
             raise SystemExit(
-                f"Incomplete conformance evidence: {label}; {evidence}"
+                f"Incomplete conformance evidence: {label}; "
+                f"{json.dumps(observed, sort_keys=True)}; {evidence}"
             )
     print(label, rows[0], flush=True)
     return {

@@ -12,6 +12,7 @@ public final class JniDomainProbe {
   static native void pauseGuest();
   static native int pauseStatus();
   static native int guestThreads();
+  private static native int vmSamplingSignals();
   static volatile int unloads;
   static volatile long sink;
 
@@ -60,6 +61,36 @@ public final class JniDomainProbe {
     }
   }
 
+  private static long javaWork(long value) {
+    for (int i = 0; i < 1000; ++i) {
+      value = (value * 1664525 + i) ^ (value >>> 7);
+    }
+    return value;
+  }
+
+  private static int awaitVmSamplingSignal() {
+    int before = vmSamplingSignals();
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    long sum = sink;
+
+    // ExecutionSample needs a runnable Java frame. Frequent JNI callbacks
+    // can leave this carrier native at every sampling instant on the worker.
+    // https://github.com/openjdk/jdk17u/blob/master/src/hotspot/share/jfr/periodic/sampling/jfrThreadSampler.cpp
+    do {
+      long until = System.nanoTime() + 20_000_000L;
+      do {
+        sum = javaWork(sum);
+      } while (System.nanoTime() < until);
+      sink = sum;
+      int delivered = vmSamplingSignals() - before;
+      if (delivered > 0) {
+        return delivered;
+      }
+    } while (System.nanoTime() < deadline);
+
+    throw new AssertionError("JFR did not deliver a suspend/resume signal during Java work");
+  }
+
   public static int run(int thread, boolean measure) {
     if (!measure && thread == 0) {
       require(guestThreads() == 32);
@@ -95,19 +126,20 @@ public final class JniDomainProbe {
       long until = System.nanoTime() + 500000000L;
       long sum = 0;
       while (System.nanoTime() < until) {
-        for (int i = 0; i < 1000; ++i) {
-          sum = (sum * 1664525 + i) ^ (sum >>> 7);
-        }
+        sum = javaWork(sum);
         sum += callback((int) sum);
       }
       sink = sum;
+      int samplingSignals = awaitVmSamplingSignal();
+
       try {
         recording.getClass().getMethod("stop").invoke(recording);
         recording.getClass().getMethod("close").invoke(recording);
       } catch (Exception error) {
         throw new AssertionError("JFR stop", error);
       }
-      System.out.println("JNI_DOMAIN_VM_COOP {\"samples\":20,\"overlaps\":" + overlaps + "}");
+      System.out.println("JNI_DOMAIN_VM_COOP {\"samples\":20,\"overlaps\":" + overlaps
+          + ",\"sr_deliveries\":" + samplingSignals + "}");
     }
     require(vmCheck() == 1);
     Object object = new Object();

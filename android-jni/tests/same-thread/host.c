@@ -16,6 +16,7 @@ static int measuring, threads;
 static _Atomic int failures;
 static const struct gw_loader_api_v1 *loader;
 static struct gw_loader_library library;
+extern _Atomic int domain_sr_deliveries;
 
 static int exception(JNIEnv *env) {
   if (!(*env)->ExceptionCheck(env)) {
@@ -30,6 +31,12 @@ static void inject_context_failure(JNIEnv *env, jclass cls) {
   (void)env;
   (void)cls;
   atomic_store(&fail_next_context, 1);
+}
+
+static jint vm_sampling_signals(JNIEnv *env, jclass cls) {
+  (void)env;
+  (void)cls;
+  return atomic_load_explicit(&domain_sr_deliveries, memory_order_relaxed);
 }
 
 static void conformance(JNIEnv *env) {
@@ -210,7 +217,7 @@ int main(int argc, char **argv) {
   REQUIRE(!owner_command(NULL, JNI_DOMAIN_STOP));
   REQUIRE((*vm)->DestroyJavaVM(vm) == JNI_OK);
 #ifdef GW_EXPERIMENT_LATE_SIGNAL
-  extern _Atomic int domain_sr_deliveries, domain_sr_guest_deliveries;
+  extern _Atomic int domain_sr_guest_deliveries;
   REQUIRE(measuring || atomic_load(&domain_sr_deliveries) > 0);
   REQUIRE(measuring || !session.domain ||
           atomic_load(&domain_sr_guest_deliveries) > 0);
@@ -235,6 +242,10 @@ int main(int argc, char **argv) {
 #endif
   jclass local = (*env)->FindClass(env, "JniDomainProbe");
   REQUIRE(local && !exception(env));
+  JNINativeMethod sampler = {"vmSamplingSignals", "()I",
+                             (void *)vm_sampling_signals};
+  REQUIRE((*env)->RegisterNatives(env, local, &sampler, 1) == JNI_OK &&
+          !exception(env));
   bench_class = (*env)->NewGlobalRef(env, local);
   (*env)->DeleteLocalRef(env, local);
   run_method = (*env)->GetStaticMethodID(env, bench_class, "run", "(IZ)I");
@@ -260,7 +271,6 @@ int main(int argc, char **argv) {
   REQUIRE(atomic_load(&gw_host_bridge->loads) == (measuring ? 1 : 2) &&
           atomic_load(&gw_host_bridge->image_closes) == (measuring ? 1 : 2));
   if (!measuring) {
-    extern _Atomic int domain_sr_deliveries;
     unsigned covered = 0;
     for (int i = 0; i < 235; ++i) {
       covered += atomic_load(&gw_host_bridge->hits[i]) != 0;
@@ -279,7 +289,6 @@ int main(int argc, char **argv) {
   (*env)->DeleteGlobalRef(env, bench_class);
   REQUIRE((*vm)->DestroyJavaVM(vm) == JNI_OK);
 #ifdef GW_EXPERIMENT_LATE_SIGNAL
-  extern _Atomic int domain_sr_deliveries;
   REQUIRE(measuring || atomic_load(&domain_sr_deliveries) > 0);
   printf("LATE_SIGNAL_DELIVERIES {\"sr\":%d}\n",
          atomic_load(&domain_sr_deliveries));
