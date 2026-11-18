@@ -1,3 +1,8 @@
+/* Fortified glibc declarations redirect the public jump names to
+ * __longjmp_chk. This translation unit defines all four entry points.
+ * https://github.com/bminor/glibc/blob/glibc-2.39/setjmp/bits/setjmp2.h
+ */
+#undef _FORTIFY_SOURCE
 #include "nonlocal.h"
 
 int gw_nonlocal_interposed(void) {

@@ -72,7 +72,6 @@ jobs:
         abi: [arm64-v8a, x86_64]
     env:
       GW_ABI: ${{ matrix.abi }}
-      ANDROID_NDK_VERSION: '30.0.16138531'
       GLIBC_BUILD_JOBS: '4'
       GW_BUILD_JOBS: '4'
     steps:
@@ -93,11 +92,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
       - name: Install Android NDK
         run: |
-          ndk="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-          if [[ ! -f "$ndk/source.properties" ]]; then
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-              "ndk;$ANDROID_NDK_VERSION"
-          fi
+          release=r30-beta3
+          archive="android-ndk-$release-linux.zip"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://dl.google.com/android/repository/$archive" -o "$RUNNER_TEMP/$archive"
+          sha=2698cca1e9f161048ecd84e1e70a556e1aa00b78409473d4c1e87969d40c3efc
+          echo "$sha  $RUNNER_TEMP/$archive" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP"
+          rm -- "$RUNNER_TEMP/$archive"
+
+          ndk=$(ANDROID_NDK_HOME="$RUNNER_TEMP/android-ndk-$release" python3 scripts/target.py --ndk)
           echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
       - name: Install Zig 0.16.0
         run: |

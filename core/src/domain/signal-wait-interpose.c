@@ -149,7 +149,7 @@ int sigtimedwait(const sigset_t *set, siginfo_t *information,
     }
     result =
         gw_signal_selection_sleep(descriptor, wanted, timeout ? &left : NULL, 0,
-                                  cancellation_probe, &function);
+                                  1, cancellation_probe, &function);
     error = errno;
     cancellation_probe(&function);
     if (result <= 0) {

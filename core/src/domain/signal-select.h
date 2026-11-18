@@ -28,7 +28,7 @@ int gw_signal_selection_wait_copy(struct gw_signal_selection *, siginfo_t *,
 /* Wait without consuming anything. Its stable record can survive a Host
  * setcontext/longjmp; no pointer to the abandoned call stack is published. */
 int gw_signal_selection_sleep(int, uint64_t, const struct timespec *, int,
-                              void (*)(void *), void *);
+                              int cancellable, void (*)(void *), void *);
 int gw_signal_selection_interrupt(void *, void *, uint64_t *);
 /* Host TP is restored and catchable signals are blocked. Hidden notifications
  * do not become Host handler interruptions. A later real Host delivery wins. */
@@ -37,7 +37,8 @@ void gw_signal_wait_host_delivery(int restart);
 /* Begin leaves delivery blocked until the caller's raw atomic mask-wait.
  * End restores the caller mask/valid handler edits and retires the stable row.
  */
-long gw_signal_wait_syscall(void *, long, long, long, long, long, long, long);
+long gw_signal_mask_wait_syscall(void *, long, const long arguments[6],
+                                 int consumer, int cancellable);
 /* Native non-mask syscalls use an identified unmask/entry window, then block
  * delivery again before returning to C. Kernel timer/copyout rules stay native.
  * Begin/end and retry use the same stable row as atomic mask waits. */

@@ -449,7 +449,8 @@ static void probe_reader(void *argument) {
 
 static ssize_t consuming_read(int descriptor, const struct iovec *vectors,
                               int count, gw_signal_fd_reader backend,
-                              void *cookie, int scalar) {
+                              void *cookie, int scalar,
+                              enum gw_libc_io_policy policy) {
   int saved_errno = errno;
   struct reader_probe probe = {backend, cookie};
   for (;;) {
@@ -492,9 +493,9 @@ static ssize_t consuming_read(int descriptor, const struct iovec *vectors,
       return -1;
     }
 
-    int ready =
-        gw_signal_selection_sleep(consumer, signal_host_logical_mask(physical),
-                                  NULL, 1, probe_reader, &probe);
+    int ready = gw_signal_selection_sleep(
+        consumer, signal_host_logical_mask(physical), NULL, 1,
+        policy == GW_IO_CANCELLABLE, probe_reader, &probe);
     error = errno;
     cancellation_probe(backend, cookie);
     if (ready < 0) {
@@ -529,7 +530,7 @@ ssize_t gw_signal_fd_read_policy(int descriptor, void *buffer, size_t size,
   }
 
   struct iovec vector = {.iov_base = buffer, .iov_len = size};
-  return consuming_read(descriptor, &vector, 1, backend, cookie, 1);
+  return consuming_read(descriptor, &vector, 1, backend, cookie, 1, policy);
 }
 
 struct native_read {
@@ -662,8 +663,8 @@ ssize_t readv(int descriptor, const struct iovec *vectors, int count) {
   }
   struct native_read native = {.descriptor = descriptor,
                                .function = (void *)resolve(B_READ, "read")};
-  return consuming_read(descriptor, vectors, count, descriptor_read, &native,
-                        0);
+  return consuming_read(descriptor, vectors, count, descriptor_read, &native, 0,
+                        GW_IO_CANCELLABLE);
 }
 
 ssize_t __read_chk(int descriptor, void *buffer, size_t size,

@@ -161,9 +161,8 @@ static int transparent_wait(void *record, long number, long arguments[6],
   struct timespec left;
   int result;
   for (;;) {
-    result = gw_signal_wait_result(gw_signal_wait_syscall(
-        record, number, arguments[0], arguments[1], arguments[2], arguments[3],
-        arguments[4], arguments[5]));
+    result = gw_signal_wait_result(
+        gw_signal_mask_wait_syscall(record, number, arguments, -1, 1));
     if (!gw_signal_mask_wait_retry(record, result, errno)) {
       break;
     }

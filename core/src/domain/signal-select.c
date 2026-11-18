@@ -312,6 +312,8 @@ _Static_assert(offsetof(struct sleep_record, native_attempted) == 52,
 extern char gw_signal_wait_resume[];
 extern char gw_signal_native_unmasked[], gw_signal_native_resume[];
 extern char gw_signal_native_rearm[], gw_signal_native_rearm_blocked[];
+extern long gw_signal_wait_syscall(void *, long, long, long, long, long, long,
+                                   long);
 
 int gw_signal_wait_result(long result) {
   if (result < 0 && result >= -4095) {
@@ -446,9 +448,24 @@ uint64_t gw_signal_mask_wait_execution(void *argument) {
   return ((struct sleep_record *)argument)->execution_mask;
 }
 
-int gw_signal_mask_wait_end(void *argument, int result, int error) {
-  struct sleep_record *record = argument;
+static int clear_selection_mask(int descriptor) {
+  uint64_t empty = 0;
+  if (descriptor >= 0 && signal_host_consumer_fd() == descriptor &&
+      syscall(SYS_signalfd4, descriptor, &empty, sizeof empty, 0) < 0) {
+    signal_router_quarantine();
+    return EIO;
+  }
+  return 0;
+}
+
+static int end_mask_wait(struct sleep_record *record, int result, int error,
+                         int consumer) {
   uint64_t returned = gw_nonlocal_mask_block();
+  if (clear_selection_mask(consumer)) {
+    result = -1;
+    error = EIO;
+  }
+
   struct sleep_record *expected = record;
   atomic_compare_exchange_strong_explicit(&waiting, &expected, record->previous,
                                           memory_order_acq_rel,
@@ -462,31 +479,52 @@ int gw_signal_mask_wait_end(void *argument, int result, int error) {
   return result;
 }
 
-#ifndef __ANDROID__
-static void cancelled_mask_wait(void *record) {
-  gw_signal_mask_wait_end(record, -1, ECANCELED);
+int gw_signal_mask_wait_end(void *argument, int result, int error) {
+  return end_mask_wait(argument, result, error, -1);
 }
-#endif
 
-static void cancellation_check(void *record, void (*probe)(void *),
-                               void *argument) {
-#ifndef __ANDROID__
-  /* A cancellation before the mask-wait must not disappear between its last
-   * cancellation check and syscall entry. Delivery stays blocked throughout
-   * this short cleanup scope; a later SIGCANCEL stays kernel-pending until the
-   * atomic wait installs its execution mask. The supplied native probe keeps
-   * GNU FILE no-cancel reads non-cancellable. Interrupted raw waits return
-   * EINTR and their caller checks cancellation after ordinary mask retirement.
-   * No automatic cleanup pointer remains published while a user handler runs.
-   * https://github.com/bminor/glibc/blob/glibc-2.41/nptl/pthread_cancel.c
+struct mask_wait_cleanup {
+  void *record;
+  int consumer;
+};
+
+static void cancelled_mask_wait(struct mask_wait_cleanup *cleanup) {
+  if (cleanup->record) {
+    gw_signal_native_wait_cancel_end(cleanup->record);
+    end_mask_wait(cleanup->record, -1, ECANCELED, cleanup->consumer);
+  }
+}
+
+static void cancellation_check(void *record, int consumer,
+                               void (*probe)(void *), void *argument) {
+  struct mask_wait_cleanup cleanup
+      __attribute__((cleanup(cancelled_mask_wait))) = {record, consumer};
+  probe(argument);
+  cleanup.record = NULL;
+}
+
+long gw_signal_mask_wait_syscall(void *record, long number,
+                                 const long arguments[6], int consumer,
+                                 int cancellable) {
+  /* glibc 2.39 can leave a deferred request pending without sending SIGCANCEL.
+   * Use the same temporary cancellation mode as a native blocking syscall.
+   * The router restores the caller's mode before invoking a user handler, and
+   * compiler unwind metadata retires the wait without linking a pthread
+   * cleanup buffer into its stack.
+   * https://github.com/bminor/glibc/blob/glibc-2.39/nptl/pthread_cancel.c
    */
-  pthread_cleanup_push(cancelled_mask_wait, record);
-  probe(argument);
-  pthread_cleanup_pop(0);
-#else
-  (void)record;
-  probe(argument);
-#endif
+  struct mask_wait_cleanup cleanup
+      __attribute__((cleanup(cancelled_mask_wait))) = {record, consumer};
+  if (cancellable) {
+    gw_signal_native_wait_cancel_begin(record);
+  }
+
+  long result = gw_signal_wait_syscall(record, number, arguments[0],
+                                       arguments[1], arguments[2], arguments[3],
+                                       arguments[4], arguments[5]);
+  gw_signal_native_wait_cancel_end(record);
+  cleanup.record = NULL;
+  return result;
 }
 
 static void test_cancel(void *unused) {
@@ -497,7 +535,7 @@ static void test_cancel(void *unused) {
 }
 
 void gw_signal_mask_wait_cancel_check(void *record) {
-  cancellation_check(record, test_cancel, NULL);
+  cancellation_check(record, -1, test_cancel, NULL);
 }
 
 enum wait_location { WAIT_OUTSIDE, WAIT_SYSCALL, WAIT_SETUP };
@@ -832,7 +870,8 @@ int gw_host_futex_wait(void *word, uint32_t expected,
 
 int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
                               const struct timespec *timeout, int restart,
-                              void (*probe)(void *), void *argument) {
+                              int cancellable, void (*probe)(void *),
+                              void *argument) {
   uint64_t mask = gw_nonlocal_mask_block();
   struct sleep_record *record = sleep_record();
   if (!record) {
@@ -852,7 +891,8 @@ int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
   record->return_mask = mask;
   record->execution_mask = mask;
   waiting = record;
-  cancellation_check(record, probe, argument);
+  cancellation_check(record, descriptor, probe, argument);
+
   struct pollfd poll = {.fd = descriptor, .events = POLLIN};
   int saved_errno = errno;
   struct timespec left;
@@ -863,19 +903,17 @@ int gw_signal_selection_sleep(int descriptor, uint64_t wanted,
   if (gw_signal_selection_sleep_test_point) {
     gw_signal_selection_sleep_test_point();
   }
-  int result = gw_signal_wait_result(gw_signal_wait_syscall(
-      record, SYS_ppoll, (long)&poll, 1, (long)(timeout ? &left : NULL),
-      (long)&mask, sizeof mask, 0));
+  long arguments[] = {(long)&poll, 1,           (long)(timeout ? &left : NULL),
+                      (long)&mask, sizeof mask, 0};
+  int result = gw_signal_wait_result(gw_signal_mask_wait_syscall(
+      record, SYS_ppoll, arguments, descriptor, cancellable));
   int error = errno;
   uint64_t returned_mask = gw_nonlocal_mask_block();
   if (waiting == record) {
     waiting = record->previous;
   }
 
-  uint64_t empty = 0;
-  if (signal_host_consumer_fd() == descriptor &&
-      syscall(SYS_signalfd4, descriptor, &empty, sizeof empty, 0) < 0) {
-    signal_router_quarantine();
+  if (clear_selection_mask(descriptor)) {
     result = -1;
     error = EIO;
   }

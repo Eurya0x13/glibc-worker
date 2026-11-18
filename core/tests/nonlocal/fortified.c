@@ -1,5 +1,6 @@
 /* A separate translation unit verifies the public fortified libc spelling.
  * Do not compile the interposition definitions with this redirection. */
+#undef _FORTIFY_SOURCE
 #define _FORTIFY_SOURCE 2
 #include <setjmp.h>
 

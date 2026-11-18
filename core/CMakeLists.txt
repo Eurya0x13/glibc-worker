@@ -41,7 +41,8 @@ add_library(glibc_worker::signal_interpose ALIAS signal_interpose)
 if(NOT ANDROID)
   # C forced-unwind cleanup, without publishing a pthread cleanup stack record.
   set_source_files_properties(
-    src/domain/signal-sleep-interpose.c src/domain/guest-fd-host.c
+    src/domain/signal-select.c src/domain/signal-sleep-interpose.c
+    src/domain/guest-fd-host.c
     src/domain/guest-signalfd.c src/domain/guest-ready.c PROPERTIES
     COMPILE_OPTIONS -fexceptions)
 endif()
