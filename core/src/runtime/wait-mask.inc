@@ -47,6 +47,7 @@ int __gw_domain_wait_end(struct gw_domain_wait_mask *state) {
   if (!state->active) {
     return 0;
   }
+  state->active = 0;
   uint64_t all = UINT64_MAX;
   int result = INTERNAL_SYSCALL_CALL(rt_sigprocmask, SIG_SETMASK, &all, NULL,
                                      __NSIG_BYTES);

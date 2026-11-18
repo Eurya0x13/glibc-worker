@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <gw-context-events.h>
+#include <gw-signalfd-ops.h>
 
 static gw_libc_context_hook gw_context_hook;
 static __thread uint64_t gw_context_deferred_mask;
@@ -119,6 +120,9 @@ int __gw_context_sigmask(int how, const sigset_t *set, sigset_t *oldset,
     if (error == GW_CONTEXT_DEFER_MASK) {
       defer_context_mask(saved, target, previous);
       return 0;
+    }
+    if (!error && !saved) {
+      __gw_domain_descriptor_restore(target);
     }
     context_physical_mask(&previous, NULL);
     if (error) {

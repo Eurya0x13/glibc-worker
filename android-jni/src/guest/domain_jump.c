@@ -2,6 +2,7 @@
 #include "domain_jump.h"
 #include "domain_transport.h"
 #include "guest_internal.h"
+#include "guest-fd-lease.h"
 #include "nonlocal-mask.h"
 #include "signal-stack.h"
 #include <errno.h>
@@ -109,6 +110,7 @@ void gw_domain_checkpoint_leave(struct gw_domain_native_checkpoint *frame) {
   if (carrier->abort_checkpoint != frame || carrier->jump_target == frame) {
     _exit(125);
   }
+  gw_guest_fd_lease_end(frame);
   for (struct jump_page *p = pages; p; p = p->next) {
     for (unsigned i = 0; i < 64; ++i) {
       if (p->records[i].owner == frame) {
@@ -436,6 +438,14 @@ static void commit_scope_switch(ucontext_t *saved) {
   switch_target = NULL;
 }
 
+static void restore_waits(const ucontext_t *target) {
+  uintptr_t sp = gw_signal_interrupted_sp(target);
+  struct native_stack stack = stack_bounds(sp);
+  if (stack.size) {
+    gw_guest_fd_lease_context(sp, stack.low, stack.size);
+  }
+}
+
 int gw_domain_context_event(enum gw_context_operation operation,
                             ucontext_t *saved, const ucontext_t *target,
                             const uint64_t *entry_mask) {
@@ -445,6 +455,7 @@ int gw_domain_context_event(enum gw_context_operation operation,
   }
   if (target && target == restoring_context) {
     restoring_context = NULL;
+    restore_waits(target);
     return 0;
   }
   struct gw_domain_native_checkpoint *frame = carrier->abort_checkpoint;
@@ -479,6 +490,9 @@ int gw_domain_context_event(enum gw_context_operation operation,
         route(r, frame, 0, NATIVE_SETCONTEXT, mask);
       }
     }
+  }
+  if (!error && operation == GW_CONTEXT_RESTORE) {
+    restore_waits(target);
   }
   if (!entry_mask) {
     gw_nonlocal_mask_restore(mask);

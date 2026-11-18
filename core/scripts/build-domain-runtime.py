@@ -212,7 +212,8 @@ if not (root / "patched").exists():
     replace(
         src / "setjmp/longjmp.c",
         "#include <signal.h>",
-        "#include <signal.h>\n"
+        "#include <signal.h>\n#include <pthreadP.h>\n"
+        "#include <jmpbuf-unwind.h>\n#include <gw-signalfd-ops.h>\n"
         "extern void __gw_domain_jump_event (void *, int, int) attribute_hidden;",
     )
     replace(
@@ -221,6 +222,8 @@ if not (root / "patched").exists():
         "#ifdef GW_DOMAIN_CHECKED_JUMP\n"
         "  __gw_domain_jump_event (env, val, 2);\n"
         "#else\n  __gw_domain_jump_event (env, val, 1);\n#endif\n"
+        "  __gw_domain_descriptor_unwind (_jmpbuf_sp (env[0].__jmpbuf),\n"
+        "      (uintptr_t) THREAD_SELF->stackblock + THREAD_SELF->stackblock_size);\n"
         "  /* Perform any cleanups needed by the frames being unwound.  */",
     )
     replace(
@@ -370,7 +373,7 @@ for origin, name in [
                 "pre-clone-recipient-admission-v1",
                 "optional-logical-consuming-waits-v1",
                 "optional-native-context-events-v3",
-                "optional-guest-signalfd-v1",
+                "optional-guest-signalfd-v2",
             ],
             "sha256": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()

@@ -28,17 +28,18 @@ libc_hidden_proto(__gw_domain_consume_wait);
 
 /* Keep the owning libc's SYSCALL_CANCEL, timeout conversion and error paths.
  * Only the mask transaction changes. NULL masks retain native semantics. */
-#define GW_DOMAIN_WAIT_BEGIN(set)                         \
-  struct gw_domain_wait_mask gw_wait = {0};               \
-  do {                                                    \
-    int gw_error = __gw_domain_wait_begin(set, &gw_wait); \
-    if (gw_error) {                                       \
-      __set_errno(gw_error);                              \
-      return -1;                                          \
-    }                                                     \
-    if (gw_wait.active) {                                 \
-      set = &gw_wait.kernel;                              \
-    }                                                     \
+#define GW_DOMAIN_WAIT_BEGIN(set)                           \
+  struct gw_domain_wait_mask gw_wait                        \
+      __attribute__((cleanup(__gw_domain_wait_end))) = {0}; \
+  do {                                                      \
+    int gw_error = __gw_domain_wait_begin(set, &gw_wait);   \
+    if (gw_error) {                                         \
+      __set_errno(gw_error);                                \
+      return -1;                                            \
+    }                                                       \
+    if (gw_wait.active) {                                   \
+      set = &gw_wait.kernel;                                \
+    }                                                       \
   } while (0)
 
 #define GW_DOMAIN_WAIT_RETURN(call)                \

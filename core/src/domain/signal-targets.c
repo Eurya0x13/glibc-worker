@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <string.h>
 #include <linux/futex.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -20,6 +21,32 @@ static void unlock(struct gw_signal_targets *registry) {
   atomic_flag_clear_explicit(&registry->writer, memory_order_release);
 }
 
+static void disarm(struct gw_signal_target *target) {
+  if (target->wait_link) {
+    *target->wait_link = target->wait_next;
+    if (target->wait_next) {
+      target->wait_next->wait_link = target->wait_link;
+    }
+    target->wait_link = NULL;
+    target->wait_next = NULL;
+  }
+}
+
+static int wake_pollers(struct gw_signal_targets *registry) {
+  int error = 0;
+  while (registry->poll_waiters) {
+    struct gw_signal_target *target = registry->poll_waiters;
+    disarm(target);
+
+    const uint64_t one = 1;
+    if (syscall(SYS_write, target->wait_fd, &one, sizeof one) < 0 &&
+        errno != EAGAIN && !error) {
+      error = errno;
+    }
+  }
+  return error;
+}
+
 static int wake_waiters(struct gw_signal_targets *registry) {
   if (!registry->waits_enabled) {
     return 0;
@@ -30,6 +57,10 @@ static int wake_waiters(struct gw_signal_targets *registry) {
                       INT_MAX, NULL, NULL, 0) < 0
                   ? errno
                   : 0;
+  int poll_error = wake_pollers(registry);
+  if (!error) {
+    error = poll_error;
+  }
   if (error && !registry->wake_error) {
     registry->wake_error = error;
   }
@@ -223,6 +254,7 @@ static int create_target(struct gw_signal_targets *registry, uintptr_t key,
   }
 
   target->registry = registry;
+  target->wait_fd = -1;
   target->key = key;
   target->tid = tid;
   target->pins = tid ? 0 : 1;
@@ -337,10 +369,17 @@ static struct gw_signal_publication send_filtered(
     struct gw_signal_target *filter = target ? target : representative;
     if (!ignored || ((filter->receiver.blocked | filter->real_blocked) &
                      (UINT64_C(1) << (information->si_signo - 1)))) {
+      struct gw_signal_pending *queue =
+          target ? &target->receiver.directed : &registry->inbox.shared;
+      int number = information->si_signo;
+      int coalesced =
+          number < 32 && number > 0 &&
+          (gw_signal_pending_bits(queue) & (UINT64_C(1) << (number - 1)));
       result = gw_signal_inbox_put(&registry->inbox,
                                    target ? &target->receiver : NULL,
                                    information, notify, registry);
       if (!result.status) {
+        registry->poll_generation += !coalesced;
         int error = wake_waiters(registry);
         if (!result.wake_error) {
           result.wake_error = error;
@@ -461,6 +500,65 @@ int gw_signal_targets_wake_waiters(struct gw_signal_targets *registry) {
   return error;
 }
 
+int gw_signal_target_poll_arm(struct gw_signal_target *target,
+                              struct gw_signal_poll_sample *sample, int *fd) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  int error = 0;
+  if (registry->closed || target->receiver.closed || !target->tid) {
+    error = ESRCH;
+  } else if (fd && target->wait_fd < 0) {
+    target->wait_fd = syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (target->wait_fd < 0) {
+      error = errno;
+    }
+  }
+
+  if (!error) {
+    if (fd) {
+      uint64_t discarded;
+      syscall(SYS_read, target->wait_fd, &discarded, sizeof discarded);
+      if (!target->wait_link) {
+        target->wait_next = registry->poll_waiters;
+        target->wait_link = &registry->poll_waiters;
+        if (target->wait_next) {
+          target->wait_next->wait_link = &target->wait_next;
+        }
+        registry->poll_waiters = target;
+      }
+      *fd = target->wait_fd;
+    }
+    *sample = (struct gw_signal_poll_sample){
+        .pending = gw_signal_inbox_pending(&target->receiver),
+        .generation = registry->poll_generation,
+        .deliveries = target->deliveries,
+        .notifications = target->notifications};
+  }
+  unlock(registry);
+  return error;
+}
+
+void gw_signal_target_poll_disarm(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  disarm(target);
+  unlock(registry);
+}
+
+void gw_signal_target_poll_notify(struct gw_signal_target *target) {
+  struct gw_signal_targets *registry = target->registry;
+  lock(registry);
+  ++target->notifications;
+  unlock(registry);
+}
+
+void gw_signal_targets_poll_changed(struct gw_signal_targets *registry) {
+  lock(registry);
+  ++registry->poll_generation;
+  wake_waiters(registry);
+  unlock(registry);
+}
+
 uint64_t gw_signal_target_blocked_pending(struct gw_signal_target *target) {
   struct gw_signal_targets *registry = target->registry;
   lock(registry);
@@ -547,6 +645,10 @@ static int release(struct gw_signal_target *target) {
     error = gw_signal_receiver_destroy(&target->receiver);
   }
   if (!error) {
+    disarm(target);
+    if (target->wait_fd >= 0) {
+      syscall(SYS_close, target->wait_fd);
+    }
     --registry->retained;
     munmap(target, sizeof *target);
   }

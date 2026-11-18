@@ -163,6 +163,7 @@ run(
         source / "guest-worker-signals.c",
         source / "guest-adopted-signals.c",
         source / "guest-signalfd.c",
+        source / "guest-signalfd-ready.c",
         "-o",
         out / "module.so",
         "-lm",

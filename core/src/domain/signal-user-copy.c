@@ -64,20 +64,27 @@ int gw_signal_user_copy_prepare(void) {
 }
 
 static int copy(void *destination, const void *source, size_t length, int out) {
-  if (length > sizeof(siginfo_t)) {
-    return EINVAL;
+  uintptr_t to = (uintptr_t)destination, from = (uintptr_t)source;
+  if (length > UINTPTR_MAX - to || length > UINTPTR_MAX - from) {
+    return EFAULT;
   }
 
   int saved = errno;
   uint64_t mask = lock();
   int error = available() ? 0 : ENOTSUP;
-  if (!error &&
-      syscall(SYS_pwrite64, descriptor, source, length, 0) != (long)length) {
-    error = out ? EIO : EFAULT;
-  }
-  if (!error && syscall(SYS_pread64, descriptor, destination, length, 0) !=
-                    (long)length) {
-    error = out ? EFAULT : EIO;
+  for (size_t offset = 0; !error && offset < length;) {
+    size_t chunk = length - offset;
+    if (chunk > sizeof(siginfo_t)) {
+      chunk = sizeof(siginfo_t);
+    }
+    if (syscall(SYS_pwrite64, descriptor, from + offset, chunk, 0) !=
+        (long)chunk) {
+      error = out ? EIO : EFAULT;
+    } else if (syscall(SYS_pread64, descriptor, to + offset, chunk, 0) !=
+               (long)chunk) {
+      error = out ? EFAULT : EIO;
+    }
+    offset += chunk;
   }
 
   unlock(mask);

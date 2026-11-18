@@ -239,6 +239,56 @@ static void interrupt_read(int restart) {
   assert(!sigaction(SIGURG, &previous, NULL));
 }
 
+static _Atomic int hold_stage;
+
+static void hold_reader(int number) {
+  assert(number == SIGURG);
+  atomic_store_explicit(&hold_stage, 1, memory_order_release);
+  while (atomic_load_explicit(&hold_stage, memory_order_acquire) != 2) {
+    sched_yield();
+  }
+}
+
+static void close_read_description(void) {
+  struct sigaction action = {.sa_handler = hold_reader, .sa_flags = SA_RESTART};
+  struct sigaction previous;
+  sigemptyset(&action.sa_mask);
+  assert(!sigaction(SIGURG, &action, &previous));
+  sigset_t mask = one(SIGURG), inherited;
+  assert(!pthread_sigmask(SIG_UNBLOCK, &mask, &inherited));
+
+  mask = one(PACKET);
+  struct blocked_read call = {.fd = signalfd(-1, &mask, SFD_CLOEXEC)};
+  assert(call.fd >= 0);
+  pthread_t thread;
+  assert(!pthread_create(&thread, NULL, reader, &call));
+  wait_for_read(&call);
+  hold_stage = 0;
+  assert(!pthread_kill(thread, SIGURG));
+  while (atomic_load_explicit(&hold_stage, memory_order_acquire) != 1) {
+    sched_yield();
+  }
+
+  /* Pin the reader in its handler across the mask change and final user
+   * close. The restarted read must use the original OFD's updated mask. */
+  mask = one(OTHER);
+  assert(signalfd(call.fd, &mask, 0) == call.fd);
+  int native[2];
+  assert(!pipe2(native, O_CLOEXEC));
+  assert(dup2(native[0], call.fd) == call.fd);
+  assert(write(native[1], "n", 1) == 1);
+  send(thread, OTHER, 123);
+  atomic_store_explicit(&hold_stage, 2, memory_order_release);
+
+  assert(!pthread_join(thread, NULL) && call.result == sizeof call.packet);
+  check_packet(&call.packet, OTHER, 123);
+  char byte;
+  assert(read(call.fd, &byte, 1) == 1 && byte == 'n');
+  assert(!close(call.fd) && !close(native[0]) && !close(native[1]));
+  assert(!pthread_sigmask(SIG_SETMASK, &inherited, NULL));
+  assert(!sigaction(SIGURG, &previous, NULL));
+}
+
 static void cancel_read(void) {
   sigset_t mask = one(PACKET);
   struct blocked_read call = {.fd = signalfd(-1, &mask, SFD_CLOEXEC)};
@@ -262,6 +312,9 @@ void sdk_guest_signalfd_probe(void) {
   interrupt_read(0);
   interrupt_read(SA_RESTART);
   cancel_read();
+  close_read_description();
+  extern void sdk_guest_signalfd_ready_probe(void);
+  sdk_guest_signalfd_ready_probe();
   assert(!pthread_sigmask(SIG_SETMASK, &inherited, NULL));
   puts(
       "{\"stage\":\"guest-signalfd\",\"aliases\":true,\"copyout\":true,"

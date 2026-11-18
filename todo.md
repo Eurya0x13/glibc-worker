@@ -82,10 +82,13 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   serializes ignored-disposition flush, subsequent sends and action selection.
   The installed service connects the inbox to recipient admission, tagged libc
   send/wait hooks and timely entry during Host execution. Guest-created signalfd
-  descriptors support logical `read`/`readv`, alias mask updates and cancellation.
-  Complete descriptor readiness, job control and the remaining kernel
-  restart/EINTR semantics when the logical action changes or a notification
-  has no deliverable Guest packet.
+  descriptors support logical `read`/`readv`, `poll`/`ppoll`,
+  `select`/`pselect` and the public `epoll` wait APIs. Coverage includes
+  alias mask updates, concurrent close/replacement, waiter cancellation and
+  nested epoll watches. See [Guest signal descriptors](core/docs/en/SIGNAL_WAITING.md#guest-signalfd).
+  Complete raw/private descriptor access, use of Guest descriptors by Host,
+  job control and remaining kernel restart/EINTR semantics when the logical
+  action changes or a notification has no deliverable Guest packet.
   [Private NPTL isolation](core/docs/en/PRIVATE_SIGNALS.md) separates GNU's
   cancellation/timer and credential channels from Bionic's private signals;
   Bionic bootstrap routing and reviewed late data-import routing now cover

@@ -245,6 +245,23 @@ def execute_case(
             ]
         )
         or (
+            mode in ("adopted-signals", "worker-signals")
+            and [r for r in rows if r.get("stage") == "guest-signalfd-ready"]
+            != [
+                {
+                    "stage": "guest-signalfd-ready",
+                    "poll_select": True,
+                    "epoll_modes": True,
+                    "nested": True,
+                    "separate_targets": True,
+                    "concurrent_close": True,
+                    "cancellation": True,
+                    "temporary_masks": True,
+                    "abandoned_waits": True,
+                }
+            ]
+        )
+        or (
             mode == "worker-signals"
             and [r for r in rows if r.get("stage") == "worker-signals"]
             != [

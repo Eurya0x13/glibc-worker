@@ -12,13 +12,16 @@ project_root=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$(dirname "$GW_GUEST_OUT")"
 flags=(-O1 -g -fPIC -Wall -Wextra -Werror -DGW_DOMAIN_JNI)
 if [[ ${GW_NATIVE_UNWIND_INTEGRATION:-0} == 1 ]]; then
-  flags+=(-DGW_DOMAIN_NONLOCAL)
+  flags+=(-DGW_DOMAIN_NONLOCAL -fexceptions)
   unwind_sources=("$project_root/src/guest/domain_jump.c")
   unwind_sources+=(
     "$project_root/src/guest/domain_signal_workers.c"
     "$GW_CORE_INCLUDE/internal/signal-actions.c"
     "$GW_CORE_INCLUDE/internal/signal-consuming.c"
     "$GW_CORE_INCLUDE/internal/guest-signalfd.c"
+    "$GW_CORE_INCLUDE/internal/guest-ready.c"
+    "$GW_CORE_INCLUDE/internal/guest-epoll.c"
+    "$GW_CORE_INCLUDE/internal/guest-fd-lease.c"
     "$GW_CORE_INCLUDE/internal/signal-execution.c"
     "$GW_CORE_INCLUDE/internal/signal-execution-guest.c"
     "$GW_CORE_INCLUDE/internal/start.S"

@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "guest-signalfd.h"
+#include "guest-fd-lease.h"
 #include "nonlocal-mask.h"
 #include "signal-user-copy.h"
 #include <errno.h>
@@ -66,12 +67,12 @@ static uint64_t socket_cookie(int descriptor) {
              : cookie;
 }
 
-static void lock(void) {
+void gw_guest_fds_lock(void) {
   while (atomic_flag_test_and_set_explicit(&writer, memory_order_acquire)) {
   }
 }
 
-static void unlock(void) {
+void gw_guest_fds_unlock(void) {
   atomic_flag_clear_explicit(&writer, memory_order_release);
 }
 
@@ -82,7 +83,7 @@ static int vector_layout(void) {
   }
 
   uint64_t physical = gw_nonlocal_mask_block();
-  lock();
+  gw_guest_fds_lock();
   result = atomic_load_explicit(&layout, memory_order_relaxed);
   if (!result) {
     result = probe_vectors();
@@ -90,7 +91,7 @@ static int vector_layout(void) {
       atomic_store_explicit(&layout, result, memory_order_release);
     }
   }
-  unlock();
+  gw_guest_fds_unlock();
   gw_nonlocal_mask_restore(physical);
   return result;
 }
@@ -129,14 +130,29 @@ static int retired(const struct signal_fd *fd) {
   return 0;
 }
 
-static void reap(void) {
+int gw_guest_signalfd_reap(void) {
   size_t retained = 0;
   for (size_t i = 0; i < count; ++i) {
     if (!retired(&descriptors[i])) {
       descriptors[retained++] = descriptors[i];
     }
   }
-  atomic_store_explicit(&count, retained, memory_order_release);
+  return atomic_exchange_explicit(&count, retained, memory_order_release) !=
+         retained;
+}
+
+uint64_t gw_guest_signalfd_cookie(int descriptor) {
+  uint64_t cookie = count ? socket_cookie(descriptor) : 0;
+  return cookie && find(cookie) ? cookie : 0;
+}
+
+int gw_guest_signalfd_mask(uint64_t cookie, uint64_t *mask) {
+  struct signal_fd *fd = find(cookie);
+  if (!fd) {
+    return 0;
+  }
+  *mask = fd->mask;
+  return 1;
 }
 
 static int reserve(void) {
@@ -163,7 +179,7 @@ static int reserve(void) {
 }
 
 static int create(uint64_t mask, int flags) {
-  reap();
+  gw_guest_signalfd_reap();
   int error = reserve();
   if (error) {
     return -error;
@@ -206,7 +222,7 @@ int gw_guest_signalfd(struct gw_signal_target *target, int descriptor,
                       const sigset_t *set, int flags, int *handled) {
   int saved = errno;
   uint64_t physical = gw_nonlocal_mask_block();
-  lock();
+  gw_guest_fds_lock();
   struct signal_fd *existing =
       descriptor >= 0 && count ? find(socket_cookie(descriptor)) : NULL;
   *handled = descriptor == -1 || existing != NULL;
@@ -227,14 +243,14 @@ int gw_guest_signalfd(struct gw_signal_target *target, int descriptor,
          * The update ignores the close-on-exec/nonblocking creation flags.
          * https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c */
         existing->mask = mask;
-        gw_signal_targets_wake_waiters(target->registry);
+        gw_signal_targets_poll_changed(target->registry);
         result = descriptor;
       } else {
         result = create(mask, flags);
       }
     }
   }
-  unlock();
+  gw_guest_fds_unlock();
   errno = result < 0 ? -result : saved;
   gw_nonlocal_mask_restore(physical);
   return result < 0 ? -1 : result;
@@ -257,9 +273,14 @@ static void encode(struct signalfd_siginfo *record, const siginfo_t *signal) {
 }
 
 struct signal_read {
-  uint64_t cookie, mask, interrupts;
+  struct gw_guest_fd_lease *lease;
+  uint64_t cookie, interrupts;
   int started, nonblocking;
 };
+
+static void release_read(struct signal_read *read) {
+  gw_guest_fd_lease_drop(&read->lease);
+}
 
 struct read_output {
   const struct iovec *vector;
@@ -294,26 +315,30 @@ static int copy_record(struct read_output *out,
   return 0;
 }
 
-static int identify(struct signal_read *read, int descriptor) {
+static int identify(struct gw_signal_target *target, struct signal_read *read,
+                    int descriptor) {
   read->cookie = socket_cookie(descriptor);
   if (!read->cookie) {
     return 0;
   }
   uint64_t physical = gw_nonlocal_mask_block();
-  lock();
+  gw_guest_fds_lock();
   struct signal_fd *fd = find(read->cookie);
   int result = 0;
   if (fd) {
-    long flags = syscall(SYS_fcntl, descriptor, F_GETFL, 0);
-    if (flags < 0 || socket_cookie(descriptor) != read->cookie) {
+    int borrowed = gw_guest_fd_lease_open(&read->lease, target, descriptor,
+                                          (uintptr_t)read);
+    if (borrowed < 0) {
+      result = borrowed;
+    } else if (socket_cookie(borrowed) != read->cookie) {
       result = -EBADF;
     } else {
-      read->mask = fd->mask;
+      long flags = syscall(SYS_fcntl, borrowed, F_GETFL, 0);
       read->nonblocking = (flags & O_NONBLOCK) != 0;
       result = 1;
     }
   }
-  unlock();
+  gw_guest_fds_unlock();
   gw_nonlocal_mask_restore(physical);
   return result;
 }
@@ -326,13 +351,11 @@ static ssize_t take(struct gw_signal_target *target, struct signal_read *read,
   while (out->remaining >= sizeof(struct signalfd_siginfo)) {
     siginfo_t packet;
     struct gw_signal_wait_sample sample;
-    lock();
+    gw_guest_fds_lock();
     struct signal_fd *fd = find(read->cookie);
-    if (fd) {
-      read->mask = fd->mask;
-    }
-    result = gw_signal_target_wait_take(target, read->mask, &packet, &sample);
-    unlock();
+    result = fd ? gw_signal_target_wait_take(target, fd->mask, &packet, &sample)
+                : -EBADF;
+    gw_guest_fds_unlock();
 
     if (result <= 0) {
       if (!result) {
@@ -382,9 +405,10 @@ static ssize_t read_records(struct gw_signal_target *target,
   return result;
 }
 
-static int begin_read(struct signal_read *read, int descriptor, int *handled) {
+static int begin_read(struct gw_signal_target *target, struct signal_read *read,
+                      int descriptor, int *handled) {
   int match = atomic_load_explicit(&count, memory_order_acquire)
-                  ? identify(read, descriptor)
+                  ? identify(target, read, descriptor)
                   : 0;
   *handled = match != 0;
   if (match > 0) {
@@ -401,8 +425,8 @@ ssize_t gw_guest_signalfd_read(struct gw_signal_target *target, int descriptor,
                                void *output, size_t length,
                                gw_libc_wait_event wait, int *handled) {
   int saved = errno;
-  struct signal_read read = {0};
-  ssize_t result = begin_read(&read, descriptor, handled);
+  struct signal_read read __attribute__((cleanup(release_read))) = {0};
+  ssize_t result = begin_read(target, &read, descriptor, handled);
   if (result > 0) {
     int error = gw_signal_user_validate_read(output, length);
     size_t maximum = max_read();
@@ -483,8 +507,8 @@ ssize_t gw_guest_signalfd_readv(struct gw_signal_target *target, int descriptor,
                                 const struct iovec *vectors, int count,
                                 gw_libc_wait_event wait, int *handled) {
   int saved = errno;
-  struct signal_read read = {0};
-  ssize_t result = begin_read(&read, descriptor, handled);
+  struct signal_read read __attribute__((cleanup(release_read))) = {0};
+  ssize_t result = begin_read(target, &read, descriptor, handled);
   if (result > 0) {
     result = read_vector(target, &read, vectors, count, wait);
   }
@@ -492,39 +516,15 @@ ssize_t gw_guest_signalfd_readv(struct gw_signal_target *target, int descriptor,
   return result < 0 ? -1 : result;
 }
 
-uint64_t gw_guest_signalfd_closing(int descriptor) {
-  int saved = errno;
-  uint64_t cookie = atomic_load_explicit(&count, memory_order_acquire)
-                        ? socket_cookie(descriptor)
-                        : 0;
-  errno = saved;
-  return cookie;
-}
-
-void gw_guest_signalfd_closed(uint64_t cookie) {
-  int saved = errno;
-  uint64_t physical = gw_nonlocal_mask_block();
-  lock();
-  struct signal_fd *fd = find(cookie);
-  if (fd && retired(fd)) {
-    size_t remaining = count - (size_t)(fd - descriptors) - 1;
-    memmove(fd, fd + 1, remaining * sizeof *fd);
-    atomic_fetch_sub_explicit(&count, 1, memory_order_release);
-  }
-  unlock();
-  errno = saved;
-  gw_nonlocal_mask_restore(physical);
-}
-
 int gw_guest_signalfd_stop(void) {
-  lock();
-  reap();
+  gw_guest_fds_lock();
+  gw_guest_signalfd_reap();
   int error = count ? EBUSY : 0;
   if (!error && descriptors) {
     munmap(descriptors, capacity * sizeof *descriptors);
     descriptors = NULL;
     capacity = 0;
   }
-  unlock();
+  gw_guest_fds_unlock();
   return error;
 }

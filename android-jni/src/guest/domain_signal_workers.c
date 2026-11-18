@@ -6,6 +6,9 @@
 #include "nonlocal-mask.h"
 #include "signal-consuming.h"
 #include "guest-signalfd.h"
+#include "guest-epoll.h"
+#include "guest-fd-lease.h"
+#include "guest-ready.h"
 #include "signal-stack.h"
 #include "signal-user-copy.h"
 #include "thread-create.h"
@@ -108,6 +111,59 @@ static ssize_t readv_signalfd(int descriptor, const struct iovec *vectors,
                  : 0;
 }
 
+const void *gw_guest_fd_scope(void) {
+  if (!carrier) {
+    return NULL;
+  }
+  return carrier->guest_signal ? (const void *)carrier->guest_signal
+                               : carrier->abort_checkpoint;
+}
+
+static int descriptor(enum gw_libc_descriptor_op op, int fd, int other,
+                      int flags, int *handled) {
+  *handled = 0;
+  return current ? gw_guest_descriptor(current, op, fd, other, flags, handled)
+                 : 0;
+}
+
+static int poll_descriptors(struct pollfd *fds, nfds_t count,
+                            const struct timespec *time, const sigset_t *mask,
+                            gw_libc_poll_wait wait, int *handled) {
+  *handled = 0;
+  return current ? gw_guest_poll(current, fds, count, time, mask, wait, handled)
+                 : 0;
+}
+
+static int select_descriptors(int n, fd_set *r, fd_set *w, fd_set *x,
+                              struct timespec *time, const sigset_t *mask,
+                              gw_libc_poll_wait wait, int *handled) {
+  *handled = 0;
+  return current
+             ? gw_guest_select(current, n, r, w, x, time, mask, wait, handled)
+             : 0;
+}
+
+static int control_epoll(int epfd, int op, int fd,
+                         const struct epoll_event *event, int *handled) {
+  *handled = current != NULL;
+  if (!current) {
+    return 0;
+  }
+  int saved = errno;
+  int result = gw_guest_epoll_ctl(current, epfd, op, fd, event);
+  errno = result < 0 ? -result : saved;
+  return result < 0 ? -1 : result;
+}
+
+static int wait_epoll(int epfd, struct epoll_event *events, int count,
+                      const struct timespec *time, const sigset_t *mask,
+                      gw_libc_poll_wait wait, int *handled) {
+  *handled = current != NULL;
+  return current ? gw_guest_epoll_wait(current, epfd, events, count, time, mask,
+                                       wait)
+                 : 0;
+}
+
 static int prepare_child(void *key, uint64_t inherited, uint64_t kernel,
                          void **cookie) {
   (void)kernel;
@@ -163,6 +219,7 @@ static void leave_child(void *cookie) {
   }
   /* NPTL has finished TLS destructors and blocks catchable application
    * signals for the rest of this thread's life. No frame can resume here. */
+  gw_guest_fd_lease_finish(target);
   current = NULL;
   gw_signal_target_close(target);
   gw_guest_workers_wake_error(gw_signal_target_retire(target));
@@ -193,17 +250,23 @@ static int install_hooks(void) {
       .leave = leave_child};
   const struct gw_libc_signal_consume_hook wait = {
       .size = sizeof wait, .pending = pending, .wait = consuming};
-  const struct gw_libc_signalfd_hook fd = {.size = sizeof fd,
-                                           .open = open_signalfd,
-                                           .read = read_signalfd,
-                                           .readv = readv_signalfd,
-                                           .closing = gw_guest_signalfd_closing,
-                                           .closed = gw_guest_signalfd_closed};
+  const struct gw_libc_signalfd_hook fd = {
+      .size = sizeof fd,
+      .open = open_signalfd,
+      .read = read_signalfd,
+      .readv = readv_signalfd,
+      .descriptor = descriptor,
+      .poll = poll_descriptors,
+      .select = select_descriptors,
+      .epoll_ctl = control_epoll,
+      .epoll_wait = wait_epoll,
+      .unwind = gw_guest_fd_lease_unwind,
+      .restore = gw_guest_fd_lease_context};
   int error = bind_mask(&logical, &physical, &binding_active, virtual_mask);
   if (error || (error = mask_hook(1, mask_changed)) ||
       (error = thread_hook(1, &admission)) ||
       (error = send_hook(1, send_signal)) || (error = consume_hook(1, &wait)) ||
-      (error = signalfd_hook(1, &fd))) {
+      (error = signalfd_hook(2, &fd))) {
     return error;
   }
   return 0;
@@ -291,6 +354,7 @@ int gw_guest_signal_retire(void) {
   if (!target || !carrier) {
     return EINVAL;
   }
+  gw_guest_fd_lease_finish(target);
   current = NULL;
   carrier = NULL;
   gw_signal_target_close(target);
@@ -304,6 +368,7 @@ int gw_guest_workers_fault(int number, void *information, void *frame) {
 }
 
 static void deliver(void *frame, struct gw_guest_signal_state state) {
+  gw_signal_target_poll_notify(current);
   struct gw_signal_delivery delivery;
   int selected;
   while ((selected = gw_signal_actions_deliver(&gw_guest_actions, current,
@@ -397,6 +462,7 @@ void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
     check_publication(gw_signal_target_mask(current, carrier->guest_mask));
   }
 
+  gw_guest_fd_lease_end(activation);
   gw_domain_jump_signal_leave(activation);
   struct jni_domain_signal **link = &carrier->live_signals;
   while (*link != activation) {
@@ -424,6 +490,12 @@ int gw_guest_workers_stop(void) {
     return EBUSY;
   }
   int error = gw_guest_signalfd_stop();
+  if (error) {
+    return error;
+  }
+  gw_guest_fds_lock();
+  error = gw_guest_epoll_stop();
+  gw_guest_fds_unlock();
   if (error) {
     return error;
   }

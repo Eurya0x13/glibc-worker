@@ -11,7 +11,13 @@ ssize_t gw_guest_signalfd_read(struct gw_signal_target *, int, void *, size_t,
 ssize_t gw_guest_signalfd_readv(struct gw_signal_target *, int,
                                 const struct iovec *, int, gw_libc_wait_event,
                                 int *handled);
-uint64_t gw_guest_signalfd_closing(int);
-void gw_guest_signalfd_closed(uint64_t);
 int gw_guest_signalfd_stop(void);
+
+/* Shared by descriptor bookkeeping and its readiness adapters. Hold the
+ * writer only with catchable signals physically blocked. */
+void gw_guest_fds_lock(void);
+void gw_guest_fds_unlock(void);
+uint64_t gw_guest_signalfd_cookie(int);
+int gw_guest_signalfd_mask(uint64_t, uint64_t *);
+int gw_guest_signalfd_reap(void);
 #endif

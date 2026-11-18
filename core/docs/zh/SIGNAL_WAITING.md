@@ -303,24 +303,36 @@ libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等
 真实内核待决队列隔离、发布唤醒阻塞者、取消及 Guest 可见中断。已安装 JNI worker
 和收养载体都可以启用同一钩子。
 
-## Guest signalfd 消费
+## Guest signalfd
 
 匹配的 GNU libc 在访问 Guest 创建的信号描述符时，将 `signalfd`、`read` 和
-`readv` 路由到逻辑接收者。请求掩码归打开文件描述所有。通过 `dup` 的别名更新掩码，
-阻塞中的读取也会按新掩码选择。读取先查调用线程的私有队列，再查 Guest 共享队列。
-更新掩码时保留已有的非阻塞状态和 close-on-exec 标志。
-每个打开文件描述保留一个私有套接字端点，用于观察最后一个别名关闭。
+`readv` 路由到逻辑接收者。掩码属于打开文件描述。通过 `dup` 的别名更新掩码后，
+阻塞中的读取按新掩码选择，并保留已有的非阻塞状态和 close-on-exec 标志。读取先选
+调用线程的私有队列，再选 Guest 共享队列。
 
-适配层经内核复制完整的 Linux `signalfd_siginfo` 记录，保留排队值、`SI_TKILL`、
-`EFAULT` 和部分成功时的字节数。首次 `readv` 探测实际内核，选择旧版的逐向量读取或新版的
-跨向量分散复制。`readv` 在调用栈保存向量快照，最多为内核的 `IOV_MAX` 项。
-阻塞读取保留所属 libc 的取消点。Guest 处理器未设置 `SA_RESTART`
-时中断读取，设置后继续等待。最后一个别名关闭时回收底层描述。裸系统调用关闭或替换
-的描述符会在后续创建描述符或关闭运行时时回收。
+适配层通过内核复制完整的 Linux `signalfd_siginfo` 记录，保留排队值、`SI_TKILL`、
+`EFAULT` 和部分成功时的字节数。首次 `readv` 探测当前内核，选用逐向量读取或
+跨向量分散复制。阻塞读取保留所属 libc 的取消点，并遵守 `SA_RESTART`。
 
-已安装的 worker 和收养载体回归用其所属 GNU libc 测试上述接口。`poll`、`select`、
-`epoll` 的就绪通知、私有或裸 I/O、Host 使用 Guest 描述符及完整的并发描述符退休
-仍属于信号兼容性待办。
+`poll`、`ppoll`、`select`、`pselect` 和公开的 `epoll` 等待接口检查调用者的
+私有及共享待决队列，不消费其中的消息。掩码匹配时才报告输入就绪。普通描述符继续
+使用 Linux 的就绪判定，可和 Guest 描述符一起等待。Epoll 支持水平触发、边沿触发、
+单次触发后重新启用、按不同描述符编号注册别名，以及嵌套监听。逻辑队列变更通过
+私有通知唤醒等待者。调用方重新检查队列后才报告就绪，内部唤醒沿用原始截止时间和
+临时信号掩码。
 
-上游规则见 [Linux signalfd](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
-和 [旧版 VFS 向量读取](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c)。
+每个 Guest signalfd 保留一个对端，用于观察内核的最终关闭。Epoll 使用与 Linux
+一致的打开文件描述和描述符编号组合标识监听项。打开文件描述锁识别 epoll 别名，
+在最终关闭后回收监听，即使原编号已经复用。已经开始的读取和 epoll 等待保留
+原有的打开文件描述，直到返回或展开。Poll 和 select 在并发关闭或替换后按当前
+编号重新检查。复用的编号不会收到旧信号描述符的就绪事件。
+
+已安装的 worker 和收养载体回归覆盖混合就绪、独立接收者、嵌套 epoll、并发关闭、
+超时、掩码、取消和原生跳转清理。此契约适用于已注册 Guest 线程经所属 GNU libc
+发起的调用。裸系统调用、libc 私有 I/O 入口和 Host 使用 Guest signalfd 属于其他
+兼容性工作。
+
+- [Linux signalfd 选择与掩码更新](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
+- [Linux eventpoll 监听标识与生命周期](https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c)
+- [Linux 打开文件描述锁](https://github.com/torvalds/linux/blob/v6.12/fs/locks.c)
+- [旧版 VFS 向量读取](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c)
