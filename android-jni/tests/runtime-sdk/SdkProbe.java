@@ -9,6 +9,7 @@ public final class SdkProbe {
   static native void prepareAdoptedSignal(long address);
   static native int finishAdoptedSignal();
   static native int jumpAdoptedSignal(long address);
+  static native int runVmSignalGuest(long address, ByteBuffer control);
   static native int hostNested();
   static native int hostMask();
   static native int hostMaskBlocked();

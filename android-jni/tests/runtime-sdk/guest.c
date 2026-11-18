@@ -169,7 +169,7 @@ JNIEXPORT jint JNICALL sdk_nonlocal_probe(JNIEnv *env, jclass cls, jint mode) {
   if (mode >= 97 && mode <= 100) {
     return sdk_guest_signal_unwind_probe(mode);
   }
-  if (mode == 87 || mode == 88) {
+  if (mode == 87 || mode == 88 || mode == 101) {
     return sdk_guest_fault_probe(mode);
   }
   if (mode == 90 || mode == 91 || mode == 94 || mode == 95 || mode == 96) {
@@ -403,6 +403,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   extern void sdk_adopted_signal_prepare(JNIEnv *, jclass, jlong);
   extern jint sdk_adopted_signal_finish(JNIEnv *, jclass);
   extern jint sdk_adopted_signal_jump(JNIEnv *, jclass, jlong);
+  extern jint sdk_guest_vm_signals(JNIEnv *, jclass, jlong, jobject);
   JNINativeMethod methods[] = {
       {"probe", "(I[B)I", (void *)probe},
       {"tid", "()J", (void *)tid},
@@ -410,7 +411,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
       {"guestDescriptor", "(II)I", (void *)sdk_guest_descriptor_probe},
       {"prepareAdoptedSignal", "(J)V", (void *)sdk_adopted_signal_prepare},
       {"finishAdoptedSignal", "()I", (void *)sdk_adopted_signal_finish},
-      {"jumpAdoptedSignal", "(J)I", (void *)sdk_adopted_signal_jump}};
+      {"jumpAdoptedSignal", "(J)I", (void *)sdk_adopted_signal_jump},
+      {"runVmSignalGuest", "(JLjava/nio/ByteBuffer;)I",
+       (void *)sdk_guest_vm_signals}};
   int result = (*env)->RegisterNatives(env, cls, methods,
                                        sizeof methods / sizeof *methods);
   (*env)->DeleteLocalRef(env, cls);

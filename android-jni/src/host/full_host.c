@@ -541,7 +541,13 @@ static int context_finish(struct host_context *c, int thread_exiting) {
 }
 
 static void context_destructor(void *ptr) {
-  if (context_finish(ptr, 1)) {
+  int error = context_finish(ptr, 1);
+#ifdef GW_DOMAIN_NONLOCAL
+  if (!error) {
+    error = gw_nonlocal_finish_thread();
+  }
+#endif
+  if (error) {
     gw_dlopen_quarantine();
   }
 }

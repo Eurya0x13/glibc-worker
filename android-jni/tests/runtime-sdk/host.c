@@ -34,6 +34,7 @@
 #include "nonlocal_probe.h"
 #include "adopted-signals.h"
 #include "guest-fd-probe.h"
+#include "vm-signals.h"
 #include "internal/domain_unwind.h"
 #ifdef __ANDROID__
 #include "vm-start.h"
@@ -46,6 +47,7 @@ struct application {
   int adopted_signals;
   int nonlocal;
   int router_quarantine;
+  const char *vm_signal_directory;
   const struct gw_loader_api_v1 *loader;
   uint64_t module;
 };
@@ -82,6 +84,13 @@ static void run_on_host_stack(void) {
 
 static void adopted_swap_host(struct adopted_signal_probe *probe) {
   int invocation = atomic_fetch_add(&probe->host_entries, 1);
+  if (probe->mode == SIGNAL_RETIRE_CHAIN && invocation == 1) {
+    atomic_store_explicit(&probe->requested, 3, memory_order_release);
+    while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 3) {
+      sched_yield();
+    }
+    assert(!"Innermost Host callback resumed after retirement");
+  }
   if (invocation) {
     assert(probe->swap_phase == 2 * invocation - 1 && !probe->host_returned);
     assert(signal_host_retirement_busy());
@@ -96,6 +105,9 @@ static void adopted_swap_host(struct adopted_signal_probe *probe) {
   while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
     sched_yield();
   }
+  if (adopted_retires_saved(probe->mode)) {
+    assert(!"Retired Host callback resumed");
+  }
   assert(probe->swap_phase == 2 * SIGNAL_SWAP_ROUNDS + 1);
   assert(probe->host_entries == SIGNAL_SWAP_ROUNDS + 1);
   for (size_t i = 0; i < sizeof retained; ++i) {
@@ -106,7 +118,9 @@ static void adopted_swap_host(struct adopted_signal_probe *probe) {
 
 static void adopted_host_jump(int number) {
   assert(number == SIGWINCH);
-  if (adopted_jump_active) {
+  struct adopted_signal_probe *probe = adopted_host_nested;
+  if (adopted_jump_active &&
+      (!probe || probe->mode != SIGNAL_RETIRE_HOST_JUMP || probe->swap_phase)) {
     siglongjmp(adopted_jump, 39);
   }
 #ifndef __ANDROID__
@@ -121,15 +135,15 @@ static void adopted_host_jump(int number) {
     assert(!"Host context restore returned to Guest signal scope");
   }
 #endif
-  struct adopted_signal_probe *probe = adopted_host_nested;
   if (probe) {
     assert(syscall(SYS_gettid) == probe->tid);
-    if (probe->mode == SIGNAL_PARENT_SWAP) {
+    if (adopted_scope_swap(probe->mode)) {
       adopted_swap_host(probe);
       return;
     }
     atomic_store_explicit(&probe->requested, 2, memory_order_release);
-    while (atomic_load_explicit(&probe->handled, memory_order_acquire) < 2) {
+    while (atomic_load_explicit(&probe->handled, memory_order_acquire) <
+           adopted_activations(probe->mode)) {
       sched_yield();
     }
     assert(!adopted_guest_target(probe->mode) &&
@@ -176,7 +190,8 @@ static void await_adopted_signal(JNIEnv *env, jclass cls,
     assert((*env)->CallStaticIntMethod(env, cls, observe, shared) == 1);
     assert(!(*env)->ExceptionCheck(env));
     (*env)->DeleteLocalRef(env, shared);
-  } else if (probe->mode == SIGNAL_HOST_JUMP) {
+  } else if (probe->mode == SIGNAL_HOST_JUMP ||
+             probe->mode == SIGNAL_RETIRE_HOST_JUMP) {
     int result = sigsetjmp(adopted_jump, 1);
     if (!result) {
       adopted_jump_active = 1;
@@ -198,6 +213,10 @@ static void await_adopted_signal(JNIEnv *env, jclass cls,
     }
     if (adopted_parent_target(probe->mode)) {
       assert(probe->parent_resumed && !probe->host_returned);
+    } else if (adopted_retires_saved(probe->mode)) {
+      /* handled is published on entry. The interrupted Host cannot execute
+       * this check until the older Guest handler has completed retirement. */
+      assert(probe->swap_phase == 1 && !probe->host_returned);
     } else {
       assert(probe->host_returned);
     }
@@ -220,7 +239,7 @@ static void await_adopted_signal(JNIEnv *env, jclass cls,
     assert(!result);
   }
   assert(atomic_load_explicit(&probe->handled, memory_order_acquire) ==
-         (adopted_nested(probe->mode) ? 2 : 1));
+         adopted_activations(probe->mode));
 }
 
 static void adopted_signals(JNIEnv *env, jclass cls) {
@@ -240,10 +259,13 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
     struct adopted_signal_probe probe = {.mode = mode,
                                          .tid = (int)syscall(SYS_gettid)};
     struct sigaction original;
-    if (mode == SIGNAL_PARENT_SWAP) {
+    if (adopted_scope_swap(mode)) {
       assert(!sigaction(SIGWINCH, NULL, &original));
       struct sigaction action = original;
       action.sa_flags |= SA_ONSTACK;
+      if (mode == SIGNAL_RETIRE_CHAIN) {
+        action.sa_flags |= SA_NODEFER;
+      }
       assert(!sigaction(SIGWINCH, &action, NULL));
     }
     jlong address = (jlong)(uintptr_t)&probe;
@@ -263,9 +285,11 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
       }
       assert((*env)->CallStaticIntMethod(env, cls, finish) == 73);
     }
-    if (mode == SIGNAL_PARENT_SWAP) {
+    if (adopted_scope_swap(mode)) {
       assert(!sigaction(SIGWINCH, &original, NULL));
       assert(!signal_host_retirement_busy());
+    }
+    if (mode == SIGNAL_PARENT_SWAP) {
       printf(
           "{\"stage\":\"adopted-scope-resume\",\"round_trips\":%d,"
           "\"host_reentries\":%d,\"host_returned\":true}\n",
@@ -274,6 +298,15 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
       assert(probe.overlap_rejected && probe.host_returned &&
              !signal_host_retirement_busy());
       puts("{\"stage\":\"adopted-scope-overlap\",\"rejected\":true}");
+    } else if (adopted_retires_saved(mode)) {
+      int retired = adopted_activations(mode) - 1;
+      assert(probe.host_entries == retired && !probe.host_returned &&
+             probe.stale_rejections == retired);
+      printf(
+          "{\"stage\":\"adopted-scope-retire\",\"exit\":\"%s\","
+          "\"stale_rejected\":%d,\"host_callbacks_retired\":%d}\n",
+          mode == SIGNAL_RETIRE_HOST_JUMP ? "host-jump" : "return", retired,
+          retired);
     }
     adopted_host_nested = NULL;
     assert(!(*env)->ExceptionCheck(env));
@@ -282,6 +315,43 @@ static void adopted_signals(JNIEnv *env, jclass cls) {
         "\"owned_context\":true,\"post_signal_jni\":true}\n",
         mode);
   }
+}
+
+static void vm_suspend_and_sample(JNIEnv *env, const char *directory) {
+  extern _Atomic int domain_sr_deliveries;
+  struct sdk_vm_signals control = {0};
+  jclass cls = (*env)->FindClass(env, "SdkVmSignals");
+  assert(cls);
+  jmethodID run = (*env)->GetStaticMethodID(
+      env, cls, "run", "(Ljava/nio/ByteBuffer;JLjava/lang/String;)[I");
+  jobject shared = (*env)->NewDirectByteBuffer(env, &control, sizeof control);
+  jstring path = (*env)->NewStringUTF(env, directory);
+  assert(run && shared && path);
+
+  int before = atomic_load(&domain_sr_deliveries);
+  jintArray result = (*env)->CallStaticObjectMethod(
+      env, cls, run, shared, (jlong)(uintptr_t)&control, path);
+  if ((*env)->ExceptionCheck(env)) {
+    (*env)->ExceptionDescribe(env);
+    abort();
+  }
+  jint samples[2];
+  assert(result && (*env)->GetArrayLength(env, result) == 2);
+  (*env)->GetIntArrayRegion(env, result, 0, 2, samples);
+  assert(!(*env)->ExceptionCheck(env));
+  int delivered = atomic_load(&domain_sr_deliveries) - before;
+  assert(control.stage == SDK_VM_STACKS_RELEASED && samples[0] > 0 &&
+         samples[1] > 0 && delivered >= samples[1]);
+  printf(
+      "{\"stage\":\"vm-suspend-and-sample\",\"parked_frames\":2,"
+      "\"sr_deliveries\":%d,\"native_samples\":%d,\"java_samples\":%d,"
+      "\"jni_return_suspended\":true,\"stacks_released\":true}\n",
+      delivered, samples[0], samples[1]);
+
+  (*env)->DeleteLocalRef(env, result);
+  (*env)->DeleteLocalRef(env, path);
+  (*env)->DeleteLocalRef(env, shared);
+  (*env)->DeleteLocalRef(env, cls);
 }
 
 static long guest_owner_tid(void) {
@@ -1375,8 +1445,8 @@ static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
     assert(observed == 73 && !(*env)->ExceptionCheck(env));
     assert(native_entry(env, cls, 0) == 73);
   }
-  int fpe = native_entry(env, cls, 87);
-  assert((fpe == 73 || fpe == 74) && !(*env)->ExceptionCheck(env));
+  assert(native_entry(env, cls, 87) == 73 && !(*env)->ExceptionCheck(env));
+  assert(native_entry(env, cls, 101) == 73 && !(*env)->ExceptionCheck(env));
   assert(native_entry(env, cls, 0) == 73);
   guest_signal_unwind(env, cls);
   struct sigaction trap_previous,
@@ -1582,6 +1652,9 @@ static void *application_run(void *argument) {
   if (app->adopted_signals) {
     adopted_signals(env, cls);
   }
+  if (app->vm_signal_directory) {
+    vm_suspend_and_sample(env, app->vm_signal_directory);
+  }
   if (app->adopted_signals || app->worker_signals) {
     extern void sdk_host_guest_fds(JNIEnv *, jclass, int, int);
     sdk_host_guest_fds(env, cls, worker, app->adopted_signals);
@@ -1642,6 +1715,7 @@ static void retry_preclaim_failure(JNIEnv *env,
 int main(int argc, char **argv) {
   assert(argc == 9);
   int test_adopted_signals = !strcmp(argv[8], "adopted-signals");
+  int test_vm_signals = !strcmp(argv[8], "vm-signals");
   int test_guest_signalfd =
       test_adopted_signals || !strcmp(argv[8], "worker-signals");
   if (test_guest_signalfd) {
@@ -1783,6 +1857,7 @@ int main(int argc, char **argv) {
       .adopted_signals = test_adopted_signals,
       .nonlocal = nonlocal,
       .router_quarantine = !strcmp(argv[8], "router-quarantine"),
+      .vm_signal_directory = test_vm_signals ? argv[7] : NULL,
       .loader = loader,
       .module = library.handle};
   pthread_t thread;

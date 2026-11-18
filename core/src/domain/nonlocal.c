@@ -60,24 +60,16 @@ struct gw_nonlocal_checkpoint {
  * the libc's saved caller and its pointer/shadow-stack protection:
  * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/x86_64/setjmp.S
  * https://android.googlesource.com/platform/bionic/+/main/libc/arch-arm64/bionic/setjmp.S
- * Slots from retired scopes are reused. The owning thread retains its
- * high-water pages and captures made outside bridge scopes. */
+ * Slots from retired scopes are reused. An adopted Host thread keeps its
+ * high-water pages until its exit hook releases them. */
 struct checkpoint_page {
   struct checkpoint_page *next;
   struct gw_nonlocal_checkpoint records[64];
 };
 static _Thread_local struct checkpoint_page *pages;
+static _Thread_local int thread_finished;
 
-static _Thread_local struct {
-  int active, routed;
-  void *buffer;
-  int value;
-  restore_fn restore;
-  struct gw_nonlocal_scope *target;
-  uint64_t target_generation;
-  uint64_t mask;
-  uintptr_t jump_sp;
-} pending;
+static _Thread_local struct gw_nonlocal_transfer pending;
 
 int gw_nonlocal_init(void) {
   /* Bootstrap only, serialized before creating recipients. No resolution is
@@ -202,7 +194,9 @@ void *gw_nonlocal_capture(void *buffer, unsigned kind, uintptr_t sp,
   }
   int saved = errno;
   uint64_t mask = gw_nonlocal_mask_block();
-  record_capture(buffer, kind, sp, pc);
+  if (!thread_finished || top) {
+    record_capture(buffer, kind, sp, pc);
+  }
   gw_nonlocal_mask_restore(mask);
   errno = saved;
   return captures[kind];
@@ -221,7 +215,45 @@ void gw_nonlocal_enter(struct gw_nonlocal_scope *scope) {
 }
 
 int gw_nonlocal_pending(void) {
-  return pending.active;
+  return pending.kind != GW_NONLOCAL_IDLE;
+}
+
+int gw_nonlocal_finish_thread(void) {
+  int saved = errno;
+  uint64_t mask = gw_nonlocal_mask_block();
+  int error = 0;
+  if (top || gw_nonlocal_pending()) {
+    error = EBUSY;
+  } else {
+    while (pages) {
+      struct checkpoint_page *page = pages;
+      struct checkpoint_page *next = page->next;
+      if (syscall(SYS_munmap, page, sizeof *page)) {
+        error = errno;
+        break;
+      }
+      pages = next;
+    }
+    if (!error) {
+      thread_finished = 1;
+    }
+  }
+
+  gw_nonlocal_mask_restore(mask);
+  errno = saved;
+  return error;
+}
+
+void gw_nonlocal_suspend_transfer(struct gw_nonlocal_transfer *saved) {
+  *saved = pending;
+  pending = (struct gw_nonlocal_transfer){0};
+}
+
+void gw_nonlocal_restore_transfer(const struct gw_nonlocal_transfer *saved) {
+  if (gw_nonlocal_pending()) {
+    _exit(125);
+  }
+  pending = *saved;
 }
 
 const void *gw_nonlocal_scope_current(void) {
@@ -230,7 +262,7 @@ const void *gw_nonlocal_scope_current(void) {
 
 int gw_nonlocal_select(struct gw_nonlocal_scope *from,
                        struct gw_nonlocal_scope *to) {
-  if (top != from || !to || !to->generation || pending.active) {
+  if (top != from || !to || !to->generation || gw_nonlocal_pending()) {
     return EBUSY;
   }
   top = to;
@@ -252,24 +284,22 @@ static void retire_jumped_descriptors(uintptr_t sp) {
 static _Noreturn void continue_transfer(void) {
   if (top == pending.target &&
       (!top || top->generation == pending.target_generation)) {
-    void *buffer = pending.buffer;
-    int value = pending.value;
-    restore_fn restore = pending.restore;
-    uint64_t mask = pending.mask;
-    int routed = pending.routed;
-    struct gw_nonlocal_scope *target = pending.target;
-    pending.active = 0;
-    pending.buffer = NULL;
+    struct gw_nonlocal_transfer transfer = pending;
+    pending = (struct gw_nonlocal_transfer){0};
     prepare_native_restore();
-    if (routed) {
+    if (transfer.kind == GW_NONLOCAL_RESUME) {
+      transfer.resume(transfer.buffer);
+      _exit(125);
+    }
+    if (transfer.kind == GW_NONLOCAL_ROUTE) {
       /* The receiver cleans up with signals blocked, just like intermediate
        * landing scopes. Its caller owns restoration of the execution mask. */
-      restores[0](target->landing, 1);
+      restores[0](transfer.target->landing, 1);
       __builtin_unreachable();
     }
-    retire_jumped_descriptors(pending.jump_sp);
-    gw_nonlocal_mask_restore(mask);
-    restore(buffer, value);
+    retire_jumped_descriptors(transfer.jump_sp);
+    gw_nonlocal_mask_restore(transfer.mask);
+    transfer.restore(transfer.buffer, transfer.value);
   } else if (top) {
     restores[0](top->landing, 1);
   }
@@ -290,7 +320,8 @@ void gw_nonlocal_leave(struct gw_nonlocal_scope *scope) {
     *r = (struct gw_nonlocal_checkpoint){0};
   }
   top = scope->previous;
-  if (pending.active) {
+  scope->generation = 0;
+  if (gw_nonlocal_pending()) {
     continue_transfer();
   }
   gw_nonlocal_mask_restore(mask);
@@ -308,15 +339,15 @@ static int live_checkpoint(const struct gw_nonlocal_checkpoint *record) {
 static _Noreturn void transfer(const struct gw_nonlocal_checkpoint *record,
                                void *buffer, int value, restore_fn restore,
                                uint64_t mask) {
-  pending.buffer = buffer;
-  pending.active = 1;
-  pending.routed = 0;
-  pending.value = value;
-  pending.restore = restore;
-  pending.target = record->scope;
-  pending.target_generation = record->generation;
-  pending.mask = mask;
-  pending.jump_sp = record->kind == CONTEXT_CAPTURE ? 0 : record->sp;
+  pending = (struct gw_nonlocal_transfer){
+      .kind = GW_NONLOCAL_RESTORE,
+      .buffer = buffer,
+      .value = value,
+      .restore = restore,
+      .target = record->scope,
+      .target_generation = record->generation,
+      .mask = mask,
+      .jump_sp = record->kind == CONTEXT_CAPTURE ? 0 : record->sp};
   continue_transfer();
 }
 
@@ -336,7 +367,7 @@ _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind) {
   }
   /* An unobserved capture cannot establish which live resources it skips.
    * This remains an integration failure, never a compatibility success. */
-  if (!r || r->kind == CONTEXT_CAPTURE || pending.active ||
+  if (!r || r->kind == CONTEXT_CAPTURE || gw_nonlocal_pending() ||
       !live_checkpoint(r)) {
     _exit(125);
   }
@@ -426,7 +457,7 @@ int gw_nonlocal_setcontext(const ucontext_t *context) {
     ucontext_t direct = *context;
     return restore_context(&direct, mask);
   }
-  if (!record || pending.active || !live_checkpoint(record)) {
+  if (!record || gw_nonlocal_pending() || !live_checkpoint(record)) {
     gw_nonlocal_mask_restore(mask);
     errno = ENOTSUP;
     return -1;
@@ -452,19 +483,38 @@ int gw_nonlocal_setcontext(const ucontext_t *context) {
 
 #endif
 
-_Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *target) {
+static uint64_t begin_route(struct gw_nonlocal_scope *target) {
   uint64_t mask = gw_nonlocal_mask_block();
   struct gw_nonlocal_scope *ancestor = top;
   while (ancestor && ancestor != target) {
     ancestor = ancestor->previous;
   }
-  if (!target || !ancestor || pending.active || !gw_nonlocal_ready()) {
+  if (!target || !ancestor || !target->generation || gw_nonlocal_pending() ||
+      !gw_nonlocal_ready()) {
     _exit(125);
   }
-  pending.active = 1;
-  pending.routed = 1;
-  pending.target = target;
-  pending.target_generation = target->generation;
-  pending.mask = mask;
+  return mask;
+}
+
+_Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *target) {
+  uint64_t mask = begin_route(target);
+  pending =
+      (struct gw_nonlocal_transfer){.kind = GW_NONLOCAL_ROUTE,
+                                    .target = target,
+                                    .target_generation = target->generation,
+                                    .mask = mask};
+  continue_transfer();
+}
+
+_Noreturn void gw_nonlocal_retire_to(struct gw_nonlocal_scope *target,
+                                     void (*resume)(void *), void *argument) {
+  uint64_t mask = begin_route(target);
+  pending =
+      (struct gw_nonlocal_transfer){.kind = GW_NONLOCAL_RESUME,
+                                    .target = target,
+                                    .target_generation = target->generation,
+                                    .resume = resume,
+                                    .buffer = argument,
+                                    .mask = mask};
   continue_transfer();
 }

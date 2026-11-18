@@ -57,26 +57,63 @@ uint64_t gw_domain_reserved_signals(void) {
   return virtual_signals();
 }
 
-void gw_domain_signal_select(struct jni_domain_signal *source,
-                             struct jni_domain_signal *target) {
-  struct gw_signal_execution *from = source->execution, *to = target->execution;
-  struct domain_signal_call call = {.entry = session->signal_select_host,
-                                    .tp = from->host.tp,
-                                    .info = from,
-                                    .context = to};
+static int signal_call_host(struct gw_signal_execution *source,
+                            int (*entry)(int, void *, void *), void *argument,
+                            void *context) {
+  struct domain_signal_call call = {.entry = entry,
+                                    .tp = source->host.tp,
+                                    .info = argument,
+                                    .context = context};
 #if defined(__aarch64__)
-  call.x18 = from->host.saved[12];
-  call.control[0] = from->host.saved[21];
-  call.control[1] = from->host.saved[22];
+  call.x18 = source->host.saved[12];
+  call.control[0] = source->host.saved[21];
+  call.control[1] = source->host.saved[22];
 #else
-  call.control[0] = from->host.saved[6];
-  call.control[1] = from->host.saved[7];
+  call.control[0] = source->host.saved[6];
+  call.control[1] = source->host.saved[7];
 #endif
-  if (session->signal_call(&call) || gw_guest_signal_select(from, to)) {
+  return session->signal_call(&call);
+}
+
+static void select_signal(struct jni_domain_signal *from,
+                          struct jni_domain_signal *to) {
+  if (gw_guest_signal_select(from->execution, to->execution)) {
     _exit(125);
   }
-  current->guest_signal = target;
-  current->exchange.guest_execution_mask = target->carrier_mask;
+  current->guest_signal = to;
+  current->exchange.guest_execution_mask = to->carrier_mask;
+}
+
+void gw_domain_signal_select(struct jni_domain_signal *source,
+                             struct jni_domain_signal *target) {
+  if (signal_call_host(source->execution, session->signal_select_host,
+                       source->execution, target->execution)) {
+    _exit(125);
+  }
+  select_signal(source, target);
+}
+
+void gw_domain_signal_retire_leaf(struct jni_domain_signal *source,
+                                  struct jni_domain_signal *leaf) {
+  struct jni_domain_signal *parent = leaf->previous;
+  struct gw_signal_retirement plan = {.source = source->execution,
+                                      .leaf = leaf->execution,
+                                      .parent = parent->execution};
+  if (signal_call_host(plan.source, session->signal_prepare_retire, &plan,
+                       NULL)) {
+    _exit(125);
+  }
+
+  select_signal(source, leaf);
+  plan.source->swap(&plan.source->guest, &plan.leaf->host);
+
+  /* The leaf's stack and records have been released by this point. */
+  if (current->guest_signal != parent) {
+    _exit(125);
+  }
+  if (parent != source) {
+    select_signal(parent, source);
+  }
 }
 
 uint64_t gw_domain_rpc_return_mask(uint64_t original) {

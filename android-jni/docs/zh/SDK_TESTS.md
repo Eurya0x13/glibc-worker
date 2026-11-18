@@ -73,11 +73,12 @@ JSON 观测必须包含 15 项 Guest 检查及八个 Guest 故障线程。
 SYS 用例只在可丢弃的载体线程安装不可撤销的过滤器，以 `getpid` 的特定参数触发故障，
 普通调用继续可用，并检查 `siginfo_t` 中的系统调用号、架构及调用地址。
 
-额外的 `guest-fpe` 观测启用 `FE_DIVBYZERO` 后执行真实浮点除法，检查 `FPE_FLTDIV`、
-Guest 跳转恢复、后续普通 JNI 调用，并恢复原浮点环境。桌面要求
-`PASS_REAL_HARDWARE`。AArch64 的异常陷阱使能属于可选硬件能力；原生
-`feenableexcept` 无法启用时，Android 记录 `UNSUPPORTED_HARDWARE` 和
-`recovered:false`，不计为 FPE 恢复成功。非预期信号、缺少观测或恢复失败仍使套件失败。
+两项 `guest-fpe` 观测分别使用收养载体及 GNU 自建 pthread。各自启用
+`FE_DIVBYZERO` 后执行浮点除法，检查 `FPE_FLTDIV`、Guest 跳转及浮点环境恢复。
+桌面要求 `source: "hardware"`。AArch64 浮点陷阱属于可选硬件能力，若
+`feenableexcept` 无法启用陷阱，用例让 Linux 给当前线程投递原生
+`FPE_FLTDIV` 信号帧，并要求恢复成功，此时记录 `source: "kernel-self"`。
+报告区分两种来源，并要求后续普通 JNI 调用通过。
 
 另外九项 Guest 注册检查覆盖 `signal`、`bsd_signal`、`ssignal`、`sysv_signal`、
 `__sysv_signal`、`__sigaction`、`siginterrupt`、`sigignore` 和 `sigset`。八项执行真实陷阱，
@@ -93,7 +94,7 @@ Guest 跳转恢复、后续普通 JNI 调用，并恢复原浮点环境。桌面
 完成模块关闭及 VM 销毁。
 
 原生函数经真实桥跳板调用；目标检查点与被放弃的内层 Guest 调用间没有 Java 帧。
-Guest 故障只恢复到同一个 Guest 调用内的检查点，不放弃暂停中的 Host 回调。
+该故障用例恢复到同一个 Guest 调用内的检查点。暂停中的 Host 回调回收由下文的收养载体用例覆盖。
 十九项信号栈用例覆盖独立 Guest 配置、启用/关闭 `SA_ONSTACK`、保存/不保存跳转掩码、
 原生 `setcontext`、嵌套投递，以及 AUTODISARM 处理器通过 `swapcontext` 暂停，执行普通
 Host 回调和第二次故障后恢复。GNU pthread 也执行普通、嵌套和 AUTODISARM 用例。
@@ -190,14 +191,31 @@ Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新�
 各上下文的浮点舍入模式和掩码、备用栈重新启用、再次调用 JNI 和关闭。另一用例
 验证 Guest 栈重叠时返回 `EINVAL`，内层处理器和中间的 Host 回调仍能正常返回。
 
+另外三项用例在较新的信号调用仍暂停时，从选中的外层处理器正常返回或跳往 Host。
+其中一项在两个独立备用栈上暂停两层较新的处理器及各自的 Host 回调。退出后，
+在新的 Guest 调用中恢复各个失效上下文须返回 `ENOTSUP`，并检查回收已无挂起、
+后续 JNI 调用、模组卸载和 runtime 关闭。
+
 正常返回的 Guest 处理器会修改暂停 GNU 上下文的浮点控制状态，下次原生入口必须
 观测到这项修改。绝对时间 `clock_nanosleep` 用例要求，内核睡眠期间处理 Guest 通知
 后，Host 仍按原截止时间醒来。
 
-Linux x86_64 运行 18 个用例，其中 Host glibc 用例先恢复同作用域的 `swapcontext`
+Linux x86_64 运行 21 个用例，其中 Host glibc 用例先恢复同作用域的 `swapcontext`
 捕获，再恢复外层 `getcontext` 目标。Android ARM64 使用指定的 shell JRE17 运行
-17 个用例。Guest glibc 上下文用例在两端运行。Host glibc 用例需要 Bionic 没有
+20 个用例。Guest glibc 上下文用例在两端运行。Host glibc 用例需要 Bionic 没有
 提供的公开接口。
+
+## HotSpot 暂停和采样
+
+使用指定的 HotSpot JRE17 及 `--native-unwind --vm-signals` 运行已安装 SDK 用例。
+Java 创建的线程进入 Guest JNI，在带保护页的栈上通过两层 `swapcontext` 暂停两个帧。
+JFR 必须记录该线程处于 Guest JNI 的 `jdk.NativeMethodSample`。随后 Guest 回调 Java，
+保持原帧暂停，JFR 必须记录该回调的 `jdk.ExecutionSample`。每条有效样本必须符合线程、
+方法及时间窗口。用例也观测 HotSpot 保留的 suspend/resume 信号路由。
+
+目标线程回到 Guest 后，HotSpot 在下次进入 Java 时让它暂停。Guest 恢复暂停的栈并
+解除映射，Java 在 VM 显式恢复后继续。用例检查 TID、TLS、errno、栈哨兵值、浮点舍入、
+信号掩码、后续 JNI 调用及关闭。Android 使用已核验的 shell JRE17 制品。
 
 ## 证据
 
@@ -205,7 +223,7 @@ Linux x86_64 运行 18 个用例，其中 Host glibc 用例先恢复同作用域
 清单还绑定 Guest 源码、已安装 core 头文件/栈切换汇编、libffi，以及消费者使用的 Host 归档库。
 
 在工作区根目录执行 `python3 android-jni/tests/same_thread_results.py --require-current`，
-可核验 21 组选定桌面/Android 测试的输入散列，输出
+可核验 23 组选定桌面/Android 测试的输入散列，输出
 `android-jni/build/tests/same-thread-compatibility.json`。证据缺失、失败或过期均使检查失败。
 只要 [todo.md](../../../todo.md) 的验收要求尚未完成，即便选定矩阵全部有效通过，完整兼容性
 仍报告为 `INCOMPLETE`。

@@ -36,6 +36,7 @@ parser.add_argument(
 )
 parser.add_argument("--worker-signals", action="store_true")
 parser.add_argument("--adopted-signals", action="store_true")
+parser.add_argument("--vm-signals", action="store_true")
 parser.add_argument(
     "--unwind-windows",
     action="store_true",
@@ -58,6 +59,13 @@ if args.adopted_signals and (
     not args.native_unwind or args.nonlocal_test or args.worker_signals
 ):
     parser.error("--adopted-signals requires a standalone native-unwind run")
+if args.vm_signals and (
+    not args.native_unwind
+    or args.nonlocal_test
+    or args.worker_signals
+    or args.adopted_signals
+):
+    parser.error("--vm-signals requires a standalone native-unwind run")
 if args.host_fault_mask and not (args.nonlocal_test and args.native_unwind):
     parser.error("--host-fault-mask requires --nonlocal --native-unwind")
 if args.signal_pending and not (args.nonlocal_test and args.native_unwind):
@@ -79,6 +87,8 @@ if args.worker_signals:
     name += "-worker-signals"
 if args.adopted_signals:
     name += "-adopted-signals"
+if args.vm_signals:
+    name += "-vm-signals"
 out = project / "build/tests" / name
 out.mkdir(parents=True, exist_ok=True)
 (out / "summary.json").unlink(missing_ok=True)
@@ -116,6 +126,19 @@ run(
         source / "SdkProbe.java",
     ]
 )
+if args.vm_signals:
+    run(
+        [
+            args.jdk / "bin/javac",
+            "--release",
+            "17",
+            "-cp",
+            out,
+            "-d",
+            out,
+            source / "SdkVmSignals.java",
+        ]
+    )
 service_env = {
     **os.environ,
     "GW_GUEST_CC": "gcc",
@@ -162,6 +185,7 @@ run(
         source / "guest-signal-unwind.c",
         source / "guest-worker-signals.c",
         source / "guest-adopted-signals.c",
+        source / "guest-vm-signals.c",
         source / "guest-signalfd.c",
         source / "guest-signalfd-ready.c",
         "-o",
@@ -246,6 +270,8 @@ if args.worker_signals:
     cases = (("worker-signals", args.runtime, False),)
 if args.adopted_signals:
     cases = (("adopted-signals", args.runtime, False),)
+if args.vm_signals:
+    cases = (("vm-signals", args.runtime, False),)
 for mode, runtime, reject in cases:
     fatal = (
         int(mode.rsplit("-", 1)[1])

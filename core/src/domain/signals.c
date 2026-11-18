@@ -132,6 +132,40 @@ int signal_guest_select_host(int unused, void *from, void *to) {
   return 0;
 }
 
+int signal_guest_prepare_retire(int unused, void *argument, void *ignored) {
+  (void)unused;
+  (void)ignored;
+  struct gw_signal_retirement *plan = argument;
+  if (plan->source == plan->leaf || plan->leaf->retirement ||
+      !plan->parent->host_view) {
+    return EINVAL;
+  }
+
+  gw_nonlocal_suspend_transfer(&plan->saved_transfer);
+  int error = signal_guest_select_host(0, plan->source, plan->leaf);
+  if (error) {
+    gw_nonlocal_restore_transfer(&plan->saved_transfer);
+    return error;
+  }
+  plan->leaf->retirement = plan;
+  return 0;
+}
+
+static void resume_after_retirement(void *argument) {
+  struct gw_signal_retirement *plan = argument;
+  if (plan->parent != plan->source &&
+      signal_guest_select_host(0, plan->parent, plan->source)) {
+    _exit(125);
+  }
+  gw_nonlocal_restore_transfer(&plan->saved_transfer);
+
+  /* Preserve the surviving Host frame's original continuation. The Guest
+   * will return to it after the leaf and its intervening callbacks are gone. */
+  struct domain discarded;
+  plan->source->swap(&discarded, &plan->source->guest);
+  _exit(125);
+}
+
 static void retire_host_anchor(struct host_signal_anchor *anchor) {
   struct host_signal_anchor *volatile *link = &live_anchors;
   while (*link != anchor) {
@@ -223,6 +257,11 @@ int signal_guest_execute(struct gw_signal_execution *execution,
   if (!sigsetjmp(scope.landing, 0)) {
     execution->swap(&execution->host, &execution->guest);
     restore_execution_stack(&original_stack);
+    if (execution->retirement) {
+      struct gw_signal_retirement *plan = execution->retirement;
+      struct host_signal_anchor *parent = plan->parent->host_view;
+      gw_nonlocal_retire_to(parent->scope, resume_after_retirement, plan);
+    }
   } else {
     /* A nested Host handler may have changed its own alternate stack before
      * the jump. Keep that actual Host state across Guest-only retirement. */

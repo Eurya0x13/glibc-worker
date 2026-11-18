@@ -74,6 +74,7 @@ int signal_guest_suspended(struct signal_slot *, struct gw_signal_suspension *);
 _Noreturn void signal_guest_resume(void *identity,
                                    int (*restore)(int, void *, void *));
 int signal_guest_select_host(int, void *, void *);
+int signal_guest_prepare_retire(int, void *, void *);
 uint64_t signal_carrier_mask(struct signal_slot *, uint64_t, int guest);
 uint64_t signal_host_physical_mask(uint64_t);
 uint64_t signal_host_logical_mask(uint64_t);

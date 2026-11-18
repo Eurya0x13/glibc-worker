@@ -490,6 +490,44 @@ int gw_guest_signal_parked(void *argument) {
   return 0;
 }
 
+static struct jni_domain_signal *retained_leaf(
+    struct jni_domain_signal *active) {
+  /* The live list is newest first. A descendant of the selected activation
+   * can be retired once every younger descendant has left both domains. */
+  for (struct jni_domain_signal *leaf = carrier->live_signals; leaf;
+       leaf = leaf->live_next) {
+    for (struct jni_domain_signal *parent = leaf->previous; parent;
+         parent = parent->previous) {
+      if (parent == active) {
+        return leaf;
+      }
+    }
+  }
+  return NULL;
+}
+
+static void retire_retained_signals(struct jni_domain_signal *activation) {
+  struct jni_domain_signal *leaf = retained_leaf(activation);
+  if (!leaf) {
+    return;
+  }
+
+  stack_t alternate;
+  gw_signal_stack_get(&alternate);
+  uint64_t mask = carrier->guest_mask;
+  int native_active = carrier->guest_native_active;
+
+  do {
+    gw_domain_signal_retire_leaf(activation, leaf);
+    leaf = retained_leaf(activation);
+  } while (leaf);
+
+  gw_signal_stack_set(&alternate);
+  carrier->guest_mask = mask;
+  carrier->guest_native_active = native_active;
+  check_publication(gw_signal_target_mask(current, mask));
+}
+
 void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
   struct jni_domain_signal *activation = argument;
   if (!activation->pinned) {
@@ -499,6 +537,7 @@ void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
       carrier->guest_signal != activation) {
     _exit(126);
   }
+  retire_retained_signals(activation);
   if (reason == GW_SIGNAL_HOST_JUMP && !carrier->jump_record) {
     carrier->guest_mask = activation->initial_mask;
     check_publication(gw_signal_target_mask(current, carrier->guest_mask));
@@ -518,7 +557,7 @@ void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
   }
   *link = activation->live_next;
   carrier->guest_signal = activation->previous;
-  if (carrier->guest_signal) {
+  if (carrier->guest_signal && !activation->execution->retirement) {
     carrier->guest_signal->continuation = NULL;
     carrier->guest_signal->continuation_sp = 0;
   }

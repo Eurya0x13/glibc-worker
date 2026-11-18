@@ -1,10 +1,11 @@
 #ifndef GW_SIGNAL_EXECUTION_H
 #define GW_SIGNAL_EXECUTION_H
 #include "domain_context.h"
+#include "nonlocal.h"
 #include <signal.h>
 #include <stddef.h>
 
-#define GW_SIGNAL_EXECUTION_VERSION 2u
+#define GW_SIGNAL_EXECUTION_VERSION 3u
 
 enum gw_signal_execution_phase {
   GW_SIGNAL_EXECUTION_PREPARED = 1,
@@ -18,6 +19,8 @@ enum gw_signal_exit {
   GW_SIGNAL_HOST_JUMP,
   GW_SIGNAL_GUEST_JUMP
 };
+
+struct gw_signal_retirement;
 
 /* One entered native signal invocation. Storage, both guarded stacks and the
  * owning TCB must survive entry and destructive recovery. Do not recycle an
@@ -36,6 +39,14 @@ struct gw_signal_execution {
   volatile sig_atomic_t phase;
   int result;
   void *host_view;
+  struct gw_signal_retirement *retirement;
+};
+
+/* Lives on the surviving Guest stack, including while the leaf's Host and
+ * Guest stacks are retired. Only Host accesses the saved Host transfer. */
+struct gw_signal_retirement {
+  struct gw_signal_execution *source, *leaf, *parent;
+  struct gw_nonlocal_transfer saved_transfer;
 };
 
 struct gw_signal_execution_config {

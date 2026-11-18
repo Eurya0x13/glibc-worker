@@ -63,12 +63,19 @@ dispatch uses the stack bounds of every retained activation. Guest glibc applies
 the target's signal mask after installing its native stack. A `setcontext` to
 the parked inner capture can resume it without saving another outer capture.
 
-Keep both continuations and their stack mappings live until the inner handler
-returns through the suspended Host callback. Disjoint stack mappings are
-required for this path. An overlapping transfer returns `EINVAL` without
-changing the selected scope. When leaving an occupied signal alternate stack,
-use `SS_AUTODISARM` to prevent a later delivery from reusing its top.
-Android verification covers Guest glibc contexts and Bionic jump buffers.
+Keep each continuation and its stack live until it returns or its owning
+activation exits. If a selected outer activation returns or is unwound while
+younger activations are parked, the bridge retires those activations from
+innermost to outermost. The cleanup releases their Host callbacks, descriptor
+leases, Guest target pins, context records and bridge-owned stacks. A saved
+context from a retired scope returns `ENOTSUP` when restored inside a live
+Guest invocation. The application's own stack mappings remain its responsibility.
+
+Cross-scope switching requires disjoint Guest stack mappings. An overlapping
+transfer returns `EINVAL` without changing the selected scope. When leaving
+an occupied signal alternate stack, use `SS_AUTODISARM` to prevent a later
+delivery from reusing its top. Android verification covers Guest glibc contexts
+and Bionic jump buffers.
 
 The native-call integration masks catchable signals while acquiring/releasing
 bridge resources, publishing commands and crossing TP/stack boundaries. Requests
@@ -119,10 +126,10 @@ The opt-in service has independent Guest synchronous-fault dispositions. Core
 retains routing entries for all six fault numbers even while Host selects a
 default or ignored action; Host one-shot consumption occurs only on Host
 delivery. Adopted carriers restore Guest TP/FP/x18 before entering its handler.
-GNU-created pthreads keep their real Guest TP and never acquire a fictitious
-Host/VM thread identity. Positive tests cover real SEGV/BUS/ILL/TRAP faults and
-seccomp SYS traps,
-Guest-native jump/context recovery, nested handlers and subsequent JNI calls.
+GNU-created pthreads keep their real Guest TP. Positive tests cover real
+SEGV/BUS/ILL/TRAP faults, seccomp SYS traps and Guest-native jump/context
+recovery. FPE coverage uses hardware traps where available and separately
+reports kernel-delivered `FPE_FLTDIV` on hardware without FP trapping.
 Separate processes verify default fatal actions with actual signal termination.
 
 The opt-in integration keeps independent native alternate-stack configurations.
@@ -143,30 +150,22 @@ cleanup then checks Guest state, subsequent calls and module/runtime teardown.
 Host AUTODISARM state is captured before the Guest abort path, so an abandoned
 Host handler's disabled stack is not silently rearmed.
 
-This is not full independent signal virtualization. General saved-continuation
-lifetime accounting and reclamation remain unfinished. Tagged asynchronous
-sends/pending queues, Host delivery on GNU
-pthreads, mask/wait APIs beyond the tested paths and transition-window reentry
-still need the complete signal design. Passing Guest fault recovery within a
-native invocation does not establish unwinding a live Host callback to a Guest
-checkpoint or resuming arbitrarily saved signal frames.
-
-Remaining obligations include general Guest-target integration, resumable native
-contexts, state-publication windows, complete architecture-state restoration and
-safe JNI resource cleanup. Host scope exit releases its capture slots for reuse.
-The thread retains the record pages and its captures made outside bridge scopes.
-Unknown captures,
-stale scope generations and nested
-pending transfers currently fail the integration rather than recover. Those
-limitations are unresolved work, not the accepted first-release semantics.
+The [installed SDK tests](../../../android-jni/docs/en/SDK_TESTS.md#hotspot-suspension-and-sampling)
+verify that two parked Guest contexts survive HotSpot suspension and Java/native
+JFR sampling, resume on the same carrier, and exit with their stack mappings
+released. Host scope exit invalidates its captures and makes their slots
+available for reuse. The JNI thread-exit hook releases the Host capture pages
+after bridge teardown; captures outside bridge scopes remain available while
+that Host thread lives. Restoring an unobserved or stale context across a live
+bridge scope fails with `ENOTSUP`.
 
 The matching opt-in service also coordinates Guest-target native jumps at a
 reviewed C-only `GetVersion` callback boundary. Its glibc hook observes capture
 after native register saving, and restore before native cleanup and mask
 restoration. Records belong to a live native invocation generation. Invocation
 exit invalidates its records, slots are reused, and carrier teardown unmaps its
-high-water record pages. Host capture-page reclamation and general resumable
-continuations still require the remaining lifetime protocol.
+high-water record pages. General native JNI callback boundaries remain listed
+in the acceptance work.
 
 An inner Guest jump first retires the abandoned Guest command. Host scope
 routing then retires the corresponding command, trampoline and C callback

@@ -27,6 +27,7 @@ static __thread volatile sig_atomic_t handled, resumed;
 static __thread sigjmp_buf checkpoint;
 static __thread ucontext_t *saved_context;
 static __thread int external_registration;
+static __thread int fpe_injected, fpe_worker;
 static void trigger_trap(void);
 
 static void fault_handler(int number, siginfo_t *info, void *frame) {
@@ -38,7 +39,8 @@ static void fault_handler(int number, siginfo_t *info, void *frame) {
     _exit(128);
   }
   ++handled;
-  if (number == SIGFPE && info->si_code != FPE_FLTDIV) {
+  if (number == SIGFPE && (info->si_code != FPE_FLTDIV ||
+                           (fpe_injected && info->si_addr != &tls_canary))) {
     _exit(161);
   }
   if (number == SIGSYS &&
@@ -105,6 +107,22 @@ static void *thread_fault(void *argument) {
   intptr_t mode = (intptr_t)argument;
   int result = sdk_guest_fault_probe((int)mode);
   return (void *)(intptr_t)result;
+}
+
+static void *thread_fpe(void *unused) {
+  (void)unused;
+  fpe_worker = 1;
+  return (void *)(intptr_t)sdk_guest_fault_probe(87);
+}
+
+static int thread_fpe_probe(void) {
+  pthread_t thread;
+  void *result;
+  if (pthread_create(&thread, NULL, thread_fpe, NULL) ||
+      pthread_join(thread, &result)) {
+    return -101;
+  }
+  return (int)(intptr_t)result;
 }
 
 static int thread_faults(void) {
@@ -269,6 +287,9 @@ static _Noreturn void default_fault(int selected) {
 }
 
 int sdk_guest_fault_probe(int selected) {
+  if (selected == 101) {
+    return thread_fpe_probe();
+  }
   if (selected == 88) {
     return thread_relays();
   }
@@ -340,19 +361,15 @@ int sdk_guest_fault_probe(int selected) {
     _exit(132);
   }
   volatile int result = 73;
-  /* AArch64 integer division does not trap on zero. Request a real FP
-   * divide trap and distinguish native hardware support from bridge
-   * dispatch; an unavailable exception enable is not a recovery pass.
-   * https://github.com/bminor/glibc/blob/glibc-2.41/sysdeps/aarch64/fpu/feenablxcpt.c
+  /* AArch64 FP traps are optional. If the FPCR bit cannot be armed, exercise
+   * the same fault routing with a kernel-built frame carrying FPE_FLTDIV.
+   * https://github.com/bminor/glibc/blob/glibc-2.42/sysdeps/aarch64/fpu/feenablxcpt.c
    */
   if (selected == 87) {
     if (feclearexcept(FE_ALL_EXCEPT)) {
       _exit(162);
     }
-    if (feenableexcept(FE_DIVBYZERO) < 0) {
-      result = 74;
-      goto finish;
-    }
+    fpe_injected = feenableexcept(FE_DIVBYZERO) < 0;
   }
   if (selected == 37 && install_test_seccomp()) {
     _exit(145);
@@ -362,13 +379,25 @@ int sdk_guest_fault_probe(int selected) {
     if (!transferred) {
       errno = EDOM;
       if (selected == 87) {
-        double one = 1.0, zero = 0.0;
+        if (fpe_injected) {
+          /* Linux accepts a positive si_code from the receiving TID itself.
+           * The test signal still enters through the kernel's native frame.
+           * https://github.com/torvalds/linux/blob/v5.4/kernel/signal.c */
+          siginfo_t info = {.si_signo = SIGFPE, .si_code = FPE_FLTDIV};
+          info.si_addr = &tls_canary;
+          if (syscall(SYS_rt_tgsigqueueinfo, getpid(), syscall(SYS_gettid),
+                      SIGFPE, &info)) {
+            _exit(163);
+          }
+        } else {
+          double one = 1.0, zero = 0.0;
 #if defined(__x86_64__)
-        __asm__ volatile("divsd %1, %0" : "+x"(one) : "x"(zero));
+          __asm__ volatile("divsd %1, %0" : "+x"(one) : "x"(zero));
 #else
-        __asm__ volatile("fdiv %d0, %d0, %d1" : "+w"(one) : "w"(zero));
+          __asm__ volatile("fdiv %d0, %d0, %d1" : "+w"(one) : "w"(zero));
 #endif
-        _exit(160); /* Enabling traps without receiving one is not success. */
+        }
+        _exit(160);
       }
       if (selected == 37) {
         syscall(SYS_getpid, 0x47575359);
@@ -437,7 +466,6 @@ int sdk_guest_fault_probe(int selected) {
       result = -36;
     }
   }
-finish:
   if (pthread_sigmask(SIG_SETMASK, &original, NULL) ||
       (!external_registration && sigaction(expected_signal, &previous, NULL)) ||
       munmap(fault_page, fault_size)) {
@@ -448,15 +476,11 @@ finish:
     if (fesetenv(&original_fenv)) {
       return -89;
     }
-    if (result == 74) {
-      dprintf(STDOUT_FILENO,
-              "{\"stage\":\"guest-fpe\",\"hardware_trap\":false,"
-              "\"recovered\":false,\"skip\":\"ENOTSUP\"}\n");
-      return 74;
-    }
     dprintf(STDOUT_FILENO,
-            "{\"stage\":\"guest-fpe\",\"hardware_trap\":true,"
-            "\"recovered\":%s,\"skip\":null}\n",
+            "{\"stage\":\"guest-fpe\",\"recipient\":\"%s\","
+            "\"source\":\"%s\",\"recovered\":%s}\n",
+            fpe_worker ? "pthread" : "carrier",
+            fpe_injected ? "kernel-self" : "hardware",
             result == 73 ? "true" : "false");
   }
   return result;

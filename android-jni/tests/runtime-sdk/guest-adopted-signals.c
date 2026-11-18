@@ -25,11 +25,11 @@ struct guest_observation {
   sigset_t inherited;
   sigjmp_buf continuation;
   ucontext_t context, resumed_parent;
-  ucontext_t suspended_handler, prepared_fiber;
+  ucontext_t suspended_handler, prepared_fiber, suspended_middle;
   void *fiber_stack;
   volatile sig_atomic_t fiber_ran;
   int original_rounding;
-  stack_t alternate, previous_stack;
+  stack_t alternate, previous_stack, inner_alternate;
   uintptr_t tp, stack, outer_sp;
   size_t size;
 };
@@ -137,6 +137,7 @@ static void resume_outer_swap(struct guest_observation *o) {
   assert(!getcontext(&o->context));
   if (!o->probe->swap_phase) {
     assert(!send_host_in_frame(pid, tid));
+    assert(!adopted_retires_saved(o->probe->mode));
     assert(o->probe->swap_phase == 2 * SIGNAL_SWAP_ROUNDS + 1);
     assert(o->probe->host_returned && canary == 0x71379u);
     stack_t stack;
@@ -144,6 +145,17 @@ static void resume_outer_swap(struct guest_observation *o) {
            stack.ss_flags == o->alternate.ss_flags);
     assert(!pthread_sigmask(SIG_SETMASK, &original, NULL));
     assert(!fesetround(rounding));
+    return;
+  }
+
+  if (adopted_retires_saved(o->probe->mode)) {
+    assert(o->probe->swap_phase == 1 && !o->probe->host_returned);
+    assert(canary == 0x71379u);
+    check_swap_state(FE_DOWNWARD, 0);
+    if (o->probe->mode == SIGNAL_RETIRE_HOST_JUMP) {
+      signal_host(o);
+      assert(!"Host escape returned to the older Guest handler");
+    }
     return;
   }
 
@@ -172,6 +184,7 @@ static void resume_inner_swap(struct guest_observation *o) {
     o->probe->swap_phase = 2 * round + 1;
     const ucontext_t *outer = round ? &o->resumed_parent : &o->context;
     assert(!swapcontext(&o->suspended_handler, outer));
+    assert(!adopted_retires_saved(o->probe->mode));
     assert(o->probe->swap_phase == 2 * round + 2 && canary == 0x91451u);
     assert(!o->probe->host_returned);
     check_swap_state(FE_UPWARD, 1);
@@ -240,24 +253,29 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
   struct guest_observation *o = &observation;
   assert(o->probe && number == SIGUSR1 && packet->si_signo == SIGUSR1);
   int mode = o->probe->mode;
-  int nested = packet->si_value.sival_int == 9185;
-  assert(packet->si_code == SI_QUEUE &&
-         (nested ? adopted_nested(mode) : packet->si_value.sival_int == 9184));
+  int layer = packet->si_value.sival_int - 9184;
+  int nested = layer > 0;
+  assert(packet->si_code == SI_QUEUE && layer >= 0 &&
+         layer < adopted_activations(mode));
   assert(syscall(SYS_gettid) == o->probe->tid);
   assert((uintptr_t)__builtin_thread_pointer() == o->tp);
   assert(pthread_equal(pthread_self(), o->recipient));
   volatile char local = 41;
   uintptr_t low = o->stack;
   size_t size = o->size;
-  if (mode == SIGNAL_NESTED_ALT || (mode == SIGNAL_PARENT_SWAP && nested)) {
-    low = (uintptr_t)o->alternate.ss_sp;
-    size = o->alternate.ss_size;
+  if (mode == SIGNAL_NESTED_ALT || (adopted_scope_swap(mode) && nested)) {
+    const stack_t *stack = layer == 2 ? &o->inner_alternate : &o->alternate;
+    low = (uintptr_t)stack->ss_sp;
+    size = stack->ss_size;
   }
   assert(frame && (uintptr_t)&local - low < size);
-  if (nested && mode != SIGNAL_PARENT_SWAP) {
+  if (nested && !adopted_scope_swap(mode)) {
     assert(signal_sp(frame) - low < size);
     assert((uintptr_t)&local < signal_sp(frame) &&
            signal_sp(frame) < o->outer_sp);
+  } else if (layer == 2) {
+    assert(signal_sp(frame) - (uintptr_t)o->alternate.ss_sp <
+           o->alternate.ss_size);
   } else {
     assert(signal_sp(frame) - o->stack < o->size);
   }
@@ -276,10 +294,17 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
     return;
   }
 
+  if (mode == SIGNAL_RETIRE_CHAIN && layer == 1) {
+    assert(!sigaltstack(&o->inner_alternate, NULL));
+    assert(!getcontext(&o->suspended_middle));
+    signal_host(o);
+    assert(!"Middle Guest activation resumed after retirement");
+  }
+
   if (mode == SIGNAL_HOST_JUMP || mode == SIGNAL_HOST_CONTEXT ||
       (adopted_nested(mode) && !nested)) {
     o->outer_sp = (uintptr_t)&local;
-    if (mode == SIGNAL_PARENT_SWAP) {
+    if (adopted_scope_swap(mode)) {
       resume_outer_swap(o);
     } else if (adopted_parent_target(mode)) {
       resume_parent_signal(o);
@@ -291,7 +316,7 @@ static void guest_signal(int number, siginfo_t *packet, void *frame) {
     assert(local == 41);
     return;
   }
-  if (mode == SIGNAL_PARENT_SWAP) {
+  if (adopted_scope_swap(mode)) {
     resume_inner_swap(o);
     assert(local == 41);
     return;
@@ -343,12 +368,13 @@ static void *send_from_native(void *argument) {
   }
   assert(!pthread_sigqueue(state->recipient, SIGUSR1,
                            (union sigval){.sival_int = 9184}));
-  if (adopted_nested(probe->mode)) {
-    while (atomic_load_explicit(&probe->requested, memory_order_acquire) < 2) {
+  for (int layer = 1; layer < adopted_activations(probe->mode); ++layer) {
+    while (atomic_load_explicit(&probe->requested, memory_order_acquire) <=
+           layer) {
       sched_yield();
     }
     assert(!pthread_sigqueue(state->recipient, SIGUSR1,
-                             (union sigval){.sival_int = 9185}));
+                             (union sigval){.sival_int = 9184 + layer}));
   }
   return NULL;
 }
@@ -383,9 +409,9 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
     action.sa_flags |= SA_NODEFER;
   }
   if (o->probe->mode == SIGNAL_NESTED_ALT ||
-      o->probe->mode == SIGNAL_PARENT_SWAP) {
+      adopted_scope_swap(o->probe->mode)) {
     o->alternate = (stack_t){.ss_size = 65536 * 2};
-    if (o->probe->mode == SIGNAL_PARENT_SWAP) {
+    if (adopted_scope_swap(o->probe->mode)) {
       o->alternate.ss_flags = (int)(UINT32_C(1) << 31); /* SS_AUTODISARM */
     } else {
       action.sa_flags |= SA_ONSTACK;
@@ -393,6 +419,11 @@ void sdk_adopted_signal_prepare(JNIEnv *env, jclass cls, jlong address) {
     o->alternate.ss_sp = malloc(o->alternate.ss_size);
     assert(o->alternate.ss_sp &&
            !sigaltstack(&o->alternate, &o->previous_stack));
+  }
+  if (o->probe->mode == SIGNAL_RETIRE_CHAIN) {
+    o->inner_alternate = o->alternate;
+    o->inner_alternate.ss_sp = malloc(o->inner_alternate.ss_size);
+    assert(o->inner_alternate.ss_sp);
   }
   if (adopted_context(o->probe->mode) ||
       o->probe->mode == SIGNAL_PARENT_CONTEXT) {
@@ -423,13 +454,24 @@ jint sdk_adopted_signal_finish(JNIEnv *env, jclass cls) {
   }
   assert(!pthread_join(o->sender, NULL));
   assert(atomic_load(&o->probe->handled) ==
-         (adopted_nested(o->probe->mode) ? 2 : 1));
+         adopted_activations(o->probe->mode));
+  if (adopted_retires_saved(o->probe->mode)) {
+    assert(setcontext(&o->suspended_handler) == -1 && errno == ENOTSUP);
+    ++o->probe->stale_rejections;
+  }
+  if (o->probe->mode == SIGNAL_RETIRE_CHAIN) {
+    assert(setcontext(&o->suspended_middle) == -1 && errno == ENOTSUP);
+    ++o->probe->stale_rejections;
+  }
   assert(!sigaction(SIGUSR1, &o->previous, NULL));
   assert(!pthread_sigmask(SIG_SETMASK, &o->inherited, NULL));
   if (o->probe->mode == SIGNAL_NESTED_ALT ||
-      o->probe->mode == SIGNAL_PARENT_SWAP) {
+      adopted_scope_swap(o->probe->mode)) {
     assert(!sigaltstack(&o->previous_stack, NULL));
     free(o->alternate.ss_sp);
+  }
+  if (o->probe->mode == SIGNAL_RETIRE_CHAIN) {
+    free(o->inner_alternate.ss_sp);
   }
   if (o->fiber_stack) {
     free(o->fiber_stack);

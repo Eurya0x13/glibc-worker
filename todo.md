@@ -9,14 +9,16 @@ remain bridge compatibility obligations. See the
 
 The configured bootstrap contract covers Host deferred dequeue and handler
 ordering, plus native consumption and lifecycle windows. Tagged Guest delivery
-also runs on adopted carriers in Host/Java. General saved and resumable native
-contexts remain part of the acceptance contract.
+also runs on adopted carriers in Host/Java.
 Destructive `setcontext` and `siglongjmp` can already restore a saved native
 Guest command or an older Guest handler. A prepared `makecontext` entry can
 run and return within the current scope. Within one native invocation,
 `swapcontext` can resume an older Guest handler and switch back to the inner
 handler while both Guest stacks and the intervening Host callback remain live.
-General lifetime accounting for other saved native continuations remains open.
+Returning or unwinding from the selected outer handler also retires younger
+parked activations. The [installed SDK cases](android-jni/docs/en/SDK_TESTS.md)
+cover stale captures, FPE, and HotSpot suspend/resume and JFR sampling while
+multiple Guest frames are parked.
 
 Host handlers received on genuine GNU pthreads use the explicitly accepted
 [Host dispatcher policy](core/docs/en/HOST_SIGNAL_RELAY.md). Native
@@ -58,7 +60,6 @@ Host/Guest interruption and transparent Host sleep/ppoll with real Guest work.
 The native fixture also retires three nested asynchronous Guest entries on a
 Host-target `siglongjmp`. The installed JNI tests exercise nested
 Guest/Host/Guest entry and both jump directions through live native frames.
-General saved frames still need integration.
 
 The ordinary service enforces Host signal reservations. The opt-in unwind
 service additionally supports independent synchronous Guest dispositions,
@@ -111,17 +112,11 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   Optional [NPTL creation callbacks](core/docs/en/THREAD_LIFECYCLE.md) now
   reserve identity before clone and complete admission before creation returns.
   Both opt-in backends use the disposition table for tagged delivery, mask
-  changes and consuming waits. General saved-frame accounting remains open.
+  changes and consuming waits.
 - Keep the explicit GNU-to-Host relay contract covered while extending signal
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM
   identity or original-thread Host TLS adoption is implied.
-- Complete general saved-continuation lifetime accounting beyond the tested
-  owned signal stacks and AUTODISARM suspend/resume paths. Independent native
-  alternate stacks are implemented in the opt-in integration. Extend synchronous
-  fault coverage to FPE, all registration aliases and normal/blocked
-  initialization/teardown windows. Retain nested delivery, reset-handler and
-  nonlocal-exit regressions, and cover VM suspension/profiling protocols.
 - Implement transparent cross-domain nonlocal recovery in the first release,
   including `siglongjmp` and `setcontext`. Same-domain-only support or quarantine
   on an otherwise valid cross-domain jump does not satisfy this requirement.
@@ -132,8 +127,8 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   reviewed C-only `GetVersion` boundary, with invocation-generation records,
   ordinary RPC cleanup and the owning glibc's fortified restore entry. An
   asynchronous handler can also abandon nested signal scopes on this path or
-  restore an older Guest handler. Complete other native JNI callback boundaries
-  and resumable native contexts beyond live handler scopes in one invocation.
+  restore an older Guest handler. Complete recovery and resumable native
+  transfers across the remaining JNI callback boundaries.
   Keep transfers that skip Java/VM frames outside the contract.
 - Supply a reviewed live VM/ART recipient-quiescence provider for the explicit
   `signal_router_reclaim` protocol. Its standalone single-recipient gate is

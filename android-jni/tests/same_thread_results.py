@@ -25,6 +25,7 @@ SUITES = [
             "-nonlocal-recovery-host-mask",
             "-recovery-worker-signals",
             "-recovery-adopted-signals",
+            "-recovery-vm-signals",
         )
     ),
     "android-jni/build/tests/runtime-sdk-android-late",
@@ -32,8 +33,8 @@ SUITES = [
     "jvm-jni/build/tests/signal-profile-android",
 ]
 REMAINING = [
-    "Continuation lifetimes beyond live signal scopes and additional Guest JNI targets",
-    "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",
+    "Additional Guest JNI callback boundaries for native recovery",
+    "Reviewed live VM/ART recipient quiescence and late integration acceptance",
 ]
 
 

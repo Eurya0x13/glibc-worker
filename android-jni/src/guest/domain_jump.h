@@ -12,6 +12,8 @@ _Noreturn void gw_domain_restore_context(ucontext_t *);
 int gw_domain_resume_signal(int, void *, void *);
 void gw_domain_signal_select(struct jni_domain_signal *,
                              struct jni_domain_signal *);
+void gw_domain_signal_retire_leaf(struct jni_domain_signal *,
+                                  struct jni_domain_signal *);
 void gw_domain_jump_signal_leave(struct jni_domain_signal *);
 void gw_domain_jump_finish(void);
 void gw_domain_jump_bind(struct jni_domain_context *);

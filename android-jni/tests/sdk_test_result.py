@@ -155,22 +155,17 @@ def execute_case(
     ]
     transfer = [r for r in rows if r.get("stage") == "nonlocal-transfer"]
     fpe = [r for r in rows if r.get("stage") == "guest-fpe"]
-    fpe_supported = fpe == [
-        {
-            "stage": "guest-fpe",
-            "hardware_trap": True,
-            "recovered": True,
-            "skip": None,
-        }
-    ]
-    fpe_unavailable = fpe_optional and fpe == [
-        {
-            "stage": "guest-fpe",
-            "hardware_trap": False,
-            "recovered": False,
-            "skip": "ENOTSUP",
-        }
-    ]
+    fpe_recipient = [r.get("recipient") for r in fpe]
+    fpe_sources = [r.get("source") for r in fpe]
+    fpe_valid = fpe_recipient == ["carrier", "pthread"] and all(
+        r.get("recovered") is True
+        and (
+            r.get("source") == "hardware"
+            or (fpe_optional and r.get("source") == "kernel-self")
+        )
+        for r in fpe
+    )
+    vm_samples = [r for r in rows if r.get("stage") == "vm-suspend-and-sample"]
     fault_masks = [r for r in rows if r.get("stage") == "host-fault-mask"]
     guest_fault_masks = [
         r for r in rows if r.get("stage") == "guest-fault-mask"
@@ -193,6 +188,7 @@ def execute_case(
                 "worker-borrowed-relay",
                 "worker-signals",
                 "adopted-signals",
+                "vm-signals",
                 "nonlocal",
             )
             and not valid_relay_lifecycle(rows, mode)
@@ -208,7 +204,8 @@ def execute_case(
                     "owned_context": True,
                     "post_signal_jni": True,
                 }
-                for phase in range(17 if require_host_private else 18)
+                for phase in range(21)
+                if phase != 17 or not require_host_private
             ]
         )
         or (
@@ -227,6 +224,38 @@ def execute_case(
             mode == "adopted-signals"
             and [r for r in rows if r.get("stage") == "adopted-scope-overlap"]
             != [{"stage": "adopted-scope-overlap", "rejected": True}]
+        )
+        or (
+            mode == "adopted-signals"
+            and [r for r in rows if r.get("stage") == "adopted-scope-retire"]
+            != [
+                {
+                    "stage": "adopted-scope-retire",
+                    "exit": exit_kind,
+                    "stale_rejected": retired,
+                    "host_callbacks_retired": retired,
+                }
+                for exit_kind, retired in (
+                    ("return", 1),
+                    ("host-jump", 1),
+                    ("return", 2),
+                )
+            ]
+        )
+        or (
+            mode == "vm-signals"
+            and (
+                len(vm_samples) != 1
+                or vm_samples[0].get("parked_frames") != 2
+                or vm_samples[0].get("jni_return_suspended") is not True
+                or vm_samples[0].get("stacks_released") is not True
+                or vm_samples[0].get("native_samples", 0) < 1
+                or not (
+                    0
+                    < vm_samples[0].get("java_samples", 0)
+                    <= vm_samples[0].get("sr_deliveries", 0)
+                )
+            )
         )
         or (
             mode in ("adopted-signals", "worker-signals")
@@ -419,7 +448,7 @@ def execute_case(
                         "source_context_edits": True,
                     }
                 ]
-                or not (fpe_supported or fpe_unavailable)
+                or not fpe_valid
                 or [r for r in rows if r.get("stage") == "host-async-fault"]
                 != [
                     {
@@ -548,12 +577,13 @@ def execute_case(
         )
 
     summary = {"case": mode, **terminal[0]}
+    if mode == "vm-signals":
+        summary.update(vm_samples[0])
+        del summary["stage"]
     if mode == "nonlocal":
         skipped = transfer[0]["guest_wait_skipped"]
         summary.update(
-            guest_fpe="PASS_REAL_HARDWARE"
-            if fpe_supported
-            else "UNSUPPORTED_HARDWARE",
+            guest_fpe=dict(zip(fpe_recipient, fpe_sources)),
             wait_exercised=transfer[0]["guest_wait_cases"] - skipped,
             wait_skipped=skipped,
             wait_unwinds=transfer[0]["wait_unwinds"],

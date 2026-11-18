@@ -75,6 +75,7 @@ int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *c) {
     session.signal_page_size = (size_t)page;
     session.signal_call = domain_guest_signal_call;
     session.signal_select_host = signal_guest_select_host;
+    session.signal_prepare_retire = signal_guest_prepare_retire;
   }
 #endif
   /* Claim bridge ownership before creating helpers or changing Guest fault

@@ -22,8 +22,20 @@ enum {
   SIGNAL_PARENT_SWAP,
   SIGNAL_PARENT_SWAP_OVERLAP,
   SIGNAL_HOST_CONTEXT,
+  SIGNAL_RETIRE_SAVED,
+  SIGNAL_RETIRE_HOST_JUMP,
+  SIGNAL_RETIRE_CHAIN,
   SIGNAL_CASES
 };
+
+static inline int adopted_retires_saved(int mode) {
+  return mode == SIGNAL_RETIRE_SAVED || mode == SIGNAL_RETIRE_HOST_JUMP ||
+         mode == SIGNAL_RETIRE_CHAIN;
+}
+
+static inline int adopted_scope_swap(int mode) {
+  return mode == SIGNAL_PARENT_SWAP || adopted_retires_saved(mode);
+}
 
 static inline int adopted_parent_target(int mode) {
   return mode == SIGNAL_PARENT_JUMP || mode == SIGNAL_PARENT_CONTEXT;
@@ -31,8 +43,12 @@ static inline int adopted_parent_target(int mode) {
 
 static inline int adopted_nested(int mode) {
   return (mode >= SIGNAL_NESTED && mode <= SIGNAL_NESTED_JUMP) ||
-         mode == SIGNAL_NESTED_CONTEXT || mode == SIGNAL_PARENT_SWAP ||
+         mode == SIGNAL_NESTED_CONTEXT || adopted_scope_swap(mode) ||
          mode == SIGNAL_PARENT_SWAP_OVERLAP || adopted_parent_target(mode);
+}
+
+static inline int adopted_activations(int mode) {
+  return mode == SIGNAL_RETIRE_CHAIN ? 3 : 1 + adopted_nested(mode);
 }
 
 static inline int adopted_context(int mode) {
@@ -51,6 +67,7 @@ struct adopted_signal_probe {
   _Atomic int parent_resumed;
   _Atomic int swap_phase, host_entries;
   _Atomic int overlap_rejected;
+  _Atomic int stale_rejections;
 };
 
 enum { SIGNAL_SWAP_ROUNDS = 3 };

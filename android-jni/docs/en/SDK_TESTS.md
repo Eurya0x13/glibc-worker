@@ -114,14 +114,15 @@ The SYS probe installs an irreversible filter only on the disposable carrier;
 it traps a magic argument to `getpid`, leaving ordinary calls usable. It checks
 the kernel's syscall number, architecture and call address in `siginfo_t`.
 
-The additional `guest-fpe` observation executes a real floating-point divide
-with `FE_DIVBYZERO` enabled, checks `FPE_FLTDIV`, Guest jump recovery and the
-subsequent ordinary JNI call, then restores the original floating-point
-environment. Desktop requires `PASS_REAL_HARDWARE`. AArch64 exception trap
-enables are optional: if native `feenableexcept` cannot enable them, Android
-records `UNSUPPORTED_HARDWARE` and `recovered:false`; it is not counted as a
-successful FPE recovery. An unexpected signal, missing observation or failed
-recovery still fails the suite.
+The two `guest-fpe` observations exercise an adopted carrier and a
+GNU-created pthread. Each enables `FE_DIVBYZERO`, executes a floating-point
+divide and checks `FPE_FLTDIV`, the Guest jump and FP environment restoration.
+Desktop requires `source: "hardware"`. AArch64 exception trap enables are
+optional. If `feenableexcept` reports that the enable failed, the tested
+thread asks Linux to deliver a native `FPE_FLTDIV` frame to itself. This
+case requires a correct signal frame and recovery, with
+`source: "kernel-self"`. Reports distinguish the two sources and require a
+subsequent ordinary JNI call.
 
 Nine Guest registration cases additionally cover `signal`, `bsd_signal`,
 `ssignal`, `sysv_signal`, `__sysv_signal`, `__sigaction`, `siginterrupt`,
@@ -178,14 +179,10 @@ sender cleanup, in addition to the 74 original and eight stack jumps.
 The oracle requires individual wait/unwind observations, not just summary counts.
 See [signal waiting](../../../core/docs/en/SIGNAL_WAITING.md) for the scope.
 
-Guest fault recovery returns to a checkpoint in the same Guest invocation; it
-does not abandon a suspended Host callback. General continuation lifetime
-accounting remains unfinished. Tagged asynchronous Guest signals, mask/wait
-APIs beyond those tested, remaining lifecycle windows and complete architecture
-state are not established.
-Those remain required by [the recovery contract](../../../core/docs/en/NONLOCAL_RECOVERY.md).
-Native transfers that skip Java/VM frames are outside that contract; normal
-JNI return, Java exception propagation and surviving Java frames remain required.
+This fault fixture returns to a checkpoint in the same Guest invocation. See
+the adopted-carrier tests below for retiring a suspended Host callback.
+[The recovery contract](../../../core/docs/en/NONLOCAL_RECOVERY.md) also
+covers normal JNI return, Java exception propagation and surviving Java frames.
 
 ## Host-blocked synchronous-fault acceptance
 
@@ -281,16 +278,39 @@ rounding and masks, rearming the alternate stack, another JNI call and teardown.
 A separate case verifies `EINVAL` for an overlapping Guest stack and checks
 that the inner handler and the Host callback still return normally.
 
+Three cases leave an inner activation parked when the selected outer handler
+returns or when a Host jump leaves it. One case parks two younger handlers on
+separate alternate stacks, each with an intervening Host callback. After
+retirement, a fresh Guest invocation rejects each stale context with
+`ENOTSUP`. The fixture also checks that retirement is no longer busy and
+verifies subsequent JNI use, module close and runtime shutdown.
+
 A returning Guest handler edits the parked GNU context's FP control state.
 The next native entry must observe the edit. The absolute `clock_nanosleep`
 case checks that a Guest notification delivered during the kernel sleep leaves
 the original Host deadline intact.
 
-Linux x86_64 runs 18 cases, including the Host glibc context case. That case
+Linux x86_64 runs 21 cases, including the Host glibc context case. That case
 resumes a same-scope `swapcontext` capture before restoring its outer
-`getcontext` target. Android ARM64 runs 17 cases with the selected shell JRE17.
+`getcontext` target. Android ARM64 runs 20 cases with the selected shell JRE17.
 Guest glibc context cases run on both targets. The Host glibc case requires
 public APIs absent from Bionic.
+
+## HotSpot suspension and sampling
+
+Run the installed SDK fixture with `--native-unwind --vm-signals` and the
+selected HotSpot JRE17. A Java-created thread enters Guest JNI and parks two
+frames through nested `swapcontext` calls on guarded stacks. JFR must report
+a `jdk.NativeMethodSample` of that thread in Guest JNI. A Guest-to-Java
+callback keeps the frames parked and must generate a `jdk.ExecutionSample` of
+the callback. Each sample has to match the target thread, method and time
+window. The test observes HotSpot's reserved suspend/resume signal routing.
+
+While the target is back in Guest, HotSpot suspends the thread at its next Java
+transition. Guest restores the parked stacks and releases their mappings, and
+Java resumes only after the explicit VM resume. The test checks TID, TLS, errno,
+stack canaries, FP rounding, signal masks, a later JNI call and shutdown.
+Android runs the reviewed shell JRE17 build.
 
 ## Evidence
 
@@ -304,7 +324,7 @@ and the imported Host archives used to build the consumer.
 
 From the workspace root,
 `python3 android-jni/tests/same_thread_results.py --require-current`
-verifies input hashes for 21 selected desktop/Android suites
+verifies input hashes for 23 selected desktop/Android suites
 and writes `android-jni/build/tests/same-thread-compatibility.json`. Missing,
 failed or stale evidence fails this check. A current selected matrix still
 reports full compatibility as `INCOMPLETE` while the acceptance work in
