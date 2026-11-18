@@ -71,8 +71,8 @@ Host errno。对该预留路由的公开注册、替换和查询返回 `EBUSY`�
 
 此内部入口不提供私有位掩码虚拟化、Guest 处置/默认动作或消费等待。可选的
 [所属 libc 发送扩展](GUEST_SIGNAL_SEND.md)现已在夹具中接入带标签的公开发送。
-测试接入显式控制通知掩码和发送者。普通阻塞 I/O 以及私有/原始 Host
-等待仍受[信号等待](SIGNAL_WAITING.md)中列出的边界约束。
+测试接入显式控制通知掩码和发送者。Host 普通管道 I/O 和已接入适配器的私有等待
+遵循[阻塞 I/O 契约](SIGNAL_WAITING.md#阻塞-io-与私有系统调用入口)。
 
 ## 可复现的原生验证
 
@@ -93,10 +93,11 @@ python3 core/tests/guest_async.py --abi arm64-v8a \
 可选的原生 `--ubsan` 运行使用 Clang 检查 Host/core；GNU Guest 及其 libc 不插桩。
 该配置使用独立输出目录。
 
-两个载体经过六批已 join 的生命周期，消费 84 个私有/共享 Guest 包，并检查
+两个载体经过六批已 join 的生命周期，消费 216 个私有/共享 Guest 包，并检查
 发送者、code、数值和队列来源。Guest 入口在没有 Guest 调用轮询时中断 Host
 忙循环，在真正阻塞的
-原生睡眠和 `ppoll` 期间执行，还中断由内核保存 PC 确认的 Guest 忙循环。每次
+原生睡眠、`ppoll`、管道 I/O 及定时 futex 等待期间执行，还中断由内核保存 PC
+确认的 Guest 忙循环。每次
 入口检查 TID、Guest TP/TLS、保护页栈位置、errno、FP 控制状态及 Guest 分配。
 两种定时 Host 等待都透明完成；重试观测确认 150 ms Guest 工作从原始 500 ms
 预算中扣除。每次实际 `ppoll` 还接收一个故意不带逻辑消息的通知，并且必须在
@@ -104,7 +105,7 @@ python3 core/tests/guest_async.py --abi arm64-v8a \
 完成 Guest 析构，再 join，随后才回收 TCB、栈和接收队列。关闭后的发布返回
 `ESRCH`。
 
-60 次嵌套 Host 投递检查原始 Host 上下文、掩码修改、TP/TLS、浮点控制和
+72 次嵌套 Host 投递检查原始 Host 上下文、掩码修改、TP/TLS、浮点控制和
 普通/备用栈位置。六批组合覆盖 Host 备用栈禁用、启用和 AUTODISARM，以及
 Host `SA_ONSTACK` 开关，包括处理器内原生栈查询的标志。每个载体还在
 原生 `ppoll` 的隐藏 Guest 工作期间接收一个真正的 Host

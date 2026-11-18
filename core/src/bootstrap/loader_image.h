@@ -22,6 +22,11 @@ int gw_bootstrap_map_checked(const char *, struct gw_bootstrap_image *);
 int gw_bootstrap_stack_checked(struct gw_bootstrap_image, void *, size_t,
                                char **, size_t, void **);
 
+/* Open an LP64 artifact with the expected four-byte PT_NOTE owner and word.
+ * The caller owns the returned descriptor and can load that same inode. */
+int gw_bootstrap_open_note(const char *path, const char owner[4],
+                           Elf64_Word type, Elf64_Word expected, int *out);
+
 /* Maps the pinned glibc dynamic loader, a single ET_DYN image checked against
  * GW_ELF_MACHINE, into fresh private memory. Any failure exits the process:
  * there is no error return and no caller able to recover from a half-built

@@ -979,13 +979,17 @@ static int shutdown_contexts_idle(void) {
   return 1;
 }
 
+int fh_on_shutdown_owner(void) {
+  return lifecycle_on_owner(GW_HOST_READY);
+}
+
 /* Teardown mirrors full_host_start on the launcher thread: the loader must
    stop cleanly (it refuses while guest images remain live), helpers are
    woken and joined, and the array cache, ID cache, and pinned refs are
    released. The bridge mapping is left in place on purpose — gw_host_bridge
    stays set so a second start is refused. */
 int full_host_shutdown(void) {
-  if (!lifecycle_on_owner(GW_HOST_READY) || !shutdown_contexts_idle()) {
+  if (!fh_on_shutdown_owner() || !shutdown_contexts_idle()) {
     return JNI_ERR;
   }
   atomic_store_explicit(&lifecycle, GW_HOST_STOPPING, memory_order_release);

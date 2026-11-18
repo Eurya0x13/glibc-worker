@@ -32,7 +32,7 @@ extern int signal_sleep_prepare(void) __attribute__((weak));
 extern int gw_signal_user_copy_prepare(void) __attribute__((weak));
 extern int signal_fd_channel_ready(void) __attribute__((weak));
 extern int signal_fd_channel_busy(void) __attribute__((weak));
-extern int signal_host_relay_running(void) __attribute__((weak));
+extern int signal_host_relay_active(void) __attribute__((weak));
 extern int signal_host_relay_busy(void) __attribute__((weak));
 extern int signal_stdio_enable(void) __attribute__((weak));
 extern int signal_stdio_verify(void) __attribute__((weak));
@@ -176,6 +176,11 @@ int signal_router_defer_faults(const int *notifications) {
 
   uint64_t mask;
   lock_writer(&mask);
+  if (!signal_router_enabled() || signal_router_error()) {
+    int error = signal_router_error();
+    unlock_writer(mask);
+    return error ? error : EINVAL;
+  }
   if (atomic_load(&deferred_faults)) {
     unlock_writer(mask);
     return EALREADY;
@@ -533,7 +538,7 @@ void signal_router_selection_end(uint64_t mask) {
   unlock_writer(mask);
 }
 
-int signal_router_init_with_backend(signal_router_backend backend) {
+static int initialize_locked(signal_router_backend backend) {
   if (signal_router_error()) {
     return EIO;
   }
@@ -624,6 +629,14 @@ int signal_router_init_with_backend(signal_router_backend backend) {
   atomic_store_explicit(&routing_complete, complete, memory_order_release);
   atomic_store_explicit(&enabled, 1, memory_order_release);
   return 0;
+}
+
+int signal_router_init_with_backend(signal_router_backend backend) {
+  uint64_t mask;
+  lock_writer(&mask);
+  int error = initialize_locked(backend);
+  unlock_writer(mask);
+  return error;
 }
 
 int signal_router_init(void) {
@@ -1691,34 +1704,30 @@ int signal_router_restore(void) {
     return EIO;
   }
 
-  if (signal_host_relay_running && signal_host_relay_running()) {
-    return EBUSY;
-  }
-
-  if (signal_fd_channel_busy) {
-    int error = signal_fd_channel_busy();
-    if (error) {
-      return error;
-    }
-  }
-
-  /* Caller has joined all test carriers and destroyed the VM. */
-  if (signal_router_fault_notifications() && signal_deferred_recipients &&
-      signal_deferred_recipients()) {
-    return EBUSY;
-  }
-  const int *notifications = signal_router_fault_notifications();
-  if (notifications && notification_owner != syscall(SYS_gettid)) {
-    return EBUSY;
-  }
-
   uint64_t previous;
   lock_writer(&previous);
-  if (reclaim_batch) {
+  /* A dispatcher owns the router from before pthread_create until after
+   * join. Serialize that admission with restoration, including both windows
+   * in which the dispatcher cannot yet accept requests. */
+  if (reclaim_batch ||
+      (signal_host_relay_active && signal_host_relay_active())) {
     unlock_writer(previous);
     return EBUSY;
   }
-  int error = verify_locked();
+
+  /* The caller has joined recipients, destroyed the VM and frozen
+   * descriptor owners. Read the channel and its owner under the writer. */
+  const int *notifications = signal_router_fault_notifications();
+  if (notifications &&
+      (notification_owner != syscall(SYS_gettid) ||
+       (signal_deferred_recipients && signal_deferred_recipients()))) {
+    unlock_writer(previous);
+    return EBUSY;
+  }
+  int error = signal_fd_channel_busy ? signal_fd_channel_busy() : 0;
+  if (!error) {
+    error = verify_locked();
+  }
   struct restore_step steps[NSIG];
   unsigned count = 0, changed = 0;
   uint64_t notification_bits = 0;

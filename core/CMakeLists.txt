@@ -91,6 +91,8 @@ if(BUILD_TESTING)
   add_test(NAME carrier_lifecycle COMMAND carrier_lifecycle_test)
   add_executable(signal_relay_test tests/signal_relay.c)
   target_link_libraries(signal_relay_test PRIVATE signal_interpose)
+  target_link_options(signal_relay_test PRIVATE
+    -Wl,--wrap=pthread_create -Wl,--wrap=pthread_join)
   target_compile_options(signal_relay_test PRIVATE -UNDEBUG)
   add_test(NAME signal_relay COMMAND signal_relay_test)
   set_tests_properties(signal_relay PROPERTIES TIMEOUT 15)

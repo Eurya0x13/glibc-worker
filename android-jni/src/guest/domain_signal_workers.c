@@ -299,7 +299,7 @@ static int install_hooks(void) {
   return 0;
 }
 
-int gw_guest_workers_start(int helper, uint64_t reserved,
+int gw_guest_workers_start(int helper, uint64_t reserved, uint64_t inherited,
                            int (*quarantine)(void)) {
   if (!helper || !quarantine) {
     return EINVAL;
@@ -320,7 +320,8 @@ int gw_guest_workers_start(int helper, uint64_t reserved,
   notification = helper;
   mark_error = quarantine;
   virtual_mask = ~(nptl | job_control | bit(SIGKILL) | bit(SIGSTOP));
-  logical = gw_nonlocal_mask_block();
+  gw_nonlocal_mask_block();
+  logical = inherited;
   physical = logical & ~(bit(helper) | faults);
   reserved |= nptl | bit(helper) | job_control;
   gw_signal_targets_init(&targets, reserved, limit.rlim_cur, notify, NULL);
@@ -564,6 +565,22 @@ void gw_guest_signal_finish_parked(void *argument, enum gw_signal_exit reason) {
   carrier->guest_native_active = activation->previous_active;
   carrier->exchange.guest_execution_mask = activation->previous_carrier_mask;
   gw_guest_workers_wake_error(gw_signal_target_unpin(current));
+}
+
+int gw_guest_workers_check_stop(void) {
+  uint64_t mask = gw_nonlocal_mask_block();
+  struct gw_guest_fd_state *state = gw_guest_fds_state();
+  gw_guest_fds_lock();
+  int busy = state->host_calls != 0;
+  if (!busy) {
+    /* A Host alias can be closed through a private/raw libc entry. The
+     * endpoint, not the interposer, establishes that no alias survives. */
+    gw_guest_signalfd_reap();
+    busy = state->count != 0;
+  }
+  gw_guest_fds_unlock();
+  gw_nonlocal_mask_restore(mask);
+  return busy ? EBUSY : 0;
 }
 
 int gw_guest_workers_stop(void) {

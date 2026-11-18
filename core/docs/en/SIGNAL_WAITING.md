@@ -124,10 +124,32 @@ native-only control demonstrates that `SA_RESTART` alone still exposes `EINTR`.
 The fixture exercises notification recovery under Host TLS; it is not acceptance
 of a production Guest handler entered while Java executes.
 
-This is not general Host syscall virtualization. Ordinary blocking I/O,
-private libc calls and raw syscalls do not acquire this
-recovery scope. General saved/resumable native continuations and actual Guest
-asynchronous entry still require the remaining integration/lifetime work.
+### Blocking I/O and private syscall entry
+
+Host pipe I/O uses the owning libc and kernel restart semantics. The runtime's
+private notification action uses `SA_RESTART`. Linux restarts a blocked pipe
+operation with no transferred data and returns its byte count if it has already
+transferred data. This applies to `read`, `readv`, `write`, `writev`, native
+`fread` and direct pipe-read syscalls. See
+[Linux pipe I/O](https://github.com/torvalds/linux/blob/v6.12/fs/pipe.c) and
+[GNU libc's native file backend](https://github.com/bminor/glibc/blob/glibc-2.41/libio/fileops.c).
+
+An integration that controls its syscall entry can use `gw_host_futex_wait`
+from `signal_channel.h` with the `signal_interpose` target. It waits on a
+process-private futex and takes an absolute `CLOCK_MONOTONIC` deadline or
+`NULL`. Keep the deadline storage readable and unchanged until return. This
+non-cancelling entry retries only interruptions bound to a hidden notification
+on that wait and retains the deadline. A real Host handler can still expose
+`EINTR`. The JNI bootstrap uses this entry for Guest supervisor readiness and
+STOP acknowledgement.
+
+The native [Guest async regression](GUEST_ASYNC_ENTRY.md#reproducible-native-validation)
+interrupts actual blocked calls on adopted carriers. Its controls expose
+`EINTR` from direct timed futex waits and socket reads with `SO_RCVTIMEO`.
+Such calls may return `EINTR` when no adapter owns the wait. A blanket retry
+could extend a socket's timeout or repeat an operation with side effects.
+See [Linux signal restart handling](https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c)
+and [socket timeouts](https://github.com/torvalds/linux/blob/v6.12/include/net/sock.h).
 
 ### Native sleep controls
 

@@ -607,7 +607,7 @@ try:
     result.check_returncode()
     data = json.loads(result.stdout)
     assert data.pop("result") == "PASS"
-    assert data.pop("packets") == 84
+    assert data.pop("packets") == 216
     assert data.pop("self_packets") == 72
     assert data.pop("self_entries") == 72
     assert data.pop("host_entries") >= 24

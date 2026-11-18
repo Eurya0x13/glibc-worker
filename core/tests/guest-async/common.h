@@ -12,11 +12,12 @@ enum {
   TEST_CARRIERS = 2,
   TEST_BATCHES = 6,
   TEST_PACKETS = 4,
-  TEST_TOTAL_PACKETS = TEST_PACKETS + 3,
+  TEST_IO_PACKETS = 11,
+  TEST_TOTAL_PACKETS = TEST_PACKETS + TEST_IO_PACKETS + 3,
   TEST_LOGICAL_SIGNAL = 56,
   TEST_NESTED_HOST_SIGNAL = SIGUSR1,
   TEST_LAYOUT_WORDS = 12,
-  TEST_EXECUTIONS = 19,
+  TEST_EXECUTIONS = 19 + TEST_IO_PACKETS,
   TEST_RECOVERY_DEPTH = 3,
   TEST_RECOVERY_VALUE = 17999
 };
@@ -35,6 +36,17 @@ enum {
   PHASE_BUSY,
   PHASE_WAIT,
   PHASE_POLL,
+  PHASE_READ,
+  PHASE_READV,
+  PHASE_FREAD,
+  PHASE_SYSCALL_READ,
+  PHASE_INLINE_READ,
+  PHASE_WRITE,
+  PHASE_WRITEV,
+  PHASE_TIMED_RECV,
+  PHASE_RAW_FUTEX,
+  PHASE_HOST_FUTEX,
+  PHASE_VISIBLE_FUTEX,
   PHASE_HOST_INTERRUPT,
   PHASE_RECOVER,
   PHASE_RECOVER_AFTER,
@@ -68,6 +80,9 @@ struct async_carrier {
   int index, expected, failures;
   int host_handlers, guest_handlers, self_handlers, delay;
   int completed_work, budget_observed;
+  int io_fds[2], pipe_size;
+  _Atomic int io_done;
+  _Atomic uint32_t io_word;
   _Atomic int nested_host_count;
   int host_alternate, host_onstack, host_autodisarm;
   struct test_execution *executions;

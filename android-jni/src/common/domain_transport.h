@@ -27,7 +27,9 @@ static inline int jni_domain_select(const char *mode) {
 }
 
 #define GW_DOMAIN_TRANSPORT_MAGIC UINT64_C(0x4757444f4d41494e)
-#define GW_DOMAIN_TRANSPORT_VERSION 22u
+#define GW_DOMAIN_TRANSPORT_VERSION 23u
+#define GW_DOMAIN_NOTE_OWNER "GWC"
+#define GW_DOMAIN_NOTE_TYPE UINT32_C(0x47574401)
 #define GW_DOMAIN_LIBC_CAPABILITIES UINT64_C(0x4757440100000012)
 #define GW_DOMAIN_CAP_ADOPTION UINT64_C(1)
 #define GW_DOMAIN_CAP_NATIVE_UNWIND UINT64_C(2)
@@ -47,7 +49,12 @@ struct jni_domain_handshake {
   uint64_t required, accepted;
 };
 
-enum { JNI_DOMAIN_ALLOC = 1, JNI_DOMAIN_FREE, JNI_DOMAIN_STOP };
+enum {
+  JNI_DOMAIN_ALLOC = 1,
+  JNI_DOMAIN_FREE,
+  JNI_DOMAIN_STOP,
+  JNI_DOMAIN_CHECK_STOP
+};
 
 struct jni_domain_signal;
 
@@ -126,7 +133,7 @@ struct jni_domain_session {
   int (*signal_prepare_retire)(int, void *, void *);
   /* Published with STOP response, after the native kernel mask is installed.
    * The supervisor never resumes application work or unmasks after this ACK. */
-  uint64_t owner_stopped_mask;
+  uint64_t owner_start_mask, owner_stopped_mask;
 };
 
 static inline void wake_word(_Atomic int *p) {

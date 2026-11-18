@@ -16,6 +16,7 @@
 int signal_host_relay_start(void);
 int signal_host_relay_stop(void);
 int signal_host_relay_running(void);
+int signal_host_relay_active(void);
 int signal_host_relay_busy(void);
 
 /* Called with all catchable signals blocked, possibly under GNU TLS. Uses

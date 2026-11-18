@@ -47,8 +47,11 @@ have hidden-notification retry with one monotonic timeout budget. Public LP64
 sleep APIs now retain native timers, copyout, errno and cancellation while
 retrying hidden work; see the
 [sleep adapter](core/docs/en/SIGNAL_WAITING.md#transparent-native-sleeps).
-Installed Guest entry exercises `ppoll` and `nanosleep` transparently. Ordinary
-blocking I/O and private/raw paths still need review.
+Installed Guest entry exercises `ppoll` and `nanosleep` transparently.
+Ordinary pipe I/O, including native libc and raw reads, follows kernel restart
+semantics. The explicit Host futex gateway retains the original deadline for
+non-restartable waits. The [blocking I/O contract](core/docs/en/SIGNAL_WAITING.md#blocking-io-and-private-syscall-entry)
+records the native limits for unadapted timed sockets and direct syscalls.
 The native-only sleep control now reproduces remainder-pointer `EFAULT`, errno
 conventions and differing hrtimer/ppoll saturation on both kernels. A sleep
 adapter retains those semantics rather than reusing a ppoll remainder;
@@ -117,9 +120,10 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM
   identity or original-thread Host TLS adoption is implied.
-- Cover initialization/teardown windows, remaining mask/wait APIs and registration
-  aliases. The implemented wait guard does not supply logical Guest queues or
-  virtualize a Host descriptor passed across domains.
+- Extend additional mask/wait APIs or registration aliases when needed by a
+  supported libc or VM integration. The [runtime lifecycle contract](android-jni/docs/en/RUNTIME.md)
+  covers artifact preflight, serialized start/stop, retryable descriptor
+  ownership and bounded GNU supervisor acknowledgement.
 
 ## Complete installed/runtime integration validation
 

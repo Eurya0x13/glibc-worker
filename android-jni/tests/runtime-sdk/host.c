@@ -48,6 +48,7 @@ struct application {
   int adopted_signals;
   int nonlocal;
   int router_quarantine;
+  int held_guest_fd;
   const char *vm_signal_directory;
   const struct gw_loader_api_v1 *loader;
   uint64_t module;
@@ -1680,6 +1681,10 @@ static void *application_run(void *argument) {
   assert(!(*env)->ExceptionCheck(env));
   assert(worker ? guest_tid != syscall(SYS_gettid)
                 : guest_tid == syscall(SYS_gettid));
+  if (app->adopted_signals || app->worker_signals) {
+    extern int sdk_host_held_guest_fd(JNIEnv *, jclass);
+    app->held_guest_fd = sdk_host_held_guest_fd(env, cls);
+  }
   (*env)->DeleteLocalRef(env, data);
   (*env)->DeleteLocalRef(env, cls);
   assert((*vm)->DetachCurrentThread(vm) == JNI_OK);
@@ -1862,6 +1867,9 @@ int main(int argc, char **argv) {
   }
   if (getenv("GW_EXPECT_RUNTIME_REJECTION")) {
     assert(result == ELIBBAD || result == EPROTO);
+    if (!strcmp(argv[8], "reject-service")) {
+      assert(result == ELIBBAD && !guest_owner_tid());
+    }
     assert(full_host_state() == GW_HOST_QUARANTINED);
     assert(signal_host_relay_running());
     puts("{\"result\":\"PASS\",\"case\":\"artifact-rejection\"}");
@@ -1893,6 +1901,7 @@ int main(int argc, char **argv) {
       .adopted_signals = test_adopted_signals,
       .nonlocal = nonlocal,
       .router_quarantine = !strcmp(argv[8], "router-quarantine"),
+      .held_guest_fd = -1,
       .vm_signal_directory = test_vm_signals ? argv[7] : NULL,
       .loader = loader,
       .module = library.handle};
@@ -1903,7 +1912,19 @@ int main(int argc, char **argv) {
     assert(loader->close(env, library.handle, &error) == GW_OK);
   }
   assert(!(*env)->ExceptionCheck(env));
+  if (test_guest_signalfd) {
+    assert(app.held_guest_fd >= 0);
+    assert(gw_host_runtime_shutdown() == EBUSY);
+    assert(full_host_state() == GW_HOST_READY && signal_host_relay_running());
+    /* The raw close bypasses descriptor bookkeeping. The next shutdown
+     * attempt must observe that the kernel's final reference is gone. */
+    assert(!syscall(SYS_close, app.held_guest_fd));
+    puts(
+        "{\"stage\":\"runtime-busy-descriptor\",\"retry_after_raw_close\":"
+        "true}");
+  }
   assert(!gw_host_runtime_shutdown());
+  assert(gw_host_runtime_shutdown() == EALREADY);
   check_owner_quiescent(owner_tid);
   assert(full_host_state() == GW_HOST_STOPPED);
   assert(signal_host_relay_running() == borrowed_relay);

@@ -100,7 +100,8 @@ static int receive(int number, void *information, void *context) {
 
   int phase = atomic_load(&carrier->phase);
   if (carrier->interrupted_host_frame &&
-      (phase == PHASE_BUSY || phase == PHASE_HOST_INTERRUPT)) {
+      (phase == PHASE_BUSY || phase == PHASE_HOST_INTERRUPT ||
+       phase == PHASE_VISIBLE_FUTEX)) {
     /* Deliberately bypass tagged sends: this is a real Host-owned signal
      * arriving while Guest code executes in a Host-origin async entry. */
     uint64_t bit = UINT64_C(1) << (TEST_NESTED_HOST_SIGNAL - 1), previous;

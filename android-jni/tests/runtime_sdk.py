@@ -257,6 +257,7 @@ cases = (
     ("borrowed-relay", args.runtime, False),
     ("worker-borrowed-relay", args.runtime, False),
     ("reject-ordinary-libc", args.ordinary_runtime, True),
+    ("reject-service", args.runtime, True),
 )
 if args.nonlocal_test:
     cases = (("nonlocal", args.runtime, False),)
@@ -290,7 +291,7 @@ for mode, runtime, reject in cases:
         ),
         runtime / "ld-linux-x86-64.so.2",
         str(runtime) + ":" + str(support),
-        out / "service",
+        out / ("module.so" if mode == "reject-service" else "service"),
         out / "module.so",
         out,
         mode,

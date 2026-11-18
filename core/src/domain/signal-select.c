@@ -6,6 +6,7 @@
 #include "signals.h"
 #include "nonlocal-mask.h"
 #include <errno.h>
+#include <linux/futex.h>
 #include <poll.h>
 #include <pthread.h>
 #include <string.h>
@@ -790,13 +791,43 @@ int gw_signal_mask_wait_retry(void *argument, int result, int error) {
   return retry_wait(argument, result, error, 0, 0, 1);
 }
 
-int gw_signal_native_wait_retry(void *argument, int result, int error) {
-  return retry_wait(argument, result, error, 1, 0, 1);
+int gw_signal_native_wait_retry(void *argument, int result, int error,
+                                int cancellable) {
+  return retry_wait(argument, result, error, 1, 0, cancellable);
 }
 
 int gw_signal_native_read_retry(void *argument, int result, int error,
                                 int cancellable) {
   return retry_wait(argument, result, error, 1, 1, cancellable);
+}
+
+int gw_host_futex_wait(void *word, uint32_t expected,
+                       const struct timespec *deadline) {
+  const int operation = FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG;
+  if (!signal_router_enabled()) {
+    return syscall(SYS_futex, word, operation, expected, deadline, NULL,
+                   FUTEX_BITSET_MATCH_ANY);
+  }
+
+  int saved_errno = errno;
+  void *record = gw_signal_mask_wait_current_begin();
+  if (!record) {
+    return -1;
+  }
+
+  /* A timed futex returns EINTR even with the router's SA_RESTART. Reusing
+   * the same absolute timeout leaves expiry and validation in the kernel.
+   * https://github.com/torvalds/linux/blob/v6.12/kernel/futex/waitwake.c
+   * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c
+   */
+  int result, error;
+  do {
+    result = gw_signal_wait_result(gw_signal_native_wait_syscall(
+        record, SYS_futex, (long)word, operation, expected, (long)deadline, 0,
+        FUTEX_BITSET_MATCH_ANY));
+    error = result < 0 ? errno : saved_errno;
+  } while (gw_signal_native_wait_retry(record, result, error, 0));
+  return gw_signal_mask_wait_end(record, result, error);
 }
 
 int gw_signal_selection_sleep(int descriptor, uint64_t wanted,

@@ -13,7 +13,7 @@
 #include "loader_image.h"
 #include "arch.h"
 
-enum { BOOTSTRAP_AUX_CAPACITY = 24 };
+enum { BOOTSTRAP_AUX_CAPACITY = 24, BOOTSTRAP_PHDR_CAPACITY = 64 };
 
 static void die(const char *msg) {
   perror(msg);
@@ -26,6 +26,103 @@ static uintptr_t down(uintptr_t n, size_t a) {
 
 static uintptr_t up(uintptr_t n, size_t a) {
   return (n + a - 1) & ~(uintptr_t)(a - 1);
+}
+
+static int read_headers(int fd, uint64_t size, Elf64_Ehdr *eh, Elf64_Phdr *ph) {
+  if (pread(fd, eh, sizeof *eh, 0) != sizeof *eh ||
+      memcmp(eh->e_ident, ELFMAG, SELFMAG) ||
+      eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+      eh->e_ident[EI_DATA] != ELFDATA2LSB || eh->e_machine != GW_ELF_MACHINE ||
+      eh->e_phentsize != sizeof *ph || !eh->e_phnum ||
+      eh->e_phnum > BOOTSTRAP_PHDR_CAPACITY) {
+    return ENOEXEC;
+  }
+
+  size_t bytes = eh->e_phnum * sizeof *ph;
+  if (eh->e_phoff > size || bytes > size - eh->e_phoff ||
+      pread(fd, ph, bytes, eh->e_phoff) != (ssize_t)bytes) {
+    return ENOEXEC;
+  }
+  return 0;
+}
+
+static int check_note_segment(int fd, const Elf64_Phdr *ph, uint64_t size,
+                              const char owner[4], Elf64_Word type,
+                              Elf64_Word expected) {
+  if (ph->p_offset > size || ph->p_filesz > size - ph->p_offset) {
+    return ENOEXEC;
+  }
+
+  uint64_t end = ph->p_offset + ph->p_filesz;
+  for (uint64_t pos = ph->p_offset; pos < end;) {
+    Elf64_Nhdr note;
+    if (end - pos < sizeof note ||
+        pread(fd, &note, sizeof note, pos) != sizeof note) {
+      return ENOEXEC;
+    }
+    pos += sizeof note;
+    uint64_t length = up(note.n_namesz, 4) + up(note.n_descsz, 4);
+    if (length > end - pos) {
+      return ENOEXEC;
+    }
+    if (note.n_type == type && note.n_namesz == 4 &&
+        note.n_descsz == sizeof expected) {
+      struct {
+        char owner[4];
+        Elf64_Word word;
+      } payload;
+
+      if (pread(fd, &payload, sizeof payload, pos) != sizeof payload) {
+        return ENOEXEC;
+      }
+      if (!memcmp(owner, payload.owner, sizeof payload.owner)) {
+        return payload.word == expected ? 0 : ELIBBAD;
+      }
+    }
+    pos += length;
+  }
+  return ENOENT;
+}
+
+int gw_bootstrap_open_note(const char *path, const char owner[4],
+                           Elf64_Word type, Elf64_Word expected, int *out) {
+  if (!path || !owner || !out) {
+    return EINVAL;
+  }
+
+  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+  if (fd < 0) {
+    return errno;
+  }
+
+  struct stat status;
+  int error = fstat(fd, &status) ? errno : 0;
+  Elf64_Ehdr eh;
+  Elf64_Phdr ph[BOOTSTRAP_PHDR_CAPACITY];
+  if (!error) {
+    error = S_ISREG(status.st_mode) ? read_headers(fd, status.st_size, &eh, ph)
+                                    : ENOEXEC;
+  }
+  if (!error && eh.e_type != ET_DYN && eh.e_type != ET_EXEC) {
+    error = ENOEXEC;
+  }
+  if (!error) {
+    error = ENOENT;
+    for (unsigned i = 0; i < eh.e_phnum && error == ENOENT; ++i) {
+      /* GNU property notes can have eight-byte alignment. The service
+       * identity is a separate four-byte-aligned ELF note. */
+      if (ph[i].p_type == PT_NOTE && ph[i].p_align <= 4) {
+        error = check_note_segment(fd, &ph[i], status.st_size, owner, type,
+                                   expected);
+      }
+    }
+  }
+  if (error) {
+    close(fd);
+    return error == ENOENT ? ELIBBAD : error;
+  }
+  *out = fd;
+  return 0;
 }
 
 /* Bootstrap mapper for ONE pinned ld.so only. No dynamic section processing,
@@ -49,27 +146,11 @@ int gw_bootstrap_map_checked(const char *path, struct gw_bootstrap_image *out) {
   int error = ENOEXEC;
 
   Elf64_Ehdr e;
-  if (!(pread(fd, &e, sizeof e, 0) == sizeof e)) {
+  Elf64_Phdr ph[BOOTSTRAP_PHDR_CAPACITY];
+  if (read_headers(fd, st.st_size, &e, ph) || e.e_type != ET_DYN) {
     goto fail;
   }
-  const int machine = GW_ELF_MACHINE;
-  if (!(!memcmp(e.e_ident, ELFMAG, SELFMAG) &&
-        e.e_ident[EI_CLASS] == ELFCLASS64 &&
-        e.e_ident[EI_DATA] == ELFDATA2LSB && e.e_type == ET_DYN &&
-        e.e_machine == machine && e.e_phentsize == sizeof(Elf64_Phdr) &&
-        e.e_phnum && e.e_phnum <= 64)) {
-    goto fail;
-  }
-
-  Elf64_Phdr ph[64];
   size_t bytes = e.e_phnum * sizeof *ph;
-  if (!(e.e_phoff <= (uint64_t)st.st_size &&
-        bytes <= (uint64_t)st.st_size - e.e_phoff)) {
-    goto fail;
-  }
-  if (!(pread(fd, ph, bytes, e.e_phoff) == (ssize_t)bytes)) {
-    goto fail;
-  }
 
   size_t page = (size_t)sysconf(_SC_PAGESIZE), total = 0;
   uintptr_t last = 0;

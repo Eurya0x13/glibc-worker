@@ -59,8 +59,10 @@ stops. JNI startup borrows a dispatcher already started by the embedder; that
 owner stops it after runtime shutdown and before router restoration. A rejected
 bridge configuration that leaves `GW_HOST_NEW` does not create a dispatcher or
 enable Guest fault routing and permits a corrected retry.
-The router cannot restore while the relay runs, and reclamation cannot release
-queued immutable action tokens. Failed runtime initialization retains resources
+The relay owns the router from before dispatcher creation until after join.
+Restoration returns `EBUSY` throughout that interval, including startup and
+shutdown. Reclamation preserves immutable action tokens used by queued requests.
+Failed runtime initialization retains resources
 after the bridge claims initialization under the process-disposal contract.
 
 ## Verification

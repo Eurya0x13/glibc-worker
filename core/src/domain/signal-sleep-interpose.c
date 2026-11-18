@@ -171,7 +171,7 @@ static int native_sleep(clockid_t clock, int flags, struct timespec requested,
         break;
       }
     }
-    if (!gw_signal_native_wait_retry(record, result, error)) {
+    if (!gw_signal_native_wait_retry(record, result, error, 1)) {
       break;
     }
 

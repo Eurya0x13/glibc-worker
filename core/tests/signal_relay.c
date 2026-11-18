@@ -16,9 +16,54 @@ static _Atomic long dispatcher_tid;
 static pthread_barrier_t selected, replaced;
 static int replacing;
 
+enum relay_window { AT_CREATE = 1, AT_JOIN };
+static _Thread_local enum relay_window window;
+static pthread_barrier_t entering_window, leaving_window;
+
 static void barrier(pthread_barrier_t *value) {
   int result = pthread_barrier_wait(value);
   assert(!result || result == PTHREAD_BARRIER_SERIAL_THREAD);
+}
+
+int __real_pthread_create(pthread_t *, const pthread_attr_t *,
+                          void *(*)(void *), void *);
+int __real_pthread_join(pthread_t, void **);
+
+int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
+                          void *(*entry)(void *), void *argument) {
+  if (window == AT_CREATE) {
+    barrier(&entering_window);
+    barrier(&leaving_window);
+  }
+  return __real_pthread_create(thread, attributes, entry, argument);
+}
+
+int __wrap_pthread_join(pthread_t thread, void **result) {
+  if (window == AT_JOIN) {
+    barrier(&entering_window);
+    barrier(&leaving_window);
+  }
+  return __real_pthread_join(thread, result);
+}
+
+static void *transition(void *argument) {
+  window = *(const enum relay_window *)argument;
+  int error = window == AT_CREATE ? signal_host_relay_start()
+                                  : signal_host_relay_stop();
+  assert(!error);
+  return NULL;
+}
+
+static void check_restore_window(enum relay_window paused) {
+  pthread_t thread;
+  assert(!pthread_create(&thread, NULL, transition, &paused));
+  barrier(&entering_window);
+  assert(signal_host_relay_active() && !signal_host_relay_running());
+  assert(signal_host_relay_start() == EALREADY);
+  assert(signal_host_relay_stop() == EBUSY);
+  assert(signal_router_restore() == EBUSY);
+  barrier(&leaving_window);
+  assert(!pthread_join(thread, NULL));
 }
 
 static void receive(int number, siginfo_t *information, void *frame) {
@@ -89,7 +134,9 @@ leave:
 int main(void) {
   assert(signal_host_relay_start() == EINVAL);
   assert(!signal_router_init());
-  assert(!signal_host_relay_start());
+  assert(!pthread_barrier_init(&entering_window, NULL, 2));
+  assert(!pthread_barrier_init(&leaving_window, NULL, 2));
+  check_restore_window(AT_CREATE);
   assert(signal_host_relay_start() == EALREADY);
   assert(signal_router_restore() == EBUSY);
 
@@ -138,8 +185,10 @@ int main(void) {
   assert(atomic_load(&hits) == 34);
 
   assert(!signal_host_relay_busy());
-  assert(!signal_host_relay_stop());
+  check_restore_window(AT_JOIN);
   assert(!signal_router_restore());
+  assert(!pthread_barrier_destroy(&entering_window));
+  assert(!pthread_barrier_destroy(&leaving_window));
   assert(!pthread_barrier_destroy(&selected));
   assert(!pthread_barrier_destroy(&replaced));
 
@@ -147,5 +196,5 @@ int main(void) {
       "{\"result\":\"PASS\",\"host_tls\":true,\"original_siginfo\":true,"
       "\"different_thread\":true,\"concurrent_recipients\":true,"
       "\"busy_stop\":true,\"selected_generation\":true,"
-      "\"process_directed\":true}");
+      "\"process_directed\":true,\"startup_and_join_windows\":true}");
 }

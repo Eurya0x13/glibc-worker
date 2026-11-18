@@ -99,9 +99,28 @@ Host 中断之后的余量。输入转换遵循载体的 LP64 libc：GNU 会规�
 证明仅设置 `SA_RESTART` 仍会暴露 `EINTR`。夹具验证 Host TLS 下的通知恢复，
 不等于生产 Guest 处理器在 Java 执行期间进入的验收。
 
-这不是通用 Host 系统调用虚拟化。一般阻塞 I/O、
-libc 私有调用和原始系统调用尚未取得这项恢复保护。通用可保存/恢复的原生
-延续状态以及实际 Guest 异步入口仍需完成接入和生命周期工作。
+### 阻塞 I/O 与私有系统调用入口
+
+Host 管道 I/O 保留所属 libc 和内核的重启语义。运行时的私有通知使用
+`SA_RESTART`。Linux 会重启尚未传输数据的阻塞管道操作，已有进度时则返回已传输
+的字节数。这适用于 `read`、`readv`、`write`、`writev`、原生 `fread`
+及直接读取管道的系统调用。见
+[Linux 管道 I/O](https://github.com/torvalds/linux/blob/v6.12/fs/pipe.c)
+和 [GNU libc 原生文件后端](https://github.com/bminor/glibc/blob/glibc-2.41/libio/fileops.c)。
+
+能控制系统调用入口的接入方可以链接 `signal_interpose`，通过 `signal_channel.h`
+中的 `gw_host_futex_wait` 等待进程私有 futex。超时参数使用 `CLOCK_MONOTONIC`
+的绝对截止时间或 `NULL`，截止时间所在内存须保持可读且不变直至返回。这个非取消
+入口只重试确认由该等待上的隐藏通知造成的中断，并沿用原截止时间。真实 Host
+处理器仍可使调用返回 `EINTR`。JNI 启动器通过此入口等待 Guest 监督线程就绪及确认
+STOP。
+
+[Guest 异步回归](GUEST_ASYNC_ENTRY.md#可复现的原生验证)在收养载体上中断
+真实阻塞调用。对照用例表明，直接执行带超时的 futex 等待和设置了 `SO_RCVTIMEO`
+的 socket 读取都可能返回 `EINTR`。未接入适配器时保留这种内核行为。统一重试
+会延长 socket 超时，也可能重复已经产生副作用的操作。见
+[Linux 信号重启处理](https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c)
+和 [socket 超时](https://github.com/torvalds/linux/blob/v6.12/include/net/sock.h)。
 
 ### 睡眠接口的原生对照
 

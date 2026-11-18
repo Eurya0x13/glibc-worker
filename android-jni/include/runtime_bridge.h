@@ -43,13 +43,16 @@ extern "C" {
  * startup creates and owns it before admitting GNU code.
  * The selected VM is obtained from env by the bridge, not created here.
  * Use a dedicated bootstrap/lifecycle thread. Its context zero is the GNU
- * supervisor's control channel; application JNI calls use other VM threads. */
+ * supervisor's control channel; application JNI calls use other VM threads.
+ * Overlapping lifecycle calls return EBUSY before accessing that channel. */
 int gw_host_runtime_start(JNIEnv *env, const struct gw_host_runtime_config *);
 
 /* Same lifecycle owner and quiescence requirements as full_host_shutdown.
  * Success does not unload the runtime, destroy the VM or reclaim idle domain
  * continuations. The bridge and signal router stay mapped until process exit.
- * Busy shutdown returns EBUSY and may be retried after producers quiesce. */
+ * EBUSY permits retry after producers quiesce and Guest descriptors close.
+ * Once shutdown commits, a failed owner acknowledgement or dispatcher join
+ * returns terminal EIO. A completed shutdown returns EALREADY on repetition. */
 int gw_host_runtime_shutdown(void);
 #ifdef __cplusplus
 }

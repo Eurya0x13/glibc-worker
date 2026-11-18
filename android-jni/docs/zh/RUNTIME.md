@@ -19,10 +19,14 @@ start 在桥初始化前检查 `signal_router_guest_ready()`。已有自定义 H
 
 使用独立启动/生命周期线程，其上下文零服务 Guest 监督线程的控制通道。应用 native 调用在其他已附着 VM 线程上执行，按后端获得同线程收养域或 worker 绑定，保留已有 owner/control 模型。
 
-start 返回零或 errno。激活前，Host/服务协商私有传输版本、会话布局和必需能力，服务核对补丁 libc 的收养 ABI；普通或不匹配的 libc 会被拒绝。桥初始化开始后的失败使 runtime 隔离并保留资源；调用方必须丢弃进程，不能重试初始化。
+start 返回零或 errno。启动 GNU 代码前，Host 打开服务文件并核对 ELF note 中的
+私有传输版本，再通过 `/proc/self/fd` 将同一个已打开文件交给动态链接器。
+监督线程初始屏蔽可捕获信号，校验共享布局、必需能力和补丁 libc ABI 后，
+才注册面向 Host 的信号入口并应用继承的掩码。桥初始化开始后的失败使 runtime
+隔离并保留资源，调用方必须丢弃进程。
 校验失败后桥仍为 `GW_HOST_NEW` 时，可以修正配置后重试。runtime 先认领桥，再创建
-分发线程或启用 Guest 故障路由，因此拒绝配置不会遗留这两类副作用。认领之后的终止性
-失败不回滚辅助线程。
+分发线程或启用 Guest 故障路由，因此拒绝配置不会遗留这两类副作用。启动与关闭
+调用重叠时返回 `EBUSY`，此时不会访问传输状态。桥认领后的终止性失败保留辅助线程。
 
 启动 GNU 代码前，接口创建真实 Host 分发线程，遵守
 [信号转交契约](../../../core/docs/zh/HOST_SIGNAL_RELAY.md)。真正 GNU pthread 收到
@@ -32,14 +36,20 @@ runtime 只借用它，关闭后保留其运行；否则 runtime 拥有该线程
 join。两种情况都在请求未完成时拒绝关闭。外部所有者在 runtime 关闭之后、还原路由器
 之前 join 借用的分发线程；外部发送者必须已静止。
 
-shutdown 要求生命周期所有者、停止生产者、native 工作静止且模块已关闭。它不取消调用、不销毁 VM，也不卸载已保存栈/TLS/代码。空闲 VM 绑定和 GNU 监督线程保持固定。两个后端均遵守 [生命周期契约](LIFECYCLE.md)。
+shutdown 要求生命周期所有者、停止生产者、native 工作静止且模块已关闭。它不取消
+调用、不销毁 VM，也不卸载已保存栈/TLS/代码。空闲 VM 绑定和 GNU 监督线程保持固定。
+Guest 信号描述符仍打开或 Host 描述符等待仍在进行时，在关闭桥之前返回 `EBUSY`。
+关闭最后一个描述符引用后可重试。成功关闭后的重复调用返回 `EALREADY`。两个后端
+均遵守 [生命周期契约](LIFECYCLE.md)。
 
 确认 STOP 前，监督线程 join 自己的 worker，通过原生内核掩码屏蔽所有可捕获
 信号，并撤销自己的 Host 信号注册表入口。随后永久停在原生 futex 中，不再轮询
 应用命令。Host 在停止自己的分派线程前核对已确认的掩码，避免恢复路由器后，
 空闲 GNU 监督线程进入原生 Host 处理器。`SIGKILL`/`SIGSTOP` 保留原生内核语义；
 这不代表完整的 VM/ART 接收者静默，也不允许解除 GNU runtime 映射。诊断线程名
-为 `gw-guest-owner`。私有传输要求匹配的静默 STOP 能力，旧服务在激活前被拒绝。
+为 `gw-guest-owner`。就绪、描述符预检和 STOP 确认等待各使用 15 秒单调时钟截止时间。
+桥提交关闭后，如果 STOP 或分发线程 join 失败，返回终止性 `EIO` 并保留剩余资源。
+私有传输支持描述符预检和静默 STOP 确认，旧服务在激活前被拒绝。
 
 `build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及 domain-runtime.json 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI 或收养版本错误的清单。低层 full_host_start 仍供自备 worker 启动机制的宿主使用，不会静默创建 runtime。
 

@@ -25,12 +25,13 @@ struct relay_request {
 _Static_assert(ATOMIC_POINTER_LOCK_FREE == 2 && ATOMIC_INT_LOCK_FREE == 2,
                "foreign-TLS signal entry requires lock-free atomics");
 static _Atomic(struct relay_request *) requests;
-static _Atomic int state, notification;
+static _Atomic int state, dispatcher_ready, notification;
 #define RELAY_CLOSED (UINT_MAX - (UINT_MAX >> 1))
 /* Admission and in-flight ownership share one modification order. A separate
  * running flag plus reader count would leave a stop/admission race. */
 static _Atomic unsigned admission = RELAY_CLOSED;
 static pthread_t dispatcher;
+static _Thread_local int on_dispatcher;
 
 static __attribute__((no_stack_protector)) void wake(_Atomic int *word) {
   gw_raw3(SYS_futex, (long)word, FUTEX_WAKE_PRIVATE, 1);
@@ -87,6 +88,7 @@ static void deliver(struct relay_request *request) {
 
 static void *dispatch(void *unused) {
   (void)unused;
+  on_dispatcher = 1;
   int proof = signal_router_reclaim_signal();
   if (proof) {
     uint64_t bit = UINT64_C(1) << (proof - 1);
@@ -94,8 +96,8 @@ static void *dispatch(void *unused) {
       _exit(125);
     }
   }
-  atomic_store_explicit(&state, RUNNING, memory_order_release);
-  wake(&state);
+  atomic_store_explicit(&dispatcher_ready, 1, memory_order_release);
+  wake(&dispatcher_ready);
 
   for (;;) {
     int observed = atomic_load_explicit(&notification, memory_order_acquire);
@@ -118,52 +120,60 @@ int signal_host_relay_running(void) {
   return atomic_load_explicit(&state, memory_order_acquire) == RUNNING;
 }
 
+int signal_host_relay_active(void) {
+  return atomic_load_explicit(&state, memory_order_acquire) != STOPPED;
+}
+
 int signal_host_relay_busy(void) {
   return (atomic_load_explicit(&admission, memory_order_acquire) &
           ~RELAY_CLOSED) != 0;
 }
 
 int signal_host_relay_start(void) {
-  if (!signal_router_enabled()) {
-    return EINVAL;
-  }
-
+  uint64_t mask = signal_router_selection_begin();
+  int error = signal_router_error();
   int expected = STOPPED;
-  if (!atomic_compare_exchange_strong(&state, &expected, STARTING)) {
-    return EALREADY;
+  if (!error && !signal_router_enabled()) {
+    error = EINVAL;
+  }
+  if (!error && !atomic_compare_exchange_strong(&state, &expected, STARTING)) {
+    error = EALREADY;
+  }
+  signal_router_selection_end(mask);
+  if (error) {
+    return error;
   }
 
-  uint64_t mask = gw_nonlocal_mask_block();
-  int error = pthread_create(&dispatcher, NULL, dispatch, NULL);
+  atomic_store_explicit(&dispatcher_ready, 0, memory_order_relaxed);
+  mask = gw_nonlocal_mask_block();
+  error = pthread_create(&dispatcher, NULL, dispatch, NULL);
   gw_nonlocal_mask_restore(mask);
   if (error) {
     atomic_store_explicit(&state, STOPPED, memory_order_release);
     return error;
   }
 
-  wait_value(&state, STARTING);
+  wait_value(&dispatcher_ready, 0);
   atomic_store_explicit(&admission, 0, memory_order_release);
+  atomic_store_explicit(&state, RUNNING, memory_order_release);
   return 0;
 }
 
 int signal_host_relay_stop(void) {
-  if (!signal_host_relay_running()) {
-    return EINVAL;
-  }
-  if (pthread_equal(pthread_self(), dispatcher)) {
+  if (on_dispatcher) {
     return EDEADLK;
   }
 
   int expected = RUNNING;
   if (!atomic_compare_exchange_strong(&state, &expected, STOPPING)) {
-    return EBUSY;
+    return expected == STOPPED ? EINVAL : EBUSY;
   }
 
   unsigned pending =
       atomic_fetch_or_explicit(&admission, RELAY_CLOSED, memory_order_acq_rel);
   if (pending & ~RELAY_CLOSED) {
-    atomic_store_explicit(&state, RUNNING, memory_order_release);
     atomic_fetch_and_explicit(&admission, ~RELAY_CLOSED, memory_order_release);
+    atomic_store_explicit(&state, RUNNING, memory_order_release);
     return EBUSY;
   }
 

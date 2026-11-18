@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 #include "domain_transport.h"
 #include "guest_internal.h"
+#include "nonlocal-mask.h"
 #include <dlfcn.h>
+#include <elf.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -12,9 +14,19 @@
 #include "domain_signals.h"
 #include "domain_signal_workers.h"
 #include "domain_jump.h"
-#include "nonlocal-mask.h"
 #include "signal-stack.h"
 #endif
+
+static const struct {
+  Elf64_Nhdr header;
+  char owner[4];
+  Elf64_Word transport;
+} service_note __attribute__((used, section(".note.gw.domain"), aligned(4))) = {
+    .header = {.n_namesz = 4,
+               .n_descsz = sizeof(Elf64_Word),
+               .n_type = GW_DOMAIN_NOTE_TYPE},
+    .owner = GW_DOMAIN_NOTE_OWNER,
+    .transport = GW_DOMAIN_TRANSPORT_VERSION};
 
 static struct jni_domain_session *session;
 static __thread struct jni_domain_context *current;
@@ -383,6 +395,7 @@ static int setup_signals(void) {
       return EINVAL;
     }
     int error = gw_guest_workers_start(helper, session->reserved_signals,
+                                       session->owner_start_mask,
                                        session->quarantine_signals);
     if (error) {
       return error;
@@ -415,11 +428,10 @@ static int setup_signals(void) {
 
 int main(int argc, char **argv) {
   if (argc != 2) {
-    _exit(124);
+    syscall(SYS_exit, 124);
+    __builtin_unreachable();
   }
   session = (void *)(uintptr_t)strtoull(argv[1], NULL, 16);
-  session->note_guest(0, syscall(SYS_gettid),
-                      (uintptr_t)__builtin_thread_pointer());
   struct jni_domain_handshake *hello = &session->handshake;
   uint64_t supported = GW_DOMAIN_CAP_ADOPTION | GW_DOMAIN_CAP_STOP_QUIESCENT;
 #ifdef GW_DOMAIN_NONLOCAL
@@ -463,10 +475,16 @@ int main(int argc, char **argv) {
   }
 #endif
   full_guest_start(&session->shared);
+  session->note_guest(0, syscall(SYS_gettid),
+                      (uintptr_t)__builtin_thread_pointer());
 #ifdef GW_DOMAIN_NONLOCAL
   if (session->guest_notification) {
     gw_guest_workers_unmask();
+  } else {
+    gw_nonlocal_mask_restore(session->owner_start_mask);
   }
+#else
+  gw_nonlocal_mask_restore(session->owner_start_mask);
 #endif
   session->entry = adopted_entry;
   atomic_store_explicit(&session->shared.phase, 2, memory_order_release);
@@ -495,6 +513,11 @@ int main(int argc, char **argv) {
         }
       } else if (operation == JNI_DOMAIN_FREE) {
         session->error = free_domain(c->token);
+#ifdef GW_DOMAIN_NONLOCAL
+      } else if (operation == JNI_DOMAIN_CHECK_STOP) {
+        session->error =
+            session->guest_notification ? gw_guest_workers_check_stop() : 0;
+#endif
       } else if (operation == JNI_DOMAIN_STOP) {
         session->error = stop_service();
       } else {

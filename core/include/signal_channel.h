@@ -1,6 +1,8 @@
 #ifndef GW_HOST_SIGNAL_CHANNEL_H
 #define GW_HOST_SIGNAL_CHANNEL_H
 #include <stddef.h>
+#include <stdint.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +25,15 @@ enum { GW_HOST_FAULT_SIGNAL_COUNT = 6 };
  * Runtime-owned descriptors must not be closed/replaced by application code.
  */
 int gw_host_signal_channel_enable(const int *notifications, size_t count);
+
+/* Explicit non-cancelling Host futex wait for libc/assembly integrations.
+ * deadline is an absolute CLOCK_MONOTONIC time or NULL. The word belongs to
+ * this process (FUTEX_PRIVATE_FLAG); any FUTEX_WAKE on that private key can
+ * wake it. Returns zero or -1 with kernel-style errno. While routed, only
+ * hidden notification interruptions retry, retaining the same deadline.
+ * Applications that directly issue syscalls do not enter this gateway. */
+int gw_host_futex_wait(void *word, uint32_t expected,
+                       const struct timespec *deadline);
 
 /* Optional live reclamation. Lease an unused public realtime number before
  * starting the runtime's relay/Guest helpers. The process owns this number

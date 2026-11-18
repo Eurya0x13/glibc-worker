@@ -101,6 +101,16 @@ static jint invoke(JNIEnv *env, jclass cls, jmethodID method, int op, int arg) {
   return result;
 }
 
+int sdk_host_held_guest_fd(JNIEnv *env, jclass cls) {
+  jmethodID method =
+      (*env)->GetStaticMethodID(env, cls, "guestDescriptor", "(II)I");
+  assert(method);
+  int fd = invoke(env, cls, method, SDK_FD_OPEN, 0);
+  assert(fd >= 0);
+  assert(!invoke(env, cls, method, SDK_FD_FINISH, 0));
+  return fd;
+}
+
 static void check_packet(const struct signalfd_siginfo *packet, int signo,
                          int value) {
   assert(packet->ssi_signo == (uint32_t)signo && packet->ssi_code == SI_QUEUE);

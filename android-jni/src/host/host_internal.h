@@ -42,6 +42,7 @@ void *fh_id(struct host_context *, jobject, int);
 void fh_throw(JNIEnv *, enum fb_failure, const char *);
 void fh_drop_token(jobject);
 void fh_drop_locals(struct host_context *, int);
+int fh_on_shutdown_owner(void);
 void sweep_ids(JNIEnv *, int);
 jclass fh_declaring_class(struct host_context *, jobject);
 const char *fh_describe(struct host_context *, jobject);

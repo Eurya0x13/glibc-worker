@@ -355,6 +355,7 @@ cases = [
     ("borrowed-relay", False),
     ("worker-borrowed-relay", False),
     ("reject-ordinary-libc", True),
+    ("reject-service", True),
 ]
 if args.expect_unconfigured_profile:
     cases = [("unconfigured-profile", False)]
@@ -379,7 +380,7 @@ for mode, reject in cases:
         if mode.startswith("guest-default-")
         else None
     )
-    runtime = remote + ("/ordinary" if reject else "")
+    runtime = remote + ("/ordinary" if mode == "reject-ordinary-libc" else "")
     classpath = remote + "/probe.jar:" + remote + "/helpers.jar"
     if args.jvm_prefix:
         classpath += ":" + remote + "/jvm-helpers.jar"
@@ -414,7 +415,7 @@ for mode, reject in cases:
         remote + "/probe.jar:" + remote + "/helpers.jar",
         runtime + "/ld-linux-aarch64.so.1",
         runtime,
-        remote + "/service",
+        remote + ("/module.so" if mode == "reject-service" else "/service"),
         remote + "/module.so",
         remote,
         mode,

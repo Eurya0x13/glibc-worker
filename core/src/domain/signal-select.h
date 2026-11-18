@@ -56,7 +56,7 @@ void gw_signal_native_wait_cancel_begin(void *);
 void gw_signal_native_wait_cancel_end(void *);
 void gw_signal_native_wait_rearm(void *);
 __int128 gw_signal_native_wait_host_shift(void *);
-int gw_signal_native_wait_retry(void *, int result, int error);
+int gw_signal_native_wait_retry(void *, int result, int error, int cancellable);
 int gw_signal_native_read_retry(void *, int result, int error, int cancellable);
 int gw_signal_wait_result(long);
 void *gw_signal_mask_wait_begin(uint64_t);

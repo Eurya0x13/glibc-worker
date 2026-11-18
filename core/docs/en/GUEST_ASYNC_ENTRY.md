@@ -95,9 +95,8 @@ This internal entry does not add private-bit mask virtualization,
 Guest dispositions/default actions or consuming waits. The optional
 [owning-libc send extension](GUEST_SIGNAL_SEND.md) now supplies tagged public
 sends in the fixture. The test integration explicitly controls its notification
-mask and senders. General
-blocking I/O and private/raw Host waits retain the limits in
-[signal waiting](SIGNAL_WAITING.md).
+mask and senders. Ordinary Host pipe I/O and explicitly adapted private
+waits follow the [blocking I/O contract](SIGNAL_WAITING.md#blocking-io-and-private-syscall-entry).
 
 ## Reproducible native validation
 
@@ -120,11 +119,11 @@ logical number remains installed and receives its own untagged kernel packet.
 The optional native `--ubsan` run instruments Host/core with Clang; the GNU
 Guest and its libc remain uninstrumented. It uses a separate output directory.
 
-Two carriers over six joined lifetimes consume 84 private/shared Guest packets
+Two carriers over six joined lifetimes consume 216 private/shared Guest packets
 with sender, code, value and queue-source checks. Guest entry interrupts Host
 busy code without Guest-call polling, runs during an actually blocked native
-sleep and `ppoll`, and interrupts
-a Guest busy loop identified by its real kernel-saved PC. Each entry checks TID,
+sleep, `ppoll`, pipe I/O and timed futex waits, and interrupts a Guest busy loop
+identified by its kernel-saved PC. Each entry checks TID,
 Guest TP/TLS, guarded-stack placement, errno, FP control and Guest allocation.
 Both timed Host waits complete transparently; retry observations prove 150 ms
 of Guest work reduces their original 500 ms budgets.
@@ -134,7 +133,7 @@ After send admission closes, the target drains its helper, completes Guest
 teardown and joins before any TCB, stack or receiver queue is reclaimed. A
 post-close publication returns `ESRCH`.
 
-Sixty nested Host deliveries check original Host contexts, mask edits, TP/TLS,
+Seventy-two nested Host deliveries check original Host contexts, mask edits, TP/TLS,
 floating-point control and ordinary/alternate-stack placement. The six batches
 cross disabled, enabled and AUTODISARM Host alternate stacks with Host
 `SA_ONSTACK` on/off, including native stack-query flags inside the handler.

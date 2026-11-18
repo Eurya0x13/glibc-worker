@@ -1,14 +1,16 @@
 #define _GNU_SOURCE
 #include "domain_runtime.h"
 #include "dlopen_backend.h"
+#include "nonlocal-mask.h"
+#include "signal_channel.h"
 #include <time.h>
 #include <errno.h>
 #ifdef GW_DOMAIN_NONLOCAL
-#include "nonlocal-mask.h"
 #include "signal-stack.h"
 #endif
 extern long launch_guest(unsigned long, void *, void *);
 extern void domain_start(void);
+extern __typeof__(gw_host_futex_wait) gw_host_futex_wait __attribute__((weak));
 struct jni_domain_session session;
 static pthread_mutex_t owner_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Thread_local struct jni_domain_context *current;
@@ -300,6 +302,30 @@ static void *stack_alloc(size_t size) {
   return p + page;
 }
 
+static int wait_for_owner(_Atomic int *word, int wanted) {
+  struct timespec deadline;
+  if (clock_gettime(CLOCK_MONOTONIC, &deadline)) {
+    return errno;
+  }
+  deadline.tv_sec += 15;
+
+  int observed;
+  while ((observed = atomic_load_explicit(word, memory_order_acquire)) !=
+         wanted) {
+    int result =
+        gw_host_futex_wait
+            ? gw_host_futex_wait(word, (uint32_t)observed, &deadline)
+            : syscall(SYS_futex, word, FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG,
+                      observed, &deadline, NULL, FUTEX_BITSET_MATCH_ANY);
+    if (result < 0 && errno != EINTR && errno != EAGAIN) {
+      return atomic_load_explicit(word, memory_order_acquire) == wanted ? 0
+                                                                        : errno;
+    }
+  }
+
+  return 0;
+}
+
 int owner_command(struct jni_domain_context *context, int operation) {
   pthread_mutex_lock(&owner_lock);
   int seq = gw_rpc_next_sequence(atomic_load(&session.request));
@@ -307,15 +333,23 @@ int owner_command(struct jni_domain_context *context, int operation) {
   session.operation = operation;
   atomic_store_explicit(&session.request, seq, memory_order_release);
   fb_event_notify(&fb_context_at(gw_host_bridge, 0)->guest_event);
-  int observed;
-  while ((observed = atomic_load_explicit(&session.response,
-                                          memory_order_acquire)) != seq) {
-    wait_word(&session.response, observed);
+  int error = 0;
+  if (operation == JNI_DOMAIN_STOP || operation == JNI_DOMAIN_CHECK_STOP) {
+    error = wait_for_owner(&session.response, seq);
+  } else {
+    int observed;
+    while ((observed = atomic_load_explicit(&session.response,
+                                            memory_order_acquire)) != seq) {
+      wait_word(&session.response, observed);
+    }
   }
-  int error = session.error;
-  if (!error && operation == JNI_DOMAIN_STOP &&
-      session.owner_stopped_mask != GW_DOMAIN_STOP_MASK) {
-    error = EPROTO;
+
+  if (!error) {
+    error = session.error;
+    if (!error && operation == JNI_DOMAIN_STOP &&
+        session.owner_stopped_mask != GW_DOMAIN_STOP_MASK) {
+      error = EPROTO;
+    }
   }
   pthread_mutex_unlock(&owner_lock);
   return error;
@@ -348,57 +382,63 @@ int domain_owner_start(const char *loader, const char *libraries,
     }
   }
 #endif
-  char pointer[32];
-  snprintf(pointer, sizeof pointer, "%lx", (unsigned long)(uintptr_t)&session);
-  char *arguments[] = {(char *)loader, "--library-path", (char *)libraries,
-                       (char *)service, pointer};
   struct gw_bootstrap_image image;
   int error = gw_bootstrap_map_checked(loader, &image);
   if (error) {
     return error;
   }
+  int service_fd;
+  error =
+      gw_bootstrap_open_note(service, GW_DOMAIN_NOTE_OWNER, GW_DOMAIN_NOTE_TYPE,
+                             GW_DOMAIN_TRANSPORT_VERSION, &service_fd);
+  if (error) {
+    munmap(image.base, image.size);
+    return error;
+  }
+
   const size_t size = 2 * 1024 * 1024;
   void *stack = stack_alloc(size);
   if (!stack) {
     error = errno;
+    close(service_fd);
     munmap(image.base, image.size);
     return error;
   }
+  char pointer[32], opened[48];
+  snprintf(pointer, sizeof pointer, "%lx", (unsigned long)(uintptr_t)&session);
+  snprintf(opened, sizeof opened, "/proc/self/fd/%d", service_fd);
+  char *arguments[] = {(char *)loader, "--library-path", (char *)libraries,
+                       opened, pointer};
   void *sp;
   error = gw_bootstrap_stack_checked(image, stack, size, arguments, 5, &sp);
   long tid = 0;
   if (!error) {
+    uint64_t mask = gw_nonlocal_mask_block();
+    session.owner_start_mask = mask;
     tid = launch_guest(CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
                            CLONE_THREAD | CLONE_SYSVSEM,
                        sp, image.entry);
+    gw_nonlocal_mask_restore(mask);
     if (tid < 0) {
       error = (int)-tid;
     }
   }
   if (error) {
     size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    close(service_fd);
     munmap((char *)stack - page, size + 2 * page);
     munmap(image.base, image.size);
     return error;
   }
   /* Once cloned, the stack and loader are process-pinned, including errors.
    * A published ready flag does not prove that the kernel has exited a thread.
-   * Never reclaim its stack based on an application-level completion flag. */
-  struct timespec beginning, now;
-  if (clock_gettime(CLOCK_MONOTONIC, &beginning)) {
-    return errno;
+   * Keep the validated service fd on timeout: the loader may yet open its
+   * /proc path, which must continue to identify the original file. */
+  error = wait_for_owner(&session.ready, 1);
+  if (error) {
+    return error;
   }
-  while (!atomic_load_explicit(&session.ready, memory_order_acquire)) {
-    struct timespec timeout = {.tv_nsec = 100000000};
-    syscall(SYS_futex, &session.ready, FUTEX_WAIT_PRIVATE, 0, &timeout, NULL,
-            0);
-    if (clock_gettime(CLOCK_MONOTONIC, &now)) {
-      return errno;
-    }
-    if (now.tv_sec - beginning.tv_sec >= 15) {
-      return ETIMEDOUT;
-    }
-  }
+  close(service_fd);
   if (session.error) {
     return session.error;
   }

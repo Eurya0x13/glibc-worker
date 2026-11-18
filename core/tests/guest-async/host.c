@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "common.h"
+#include "host-io.h"
 #include "private-threads.h"
 #include "loader_image.h"
 #include "nonlocal-mask.h"
@@ -352,6 +353,9 @@ static void *carrier_main(void *argument) {
   assert(ppoll(NULL, 0, &interrupted_wait, NULL) == -1 && errno == EINTR);
   errno = EDOM;
   host_check();
+  check_host_io(carrier);
+  errno = EDOM;
+  host_check();
   stack_t original_alternate;
   gw_signal_stack_get(&original_alternate);
   sigset_t original_recovery_mask;
@@ -442,7 +446,7 @@ static void wait_value(_Atomic int *word, int value) {
   }
 }
 
-static void wait_native_sleep(struct async_carrier *carrier, int phase) {
+static void wait_native(struct async_carrier *carrier, int phase, long call) {
   wait_value(&carrier->phase, phase);
   struct timespec start, now;
   assert(!clock_gettime(CLOCK_MONOTONIC, &start));
@@ -457,8 +461,12 @@ static void wait_native_sleep(struct async_carrier *carrier, int phase) {
     if (length > 0) {
       text[length] = 0;
       long number;
-      if (sscanf(text, "%ld", &number) == 1 &&
-          number == (phase == PHASE_WAIT ? SYS_clock_nanosleep : SYS_ppoll)) {
+      unsigned long first = 0, second = 0;
+      if (sscanf(text, "%ld %lx %lx", &number, &first, &second) >= 1 &&
+          number == call &&
+          (call != SYS_futex ||
+           (first == (uintptr_t)&carrier->io_word &&
+            second == (FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG)))) {
         return;
       }
     }
@@ -552,12 +560,13 @@ static void send_wait_packets(void) {
   for (int polling = 0; polling < 2; ++polling) {
     for (int i = 0; i < TEST_CARRIERS; ++i) {
       int phase = polling ? PHASE_POLL : PHASE_WAIT;
-      wait_native_sleep(&carriers[i], phase);
+      long call = polling ? SYS_ppoll : SYS_clock_nanosleep;
+      wait_native(&carriers[i], phase, call);
       if (polling) {
         int empty = atomic_load(&carriers[i].empty_notifications);
         assert(!owner_command(&carriers[i], OWNER_EMPTY, 0));
         wait_value(&carriers[i].empty_notifications, empty + 1);
-        wait_native_sleep(&carriers[i], phase);
+        wait_native(&carriers[i], phase, call);
       }
       assert(!owner_command(
           &carriers[i], OWNER_SEND,
@@ -566,8 +575,26 @@ static void send_wait_packets(void) {
     }
   }
   for (int i = 0; i < TEST_CARRIERS; ++i) {
-    wait_native_sleep(&carriers[i], PHASE_HOST_INTERRUPT);
+    wait_native(&carriers[i], PHASE_HOST_INTERRUPT, SYS_ppoll);
     assert(!owner_command(&carriers[i], OWNER_EMPTY, 0));
+  }
+}
+
+static void send_io_packets(void) {
+  for (int phase = PHASE_READ; phase <= PHASE_VISIBLE_FUTEX; ++phase) {
+    int packet = TEST_PACKETS + 3 + phase - PHASE_READ;
+    for (int i = 0; i < TEST_CARRIERS; ++i) {
+      struct async_carrier *carrier = &carriers[i];
+      long number = host_io_call_number(phase);
+      wait_native(carrier, phase, number);
+      assert(
+          !owner_command(carrier, OWNER_SEND, carrier->index * 1000 + packet));
+      wait_value(&carrier->received, packet);
+      if (phase <= PHASE_WRITEV || phase == PHASE_HOST_FUTEX) {
+        wait_native(carrier, phase, number);
+      }
+      host_io_unblock(carrier, phase);
+    }
   }
 }
 
@@ -633,7 +660,7 @@ static void join_carriers(pthread_t threads[TEST_CARRIERS],
     assert(!pthread_join(threads[i], &result) && result == expected);
     assert(carriers[i].guest_handlers == 1 && carriers[i].host_handlers >= 2);
     assert(carriers[i].self_handlers == 6);
-    assert(carriers[i].nested_host_count == TEST_PACKETS + 1);
+    assert(carriers[i].nested_host_count == TEST_PACKETS + 2);
     assert(atomic_load(&carriers[i].host_signal_count) == 1);
     assert(!owner_command(&carriers[i], OWNER_FREE, 0));
     sum->packets += atomic_load(&carriers[i].received);
@@ -689,6 +716,7 @@ int main(int argc, char **argv) {
     start_carriers(batch, threads);
     send_busy_packets();
     send_wait_packets();
+    send_io_packets();
     send_recovery_packets();
     send_guest_packets_and_close(threads);
     join_carriers(threads, &sum);
@@ -712,6 +740,9 @@ int main(int argc, char **argv) {
       "\"adopted_mask_inheritance\":true,"
       "\"busy_host_delivery\":true,\"host_sleep_transparent\":true,"
       "\"host_ppoll_transparent\":true,\"handler_time_in_budget\":true,"
+      "\"host_pipe_io_transparent\":true,\"host_private_and_raw_read\":true,"
+      "\"timed_futex_transparent\":true,\"timed_futex_visible_eintr\":true,"
+      "\"unadapted_timed_io_eintr\":true,"
       "\"empty_notification_retry\":true,"
       "\"host_disposition_preserved\":true,"
       "\"nested_host_original_context\":true,\"nested_host_stacks\":true,"
