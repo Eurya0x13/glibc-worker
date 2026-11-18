@@ -14,6 +14,20 @@ public final class SdkProbe {
   static native int hostMask();
   static native int hostMaskBlocked();
   static native int hostStack();
+  static native int tryGuardedContext();
+  static int recoveryField = 73;
+  static int guardFinally;
+
+  static int guardedRecovery(Object monitor) {
+    try {
+      synchronized (monitor) {
+        return tryGuardedContext();
+      }
+    } finally {
+      ++guardFinally;
+    }
+  }
+
   static int reply(int value) {
     return value + 9;
   }

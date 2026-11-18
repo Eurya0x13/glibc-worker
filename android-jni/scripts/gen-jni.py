@@ -112,7 +112,7 @@ for i, (ret, name, ts) in enumerate(api):
                 f" GW_RPC_SCOPE(jni,GW_RPC_HOST_JNI_EXECUTE,{i});",
                 " jobject value=((jobject (*)(JNIEnv*,jclass))((void **)*env)[233])(env,rpc_arg0);",
                 " GW_RPC_SCOPE_END(jni);",
-                " r->result.l=fh_add_ref(c,value,H_LOCAL); if(value&&!r->result.l)(*env)->DeleteLocalRef(env,value); break; }",
+                " reference_result(call,value,H_LOCAL); break; }",
             ]
         )
         continue
@@ -172,6 +172,17 @@ for i, (ret, name, ts) in enumerate(api):
             h.append(f" {t} rpc_arg{k}={vals[k]};")
             resolved[k] = f"rpc_arg{k}"
     h.append(" if(c->marshal_error){r->error=2;break;}")
+    discard = {
+        "GetStringChars": "discard_chars",
+        "GetStringUTFChars": "discard_utf_chars",
+        "GetStringCritical": "discard_string_critical",
+        "GetPrimitiveArrayCritical": "discard_array_critical",
+    }.get(name)
+    if array_elements and array_elements[1] == "Get":
+        discard = f"discard_{array_elements[2].lower()}_elements"
+    if discard:
+        h.append(" jboolean copy=JNI_FALSE;")
+        resolved[1] = "r->a[1].l ? &copy : NULL"
     measured = (
         f"{callee}(env" + (" ," + ",".join(resolved) if resolved else "") + ")"
     )
@@ -180,36 +191,41 @@ for i, (ret, name, ts) in enumerate(api):
         " " + measured + ";" if ret == "void" else f" {ret} value={measured};"
     )
     h.append(" GW_RPC_SCOPE_END(jni);")
-    if name == "PushLocalFrame":
-        h.append(" if(value==JNI_OK)c->local_depth++;")
     if name == "PopLocalFrame":
         h.append(" fh_drop_locals(c,c->local_depth); c->local_depth--;")
     if name in ("DeleteLocalRef", "DeleteGlobalRef", "DeleteWeakGlobalRef"):
         h.append(" fh_drop_token(r->a[0].l);")
-    if name.startswith(("GetPrimitiveArrayCritical", "GetStringCritical")):
-        h.append(" if(value)c->critical++;")
     if name == "ReleaseStringCritical":
         h.append(" if(c->critical)c->critical--;")
     if name == "ReleasePrimitiveArrayCritical":
         h.append(" if(c->critical)c->critical--;")
-    if ret in refs:
+    if discard:
+        h.append(
+            f" pointer_result(call,rpc_arg0,value,{discard},copy,{int(name.endswith('Critical'))});"
+        )
+    elif name == "PushLocalFrame":
+        h.append(" push_frame_result(call,value);")
+    elif name == "MonitorEnter":
+        h.append(" monitor_enter_result(call,rpc_arg0,value);")
+    elif ret in refs:
         kind = {"NewGlobalRef": "H_GLOBAL", "NewWeakGlobalRef": "H_WEAK"}.get(
             name, "H_LOCAL"
         )
-        h.append(f" r->result.l=fh_add_ref(c,(jobject)value,{kind});")
-        delete = {
-            "NewGlobalRef": "DeleteGlobalRef",
-            "NewWeakGlobalRef": "DeleteWeakGlobalRef",
-        }.get(name, "DeleteLocalRef")
-        h.append(
-            f" if(value&&!r->result.l){{(*env)->{delete}(env,value);r->error=2;}}"
-        )
+        h.append(f" reference_result(call,(jobject)value,{kind});")
     elif ret in ("jmethodID", "jfieldID"):
         kind = "H_METHOD" if ret == "jmethodID" else "H_FIELD"
         sig = "(const char*)r->a[2].l" if "const char*" in ts else "NULL"
         if name.startswith("FromReflected"):
-            h.append(
-                f" if(value){{jobject member=fh_ref(c,r->a[0].l);const char*sig=fh_describe(c,member);if((*env)->ExceptionCheck(env))break;jclass owner=fh_declaring_class(c,member);if((*env)->ExceptionCheck(env))break;r->result.l=fh_add_id(c,(void*)value,{kind},sig,owner);if(owner)(*env)->DeleteLocalRef(env,owner);}}"
+            h.extend(
+                [
+                    " if(value){",
+                    "  char sig[FB_SIG];",
+                    '  snprintf(sig,sizeof sig,"%s",fh_describe(c,rpc_arg0));',
+                    "  if((*env)->ExceptionCheck(env))break;",
+                    "  jclass owner=fh_declaring_class(c,rpc_arg0);",
+                    f"  id_result(call,(void*)value,{kind},sig,NULL,owner);",
+                    " }",
+                ]
             )
         else:
             reflected = (
@@ -218,8 +234,15 @@ for i, (ret, name, ts) in enumerate(api):
                 else "ToReflectedField"
             )
             static = "JNI_TRUE" if name.startswith("GetStatic") else "JNI_FALSE"
-            h.append(
-                f" if(value){{jobject member=(*env)->{reflected}(env,(jclass)fh_ref(c,r->a[0].l),value,{static});if((*env)->ExceptionCheck(env))break;jclass owner=fh_declaring_class(c,member);if((*env)->ExceptionCheck(env))break;r->result.l=fh_add_id(c,(void*)value,{kind},{sig},owner);if(owner)(*env)->DeleteLocalRef(env,owner);if(member)(*env)->DeleteLocalRef(env,member);}}"
+            h.extend(
+                [
+                    " if(value){",
+                    f"  jobject member=(*env)->{reflected}(env,rpc_arg0,value,{static});",
+                    "  if((*env)->ExceptionCheck(env)){discard_local(c,NULL,member);break;}",
+                    "  jclass owner=fh_declaring_class(c,member);",
+                    f"  id_result(call,(void*)value,{kind},{sig},member,owner);",
+                    " }",
+                ]
             )
     elif ret != "void":
         h.append(

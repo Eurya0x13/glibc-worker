@@ -76,6 +76,88 @@ def valid_guest_target_observations(rows):
     ]
 
 
+def valid_jni_resource_recovery(rows):
+    host = [r for r in rows if r.get("stage") == "jni-resource-host"]
+    guest = [r for r in rows if r.get("stage") == "jni-resource-guest"]
+    boundary = [r for r in rows if r.get("stage") == "jni-managed-boundary"]
+    return (
+        host
+        == [
+            {
+                "stage": "jni-resource-host",
+                "api": name,
+                "discarded": 1,
+                "pending_preserved": name == "GetStringUTFChars",
+            }
+            for name in (
+                "NewLocalRef",
+                "NewGlobalRef",
+                "NewWeakGlobalRef",
+                "GetStringChars",
+                "GetStringUTFChars",
+                *(
+                    "Get" + kind + "ArrayElements"
+                    for kind in (
+                        "Boolean",
+                        "Byte",
+                        "Char",
+                        "Short",
+                        "Int",
+                        "Long",
+                        "Float",
+                        "Double",
+                    )
+                ),
+                "GetStringCritical",
+                "GetPrimitiveArrayCritical",
+                "PushLocalFrame",
+                "MonitorEnter",
+                "GetStaticMethodID",
+                "GetStaticFieldID",
+            )
+        ]
+        and guest
+        == [
+            {
+                "stage": "jni-resource-guest",
+                "transfer": transfer,
+                "discarded": 3,
+                "lifo": True,
+                "stale_token_rejected": True,
+                "copyout_unchanged": True,
+                "reentered_jni": True,
+            }
+            for transfer in ("siglongjmp", "setcontext")
+        ]
+        and boundary
+        == [
+            {
+                "stage": "jni-managed-boundary",
+                "rejected": True,
+                "monitor_released": True,
+                "finally_ran": True,
+            }
+        ]
+    )
+
+
+def valid_jni_signal_recovery(rows):
+    return [r for r in rows if r.get("stage") == "jni-resource-signal"] == [
+        {
+            "stage": "jni-resource-signal",
+            "api": name,
+            "transfer": transfer,
+            "discarded": 1,
+            "same_carrier": True,
+        }
+        for name, transfer in (
+            ("GetPrimitiveArrayCritical", "siglongjmp"),
+            ("GetStringCritical", "setcontext"),
+            ("NewGlobalRef", "setcontext"),
+        )
+    ]
+
+
 def valid_signal_unwind_observations(rows):
     return [r for r in rows if r.get("stage") == "guest-signal-unwind"] == [
         {
@@ -171,7 +253,9 @@ def execute_case(
         r for r in rows if r.get("stage") == "guest-fault-mask"
     ]
     warnings = (
-        "WARNING in native method" in output or "Consider using jsig" in output
+        "WARNING in native method" in output
+        or "Consider using jsig" in output
+        or "Calling other JNI functions in the scope of" in output
     )
     failed = (
         timed_out
@@ -193,6 +277,7 @@ def execute_case(
             )
             and not valid_relay_lifecycle(rows, mode)
         )
+        or (mode == "adopted-signals" and not valid_jni_signal_recovery(rows))
         or (
             mode == "adopted-signals"
             and [r for r in rows if r.get("stage") == "adopted-signal"]
@@ -490,7 +575,10 @@ def execute_case(
                 or not valid_wait_observations(rows, transfer[0])
                 or (
                     require_guest_target
-                    and not valid_guest_target_observations(rows)
+                    and (
+                        not valid_guest_target_observations(rows)
+                        or not valid_jni_resource_recovery(rows)
+                    )
                 )
                 or (require_pending and not transfer[0].get("kernel_pending"))
             )
@@ -577,6 +665,10 @@ def execute_case(
         )
 
     summary = {"case": mode, **terminal[0]}
+    if mode == "adopted-signals":
+        summary["jni_signal_recoveries"] = sum(
+            r.get("stage") == "jni-resource-signal" for r in rows
+        )
     if mode == "vm-signals":
         summary.update(vm_samples[0])
         del summary["stage"]
@@ -589,5 +681,15 @@ def execute_case(
             wait_unwinds=transfer[0]["wait_unwinds"],
             guest_signal_unwinds=4,
         )
+        if require_guest_target:
+            summary.update(
+                jni_host_recoveries=sum(
+                    r.get("stage") == "jni-resource-host" for r in rows
+                ),
+                jni_guest_recoveries=sum(
+                    r.get("stage") == "jni-resource-guest" for r in rows
+                ),
+                jni_managed_boundary=True,
+            )
 
     return summary

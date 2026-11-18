@@ -18,10 +18,14 @@ enum gw_domain_unwind_point {
   GW_UNWIND_COMMAND_FINISHED,
   GW_UNWIND_TRAMPOLINE_CLEANED,
   GW_UNWIND_RPC_READY,
+  GW_UNWIND_RPC_RESULT_OWNED,
+  GW_UNWIND_RPC_RESULT_DISCARDED,
 };
 
 #ifdef GW_DOMAIN_NONLOCAL_TEST
 extern void gw_domain_nonlocal_test_point(int) __attribute__((weak));
+extern void gw_domain_nonlocal_test_result(int, int, uintptr_t, uintptr_t)
+    __attribute__((weak));
 #define GW_UNWIND_POINT(point)              \
   do {                                      \
     if (gw_domain_nonlocal_test_point) {    \

@@ -14,8 +14,7 @@
 #include "image_policy.h"
 #include "host_bridge.h"
 #ifdef GW_DOMAIN_NONLOCAL
-#include "domain_runtime.h"
-#include "domain_unwind.h"
+#include "nonlocal.h"
 #endif
 
 struct full_bridge *gw_host_bridge;
@@ -369,122 +368,6 @@ static int metrics_accept(void) {
 static uint64_t transport_current_module(JNIEnv *env) {
   (void)env;
   return gw_host_current ? gw_host_current->module : 0;
-}
-
-/* Serve one Guest->Host JNI request. The request/response sequence pair
-   plus the "active" exchange guarantee a single server per slot even when a
-   stale notify re-runs the pump. errno is saved and restored because the
-   dispatched JNI code must not perturb the Host caller's errno. The
-   context's module is switched to r->module so any load triggered by the
-   call is attributed to the requesting guest image. */
-void fh_service(struct host_context *c, struct fb_rpc *r) {
-  JNIEnv *env = c->env;
-  int seq = atomic_load_explicit(&r->request, memory_order_acquire);
-  if (seq == atomic_load(&r->response) || atomic_exchange(&r->active, 1)) {
-    return;
-  }
-
-  int saved = errno;
-#if GW_RPC_PROFILE
-  unsigned handoff_depth = (unsigned)r->depth;
-  struct gw_handoff_row *handoff = gw_rpc_peer_handoff((unsigned)c->id);
-  if (handoff_depth < GW_HANDOFF_DEPTH) {
-    gw_handoff_dispatch(handoff, handoff_depth);
-  }
-#endif
-  GW_RPC_SCOPE(glue, GW_RPC_HOST_JNI_GLUE, -1);
-#if GW_RPC_PROFILE
-  if (r->api >= 0) {
-    gw_rpc_served((unsigned)r->api);
-  }
-#endif
-
-  uint64_t previous = c->module;
-  c->module = r->module;
-  if (r->api == 14) {
-    printf(
-        "JNI_EXPECTED_FATAL stage=host-forward index=14 name=FatalError "
-        "calls=%u\n",
-        atomic_load(&gw_host_bridge->hits[14]));
-  }
-  int previous_marshal_error = c->marshal_error;
-  int previous_emergency = c->emergency;
-  if (r == &fb_context_at(gw_host_bridge, c->id)->emergency) {
-    c->emergency = 1;
-  }
-  c->marshal_error = 0;
-  /* GetVersion has no temporary marshal ownership and enters no Java frame.
-   * Other JNI entrypoints need their own reviewed VM/resource unwind contract
-   * before they can become Guest-target landing boundaries. */
-#ifdef GW_DOMAIN_NONLOCAL
-  /* Protocol API zero excludes the JNI table's four reserved entries. */
-  int recover = gw_domain_rpc_recoverable() && r->api == 0;
-  struct gw_domain_rpc_scope scope;
-  uint64_t admission_mask = recover ? gw_nonlocal_mask_block() : 0;
-  int transferred = 0;
-  if (recover) {
-    if (!sigsetjmp(scope.unwind.landing, 0)) {
-      gw_domain_rpc_enter(&scope);
-      gw_nonlocal_mask_restore(admission_mask);
-    } else {
-      transferred = 1;
-    }
-  }
-  if (!transferred) {
-    GW_UNWIND_POINT(GW_UNWIND_RPC_READY);
-#endif
-    if (r->api == FB_RPC_REPORT_FAILURE) {
-      enum fb_failure kind = r->a[0].i;
-      if (kind < FB_FAILURE_MEMORY || kind > FB_FAILURE_STATE) {
-        kind = FB_FAILURE_STATE;
-      }
-      fh_throw(env, kind,
-               kind == FB_FAILURE_DEPTH ? "Guest bridge nesting limit exceeded"
-                                        : "Guest bridge request rejected");
-      r->error = kind;
-      r->result.i = JNI_ERR;
-    } else {
-#include "generated/host-jni.inc"
-    }
-#ifdef GW_DOMAIN_NONLOCAL
-  }
-  uint64_t cleanup_mask = recover ? gw_nonlocal_mask_block() : 0;
-#endif
-  if (c->marshal_error && !r->error) {
-    r->error = c->marshal_error;
-  }
-  c->marshal_error = previous_marshal_error;
-  c->emergency = previous_emergency;
-  if (r->error) {
-    fh_throw(env, FB_FAILURE_STATE, "JNI bridge request failed");
-    atomic_fetch_add(&gw_host_bridge->errors, 1);
-  }
-  c->module = previous;
-  GW_RPC_SCOPE_END(glue);
-  errno = saved;
-  atomic_store(&r->active, 0);
-
-#if GW_RPC_PROFILE
-  if (handoff_depth < GW_HANDOFF_DEPTH) {
-    gw_handoff_complete(handoff, handoff_depth);
-  }
-#endif
-  atomic_store_explicit(&r->response, seq, memory_order_release);
-#ifdef GW_DOMAIN_NONLOCAL
-  if (recover) {
-    if (!gw_domain_rpc_leave(&scope, admission_mask)) {
-      gw_nonlocal_mask_restore(cleanup_mask);
-    }
-  }
-#endif
-#ifdef GW_DOMAIN_JNI
-  extern int gw_domain_host_active(void);
-  if (!gw_domain_host_active()) {
-#endif
-    fb_event_notify(&fb_context_at(gw_host_bridge, c->id)->guest_event);
-#ifdef GW_DOMAIN_JNI
-  }
-#endif
 }
 
 /* TLS exit hook for a thread that reserved a context via fh_context: ask

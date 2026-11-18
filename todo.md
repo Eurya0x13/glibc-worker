@@ -117,19 +117,6 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   integration. Relayed handlers intentionally execute on a different, real Host
   pthread; source frames remain alive until they return. No fictitious JVM
   identity or original-thread Host TLS adoption is implied.
-- Implement transparent cross-domain nonlocal recovery in the first release,
-  including `siglongjmp` and `setcontext`. Same-domain-only support or quarantine
-  on an otherwise valid cross-domain jump does not satisfy this requirement.
-  Complete the restoration and lifecycle acceptance matrix in
-  [nonlocal recovery](core/docs/en/NONLOCAL_RECOVERY.md); a successful jump alone
-  is not a compatibility pass.
-  The opt-in installed service now coordinates Guest-target jumps through a
-  reviewed C-only `GetVersion` boundary, with invocation-generation records,
-  ordinary RPC cleanup and the owning glibc's fortified restore entry. An
-  asynchronous handler can also abandon nested signal scopes on this path or
-  restore an older Guest handler. Complete recovery and resumable native
-  transfers across the remaining JNI callback boundaries.
-  Keep transfers that skip Java/VM frames outside the contract.
 - Supply a reviewed live VM/ART recipient-quiescence provider for the explicit
   `signal_router_reclaim` protocol. Its standalone single-recipient gate is
   implemented/tested; a JVM safepoint alone is insufficient. Without a provider,

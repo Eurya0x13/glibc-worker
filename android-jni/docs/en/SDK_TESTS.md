@@ -74,6 +74,24 @@ close/shutdown assertions cover the accumulated active bindings and commands.
 Missing hooks or missing observations fail the case; a passing Host-target
 observation alone does not satisfy this test.
 
+### JNI result recovery
+
+`--unwind-windows` also exercises 19 Host-target interruptions after a real
+JNI result has been acquired and before its response commits. Cases require
+balanced local/global/weak references, reflection locals, strings, all eight
+primitive array element types, critical strings and arrays, a local frame, and
+a reentrant JNI monitor. The UTF case preserves the exact pending exception.
+The array case changes an unpublished cached copy, checks the Java array is
+untouched, and reacquires the same cache buffer on the next call.
+
+Guest-target `siglongjmp` and `setcontext` each abandon three nested C callback
+boundaries. The test requires last-in-first-out cleanup, intact outer
+references, unchanged staged outputs, rejection of retired reference tokens,
+further JNI calls, module close and runtime shutdown. A separate JNI call
+enters real Java code and attempts `setcontext` from a reentrant Guest native
+method. It must return `ENOTSUP`, execute the Java `finally` block and leave
+the monitor released.
+
 The nonlocal case performs 64 Host-target signal jumps. Half occur within a Host
 callback nested inside a surviving Guest call. Half use the installed alternate
 signal stack. The handler first performs a local jump, then abandons the inner
@@ -249,7 +267,8 @@ Host adoption.
 
 ## Independent Guest delivery on adopted carriers
 
-Run the installed SDK fixture with `--native-unwind --adopted-signals`.
+Run the installed test-enabled SDK fixture with
+`--native-unwind --adopted-signals`.
 The fixture configures an explicit unused Guest notification number and
 bootstraps the Host deferred-signal lanes. A GNU pthread sends each packet to
 the adopted carrier and the test requires the original TID, Guest TP, native
@@ -261,6 +280,13 @@ a Host-target jump, saved and unsaved Guest-target jumps through native
 ordinary and alternate stacks and also abandon both signal invocations on a
 jump back to the original Guest command. Every case calls JNI again before
 module unload and SDK shutdown.
+
+Three JNI result cases use a real tagged signal from a GNU pthread while
+Host owns an unpublished primitive array critical pointer, a string critical
+pointer, or a global reference. The handler on the adopted carrier restores a
+Guest checkpoint with `siglongjmp` or `setcontext`. It performs no JNI calls
+while the critical pointer is live. The Host releases the pending result
+before the interrupted Guest JNI call is abandoned.
 
 Guest `siglongjmp` and `setcontext` also resume an outer handler while retiring
 the intervening Host callback and younger Guest activation. The `setcontext`

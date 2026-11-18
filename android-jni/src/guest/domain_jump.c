@@ -26,6 +26,7 @@ struct jump_record {
   const ucontext_t *link;
   struct gw_domain_native_checkpoint *owner;
   struct jni_domain_signal *signal;
+  const void *host_guard;
   uint64_t generation, module;
   uintptr_t sp, pc;
   struct native_stack stack;
@@ -142,6 +143,7 @@ static void capture(struct jump_record *r, const void *buffer,
       .buffer = buffer,
       .owner = frame,
       .signal = carrier->guest_signal,
+      .host_guard = carrier->host_guard,
       .generation = frame ? frame->generation : 0,
       .module = gmodule,
       .depth = gdepth,
@@ -207,7 +209,7 @@ void gw_domain_jump_event(void *buffer, int value, int restore) {
   struct jump_record *r = lookup(buffer, !restore);
   if (!restore) {
     capture(r, buffer, frame);
-  } else if (!r || r->context) {
+  } else if (!r || r->context || r->host_guard != carrier->host_guard) {
     _exit(125); /* Unknown ownership cannot skip live bridge resources. */
   } else if (r->owner != frame || r->signal != carrier->guest_signal) {
     if (!can_route(r, frame)) {
@@ -238,6 +240,7 @@ static struct jump_record *lookup_context(const ucontext_t *context) {
       }
       if (match &&
           (match->generation != r->generation || match->signal != r->signal ||
+           match->host_guard != r->host_guard ||
            match->prepared != r->prepared || match->link != r->link ||
            match->depth != r->depth || match->module != r->module ||
            match->rpc_top != r->rpc_top)) {
@@ -338,7 +341,8 @@ static int can_enter_prepared(const struct jump_record *r,
    * the outgoing context. Its uc_link is now a capture in this same scope. */
   struct jump_record *link = lookup(r->link, 0);
   return link && link->context && !link->prepared && link->owner == frame &&
-         link->signal == carrier->guest_signal;
+         link->signal == carrier->guest_signal &&
+         link->host_guard == carrier->host_guard;
 }
 
 static int ancestor_of(struct jni_domain_signal *ancestor,
@@ -479,6 +483,8 @@ int gw_domain_context_event(enum gw_context_operation operation,
       if (!can_enter_prepared(r, target, saved, frame)) {
         error = ENOTSUP;
       }
+    } else if (r->host_guard != carrier->host_guard) {
+      error = ENOTSUP;
     } else if (r->owner != frame || r->signal != carrier->guest_signal) {
       int resume_child = r->signal && r->signal->continuation == r->buffer &&
                          ancestor_of(carrier->guest_signal, r->signal);
@@ -526,6 +532,7 @@ static _Noreturn void restore_guest(void *argument) {
   struct jump_record *r = c->jump_record;
   struct gw_domain_native_checkpoint *frame = c->abort_checkpoint;
   if (!r || r->owner != frame || r->signal != c->guest_signal ||
+      r->host_guard != c->host_guard ||
       (frame && r->generation != frame->generation)) {
     _exit(125);
   }

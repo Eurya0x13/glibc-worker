@@ -11,6 +11,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include "nonlocal_probe.h"
+#include "jni-recovery.h"
 
 static __thread int calls;
 static __thread int nonlocal_calls;
@@ -413,7 +414,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
       {"finishAdoptedSignal", "()I", (void *)sdk_adopted_signal_finish},
       {"jumpAdoptedSignal", "(J)I", (void *)sdk_adopted_signal_jump},
       {"runVmSignalGuest", "(JLjava/nio/ByteBuffer;)I",
-       (void *)sdk_guest_vm_signals}};
+       (void *)sdk_guest_vm_signals},
+      {"tryGuardedContext", "()I", (void *)sdk_try_guarded_context}};
   int result = (*env)->RegisterNatives(env, cls, methods,
                                        sizeof methods / sizeof *methods);
   (*env)->DeleteLocalRef(env, cls);

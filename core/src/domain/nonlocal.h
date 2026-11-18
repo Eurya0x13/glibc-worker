@@ -1,6 +1,7 @@
 #ifndef GW_DOMAIN_NONLOCAL_H
 #define GW_DOMAIN_NONLOCAL_H
 #include <setjmp.h>
+#include <signal.h>
 #include <stdint.h>
 #include <ucontext.h>
 #include "nonlocal-mask.h"
@@ -15,6 +16,8 @@ struct gw_nonlocal_scope {
   struct gw_nonlocal_scope *volatile previous;
   struct gw_nonlocal_checkpoint *volatile captures;
   volatile uint64_t generation;
+  /* The owner has entered a callee whose native frames cannot be skipped. */
+  volatile sig_atomic_t guarded;
 };
 
 enum gw_nonlocal_transfer_kind {

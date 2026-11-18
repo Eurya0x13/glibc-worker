@@ -26,14 +26,25 @@ void gw_domain_rpc_enter(struct gw_domain_rpc_scope *scope) {
   REQUIRE(current && current->abort_checkpoint);
   scope->previous = current->host_rpc;
   scope->guest_checkpoint = current->abort_checkpoint;
+  scope->previous_guard = current->host_guard;
   current->host_rpc = scope;
   gw_nonlocal_enter(&scope->unwind);
+  gw_domain_rpc_guard(scope, 1);
+}
+
+void gw_domain_rpc_guard(struct gw_domain_rpc_scope *scope, int guarded) {
+  REQUIRE(current->host_rpc == scope);
+  scope->unwind.guarded = guarded;
+  current->host_guard = guarded ? scope : scope->previous_guard;
 }
 
 int gw_domain_rpc_leave(struct gw_domain_rpc_scope *scope, uint64_t host_mask) {
   REQUIRE(current->host_rpc == scope);
   current->host_rpc = scope->previous;
-  int resume = current->jump_target == scope->guest_checkpoint;
+  current->host_guard = scope->previous_guard;
+  int resume = current->jump_record &&
+               current->jump_target == scope->guest_checkpoint &&
+               !gw_nonlocal_pending();
   if (resume) {
     /* Keep delivery masked between retiring the Host RPC and committing the
      * Guest restore. A second transfer cannot abandon half a transaction. */
@@ -506,7 +517,8 @@ int gw_domain_context_stop(struct host_context *host, int thread_exiting) {
   struct jni_domain_context *c = current;
   REQUIRE(c->id == host->id);
   if (c->live_signals || c->abort_checkpoint || c->host_rpc || c->jump_record ||
-      c->jump_resume || c->guest_rpc_owner || c->abort_resume) {
+      c->host_guard || c->jump_resume || c->guest_rpc_owner ||
+      c->abort_resume) {
     return -EBUSY;
   }
   int error = signal_prepare_release(current_signal, thread_exiting);

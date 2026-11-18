@@ -54,6 +54,7 @@ struct gw_nonlocal_checkpoint {
   uint64_t generation;
   uintptr_t sp, pc;
   unsigned kind;
+  sig_atomic_t guarded;
 };
 
 /* Buffers remain opaque. Recording ownership before a tail call preserves
@@ -172,7 +173,8 @@ static void record_capture(void *buffer, unsigned kind, uintptr_t sp,
                                         .generation = top ? top->generation : 0,
                                         .kind = kind,
                                         .sp = sp,
-                                        .pc = pc};
+                                        .pc = pc,
+                                        .guarded = top ? top->guarded : 0};
     if (kind >= CONTEXT_CAPTURE) {
       r->kind = CONTEXT_CAPTURE;
     }
@@ -210,6 +212,7 @@ void gw_nonlocal_enter(struct gw_nonlocal_scope *scope) {
   scope->generation = generation;
   scope->previous = top;
   scope->captures = NULL;
+  scope->guarded = 0;
   top = scope;
   gw_nonlocal_mask_restore(mask);
 }
@@ -327,13 +330,22 @@ void gw_nonlocal_leave(struct gw_nonlocal_scope *scope) {
   gw_nonlocal_mask_restore(mask);
 }
 
-static int live_checkpoint(const struct gw_nonlocal_checkpoint *record) {
+static int can_unwind_to(const struct gw_nonlocal_scope *target) {
   struct gw_nonlocal_scope *ancestor = top;
-  while (ancestor && ancestor != record->scope) {
+  while (ancestor && ancestor != target) {
+    if (ancestor->guarded) {
+      return 0;
+    }
     ancestor = ancestor->previous;
   }
-  return ancestor == record->scope &&
-         (!ancestor || ancestor->generation == record->generation);
+  return ancestor == target;
+}
+
+static int live_checkpoint(const struct gw_nonlocal_checkpoint *record) {
+  const struct gw_nonlocal_scope *scope = record->scope;
+  return can_unwind_to(scope) &&
+         (!scope || (scope->generation == record->generation &&
+                     scope->guarded == record->guarded));
 }
 
 static _Noreturn void transfer(const struct gw_nonlocal_checkpoint *record,
@@ -357,8 +369,9 @@ _Noreturn void gw_nonlocal_jump(void *buffer, int value, unsigned kind) {
   }
   uint64_t mask = gw_nonlocal_mask_block();
   struct gw_nonlocal_checkpoint *r = find_checkpoint(buffer, 0);
-  if (!top || (r && r->kind != CONTEXT_CAPTURE && r->scope == top &&
-               r->generation == top->generation)) {
+  if (!top ||
+      (r && r->kind != CONTEXT_CAPTURE && r->scope == top &&
+       r->generation == top->generation && r->guarded == top->guarded)) {
     retire_jumped_descriptors(r ? r->sp : 0);
     prepare_native_restore();
     gw_nonlocal_mask_restore(mask);
@@ -485,12 +498,8 @@ int gw_nonlocal_setcontext(const ucontext_t *context) {
 
 static uint64_t begin_route(struct gw_nonlocal_scope *target) {
   uint64_t mask = gw_nonlocal_mask_block();
-  struct gw_nonlocal_scope *ancestor = top;
-  while (ancestor && ancestor != target) {
-    ancestor = ancestor->previous;
-  }
-  if (!target || !ancestor || !target->generation || gw_nonlocal_pending() ||
-      !gw_nonlocal_ready()) {
+  if (!target || !can_unwind_to(target) || !target->generation ||
+      gw_nonlocal_pending() || !gw_nonlocal_ready()) {
     _exit(125);
   }
   return mask;
@@ -498,6 +507,9 @@ static uint64_t begin_route(struct gw_nonlocal_scope *target) {
 
 _Noreturn void gw_nonlocal_route(struct gw_nonlocal_scope *target) {
   uint64_t mask = begin_route(target);
+  if (target->guarded) {
+    _exit(125);
+  }
   pending =
       (struct gw_nonlocal_transfer){.kind = GW_NONLOCAL_ROUTE,
                                     .target = target,

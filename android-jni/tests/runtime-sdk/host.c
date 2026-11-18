@@ -34,6 +34,7 @@
 #include "nonlocal_probe.h"
 #include "adopted-signals.h"
 #include "guest-fd-probe.h"
+#include "jni-recovery.h"
 #include "vm-signals.h"
 #include "internal/domain_unwind.h"
 #ifdef __ANDROID__
@@ -1545,6 +1546,7 @@ static void nonlocal_run(struct application *app, JNIEnv *env, jclass cls) {
         fflush(stdout);
       }
     }
+    sdk_run_jni_recovery(env, cls, app->loader, app->module);
   }
 #endif
   assert(!pthread_sigmask(SIG_SETMASK, &inherited, NULL));
@@ -1651,6 +1653,9 @@ static void *application_run(void *argument) {
   }
   if (app->adopted_signals) {
     adopted_signals(env, cls);
+#ifdef GW_TEST_NATIVE_UNWIND
+    sdk_run_jni_recovery_async(env, cls, app->loader, app->module);
+#endif
   }
   if (app->vm_signal_directory) {
     vm_suspend_and_sample(env, app->vm_signal_directory);

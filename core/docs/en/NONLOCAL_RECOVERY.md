@@ -159,13 +159,12 @@ after bridge teardown; captures outside bridge scopes remain available while
 that Host thread lives. Restoring an unobserved or stale context across a live
 bridge scope fails with `ENOTSUP`.
 
-The matching opt-in service also coordinates Guest-target native jumps at a
-reviewed C-only `GetVersion` callback boundary. Its glibc hook observes capture
-after native register saving, and restore before native cleanup and mask
-restoration. Records belong to a live native invocation generation. Invocation
-exit invalidates its records, slots are reused, and carrier teardown unmaps its
-high-water record pages. General native JNI callback boundaries remain listed
-in the acceptance work.
+The matching opt-in service coordinates Guest-target native jumps through
+cached `GetVersion` and through JNI callbacks with resources awaiting
+publication. The owning glibc reports capture after saving registers and restore
+before native cleanup and mask restoration. Records belong to a live native
+invocation generation. Invocation exit invalidates the records, and carrier
+teardown unmaps the record pages.
 
 An inner Guest jump first retires the abandoned Guest command. Host scope
 routing then retires the corresponding command, trampoline and C callback
@@ -179,9 +178,33 @@ The installed fixture uses a real JNIEnv and bridge trampolines, with a test
 callback inserted before the cached Host `GetVersion` dispatch. It covers
 saved/unsaved masks, one/three/five nested C boundaries, 300 live captures,
 repeated buffer reuse, a fortified source entry, subsequent calls and normal
-module/runtime teardown. Other native JNI callback boundaries with temporary
-ownership, valid Guest-target native continuations and cross-domain `setcontext`
-remain required work. Skipping Java/VM frames is outside this contract.
+module/runtime teardown.
+
+### JNI result ownership
+
+Host masks delivery while claiming the RPC and publishing its cleanup scope.
+The scope guards the actual VM call and opens a native recovery window once the
+bridge owns the result and can release it. An ordinary reply transfers ownership
+when the response sequence is published. A nonlocal exit releases the pending
+result on the restored Host stack, retires any unpublished reference token and
+completes the abandoned RPC before restoring the final target.
+
+This covers local/global/weak references, reflection locals, both string
+encodings, primitive array elements, critical string/array access, a new local
+frame, and one acquisition of a JNI monitor. Array copies are released with
+`JNI_ABORT` and `isCopy` is written on commit. Cleanup preserves a pending
+Java exception using the JNI release operations allowed in that state.
+For the cleanup API contract see the
+[JNI specification](https://docs.oracle.com/en/java/javase/17/docs/specs/jni/design.html#exception-handling).
+
+JNI calls in progress can own VM or Java frames. A recovery can leave younger
+native scopes while preserving the active VM frame that encloses its target.
+A supported `setcontext` adapter rejects a transfer that would skip such a
+frame with `ENOTSUP`. Published JNI resources and completed application side
+effects retain their JNI semantics. The
+[installed validation](../../../android-jni/docs/en/SDK_TESTS.md#jni-result-recovery)
+includes a real Java callback with a monitor and a `finally` block, plus tagged
+Guest signals during unpublished critical results.
 
 The core adoption fixture additionally tests a controlled Guest-target transfer:
 Host resumes Guest on a separate guarded stack and Guest's libc restores its own

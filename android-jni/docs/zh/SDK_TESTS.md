@@ -50,6 +50,18 @@ Host 延迟掩码用例在创建 VM 前调用安装后的公开接口
 最终关闭断言验证累计的活跃绑定和命令均已清理；缺少钩子或观测都会失败，
 单独通过 Host 目标观测不能满足这组测试。
 
+### JNI 结果恢复
+
+`--unwind-windows` 还在真实 JNI 结果取得后、响应提交前执行 19 个 Host 目标中断用例。
+覆盖局部、全局和弱全局引用、临时反射引用、字符串、八种原生数组元素、字符串和数组
+的 critical 访问、局部帧和可重入的 JNI monitor。UTF 用例验证待处理异常的对象身份。
+数组用例改动尚未交付的缓存副本，随后检查 Java 数组保持原值，再次调用能复用同一份缓冲区。
+
+Guest 目标的 `siglongjmp` 和 `setcontext` 分别放弃三层嵌套 C 回调。断言覆盖逆序
+回收、外层引用保留、暂存输出未写回、失效令牌拒绝、后续 JNI 调用、模组卸载和 runtime
+关闭。另一个用例经真实 Java 回调重入 Guest native 方法，尝试绕过持有 monitor 的 Java
+帧恢复上下文，要求返回 `ENOTSUP`，原 Java `finally` 执行且 monitor 正常释放。
+
 非局部用例执行 64 次 Host 目标信号跳转，一半位于保留外层 Guest 调用的 Host 回调内部，一半使用已安装备用信号栈。处理器先做局部跳转，再放弃内层 Guest 调用。断言覆盖掩码语义、退出信号栈、再次调用、JNI 异常状态、模块关闭、runtime 关闭和 JVM 销毁。信号 52 必须未被使用；Guest 原始 tgkill 按外部未标记信号契约刻意投递 Host，不占用 VM 保留信号。
 
 另外的浮点用例设置不同的 Host/Guest 舍入模式，中断 Guest 后检查恢复及再次调用时
@@ -171,7 +183,7 @@ GNU pthread 的 Host 收养已经完成。
 
 ## 收养载体的独立 Guest 投递
 
-用 `--native-unwind --adopted-signals` 运行已安装 SDK 测试。夹具指定一个未占用的
+用 `--native-unwind --adopted-signals` 运行已安装的测试版 SDK。夹具指定一个未占用的
 Guest 通知编号，并在启动时启用 Host 延迟信号通道。GNU pthread 将各消息发送到
 收养载体，测试要求处理器收到原 TID、Guest TP、原生栈位置和负载。
 
@@ -179,6 +191,11 @@ Guest 通知编号，并在启动时启用 Host 延迟信号通道。GNU pthread
 穿过原生 `GetVersion` 的保存及不保存掩码的 Guest 目标跳转，以及 Guest/Host/Guest
 嵌套投递。嵌套用例使用普通栈和替代栈，还验证跳向原 Guest 命令时退出两层信号调用。
 每个用例在模组卸载和 SDK 关闭前再次调用 JNI。
+
+另有三项用例让 GNU pthread 在 Host 持有尚未交付的原生数组 critical 指针、字符串
+critical 指针或全局引用时发送带标签的真实信号。收养载体上的 Guest 处理器通过
+`siglongjmp` 或 `setcontext` 恢复检查点。临界指针存活期间处理器只执行原生转移，
+Host 在放弃被中断的 Guest JNI 调用前释放未交付结果。
 
 Guest `siglongjmp` 和 `setcontext` 还可退出中间的 Host 回调及较新的 Guest 信号
 调用，再恢复外层处理器。`setcontext` 用例从即将退出的栈传入上下文副本，检查目标

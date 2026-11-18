@@ -53,7 +53,7 @@ add_custom_target(android_jni_binding_store DEPENDS ${binding_objects})
 install(FILES third_party/zig/LICENSE
         DESTINATION share/licenses/glibc-worker/android-jni RENAME zig-LICENSE.txt)
 add_library(android_jni_objects OBJECT src/host/domain_runtime.c
-  src/host/runtime_bridge.c src/host/full_host.c src/host/references.c
+  src/host/runtime_bridge.c src/host/full_host.c src/host/jni_callback.c src/host/references.c
   src/host/bindings.c src/host/failure.c src/host/slot_allocator.c src/host/loader_transport.c src/host/command.c src/host/binding_table.c src/host/array_copy.c src/host/loader_backend.c src/host/image_policy.c)
 add_dependencies(android_jni_objects jni_tables)
 target_compile_definitions(android_jni_objects PRIVATE GW_DOMAIN_JNI)

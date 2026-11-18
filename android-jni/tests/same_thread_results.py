@@ -33,7 +33,6 @@ SUITES = [
     "jvm-jni/build/tests/signal-profile-android",
 ]
 REMAINING = [
-    "Additional Guest JNI callback boundaries for native recovery",
     "Reviewed live VM/ART recipient quiescence and late integration acceptance",
 ]
 

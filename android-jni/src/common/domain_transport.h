@@ -27,7 +27,7 @@ static inline int jni_domain_select(const char *mode) {
 }
 
 #define GW_DOMAIN_TRANSPORT_MAGIC UINT64_C(0x4757444f4d41494e)
-#define GW_DOMAIN_TRANSPORT_VERSION 21u
+#define GW_DOMAIN_TRANSPORT_VERSION 22u
 #define GW_DOMAIN_LIBC_CAPABILITIES UINT64_C(0x4757440100000012)
 #define GW_DOMAIN_CAP_ADOPTION UINT64_C(1)
 #define GW_DOMAIN_CAP_NATIVE_UNWIND UINT64_C(2)
@@ -68,6 +68,7 @@ struct jni_domain_context {
   stack_t guest_altstack;
   /* Opaque, owning-domain addresses. Only the owner dereferences them. */
   void *host_rpc;
+  const void *host_guard;
   void *jump_record;
   void *jump_target;
   struct jni_domain_signal *jump_signal_target;

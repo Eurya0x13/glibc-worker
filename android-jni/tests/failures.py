@@ -42,6 +42,7 @@ includes = [
 sources = [
     "android-jni/tests/native/failure_paths.c",
     "android-jni/src/host/full_host.c",
+    "android-jni/src/host/jni_callback.c",
     "android-jni/src/host/failure.c",
     "android-jni/src/host/references.c",
     "android-jni/src/host/bindings.c",

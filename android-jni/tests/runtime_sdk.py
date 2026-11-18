@@ -185,6 +185,7 @@ run(
         source / "guest-signal-unwind.c",
         source / "guest-worker-signals.c",
         source / "guest-adopted-signals.c",
+        source / "guest-jni-recovery.c",
         source / "guest-vm-signals.c",
         source / "guest-signalfd.c",
         source / "guest-signalfd-ready.c",
