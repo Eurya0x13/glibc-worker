@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,51 @@ static int install_outer_chain(void) {
 }
 #endif
 
+static void receive_reclaim_test(int number) {
+  (void)number;
+}
+
+static int check_reclaim(JavaVM *vm, JNIEnv *env, void *bridge) {
+  int (*install)(JNIEnv *) = dlsym(bridge, "domain_late_signal_install");
+  int (*enable)(int) = dlsym(bridge, "domain_late_signal_reclaim_enable");
+  int (*collect)(unsigned, unsigned *) =
+      dlsym(bridge, "domain_late_signal_reclaim");
+  int (*registration)(int, const struct sigaction *, struct sigaction *) =
+      dlsym(bridge, "signal_router_action");
+  int (*restore)(void) = dlsym(bridge, "domain_late_signal_restore");
+  if (!install || !enable || !collect || !registration || !restore) {
+    return 2;
+  }
+
+  unsigned reclaimed = 0;
+  if (collect(1000, &reclaimed) != ENOTSUP || install(env) || enable(47)) {
+    return 3;
+  }
+  struct sigaction action = {.sa_handler = receive_reclaim_test,
+                             .sa_flags = SA_RESTART};
+  uint64_t mask = UINT64_MAX;
+  sigemptyset(&action.sa_mask);
+  memcpy(&action.sa_mask, &mask, sizeof mask);
+  if (registration(48, &action, NULL) || registration(48, &action, NULL)) {
+    return 3;
+  }
+
+  int result = collect(1000, &reclaimed);
+  if (result || reclaimed != 1) {
+    fprintf(stderr, "Late VM reclaim: status=%d reclaimed=%u\n", result,
+            reclaimed);
+    return 3;
+  }
+  if ((*env)->ExceptionCheck(env) || (*vm)->DestroyJavaVM(vm) != JNI_OK ||
+      restore()) {
+    return 3;
+  }
+  puts(
+      "LATE_SIGNAL_RECLAIM {\"result\":\"PASS\","
+      "\"reclaimed\":1,\"vm_destroyed\":true}");
+  return 0;
+}
+
 /* Deliberately exports no sigaction interposer. Start the real VM first,
  * then load the bridge DSO, matching the important premain ordering. */
 int main(int argc, char **argv) {
@@ -58,6 +104,9 @@ int main(int argc, char **argv) {
   if (!bridge) {
     fprintf(stderr, "late bridge dlopen: %s\n", dlerror());
     return 2;
+  }
+  if (getenv("GW_LATE_RECLAIM_TEST")) {
+    return check_reclaim(vm, env, bridge);
   }
   const char *expected_status = getenv("GW_LATE_EXPECT_STATUS");
   if (getenv("GW_LATE_FAIL_AFTER") || expected_status) {

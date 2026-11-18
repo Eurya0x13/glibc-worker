@@ -24,6 +24,23 @@ enum { GW_HOST_FAULT_SIGNAL_COUNT = 6 };
  */
 int gw_host_signal_channel_enable(const int *notifications, size_t count);
 
+/* Optional live reclamation. Lease an unused public realtime number before
+ * starting the runtime's relay/Guest helpers. The process owns this number
+ * until exit, including across router restore. Keep the router image loaded.
+ * The owner must exclude application use, signal consumption and raw changes
+ * to the reserved action. */
+int gw_host_signal_reclaim_enable(int number);
+
+/* Call on a normal Host control thread, outside signal handlers. Reclaim
+ * replaced generations that have a fully masked kernel entry (including
+ * deferred fault channels), plus unpublished data-only generations. Others
+ * still require the embedding's complete recipient/continuation barrier.
+ * Missing native acknowledgements or a changing task census return EBUSY.
+ * Probe delivery uses SA_RESTART and the installed Host wait adapters hide
+ * it. Non-restartable waits outside those adapters may receive EINTR.
+ * Returns an errno value. Failure leaves the output and generations intact. */
+int gw_host_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed);
+
 #ifdef __cplusplus
 }
 #endif

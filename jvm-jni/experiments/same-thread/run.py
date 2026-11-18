@@ -72,6 +72,8 @@ command = [
     "--host-source",
     str(root / "core/src/domain/signal-router.c"),
     "--host-source",
+    str(root / "core/src/domain/signal-quiescence.c"),
+    "--host-source",
     str(root / "core/src/domain/signal-stack.S"),
     "--host-source",
     str(root / "core/src/domain/signal-interpose.c"),
@@ -81,6 +83,7 @@ flags = [
     "-DGW_DOMAIN_CHAIN",
     "-Wl,--export-dynamic",
     "-ldl",
+    "-I" + str(root / "core/include"),
     "-I" + str(args.jdk.resolve() / "include"),
     "-I" + str(args.jdk.resolve() / "include/linux"),
 ]

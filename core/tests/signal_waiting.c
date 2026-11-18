@@ -2,6 +2,8 @@
 #include "signals.h"
 #include "signal-router.h"
 #include "signal-select.h"
+#include "signal-relay.h"
+#include "signal_channel.h"
 #include "nonlocal-mask.h"
 #include <assert.h>
 #include <dlfcn.h>
@@ -25,6 +27,7 @@ static int hidden_mode, inject_hidden, retry_seen, delayed, plain_deliveries;
 static int nested_hidden;
 static int consume_hidden;
 static int ready_pipe[2];
+static int queued_reclaim;
 
 static uint64_t bits(const sigset_t *mask) {
   uint64_t result;
@@ -70,6 +73,10 @@ static void receive(int number, siginfo_t *information, void *context) {
 }
 
 void gw_signal_mask_wait_test_point(int stage) {
+  if (stage == 2 && queued_reclaim) {
+    assert(!sigqueue(getpid(), queued_reclaim, (union sigval){.sival_int = 1}));
+    queued_reclaim = 0;
+  }
   if (stage == 2 && inject_hidden) {
     inject_hidden = 0;
     int number = signal_router_fault_notifications()[0];
@@ -519,6 +526,32 @@ static void native_wait_gateway(void) {
   assert(!pthread_sigmask(SIG_SETMASK, &blocked, NULL));
 }
 
+static void reclaim_waits(const struct sigaction *action) {
+  const int proof = 47;
+  assert(!gw_host_signal_reclaim_enable(proof));
+  hidden_mode = 1;
+  const struct timespec short_wait = {.tv_nsec = 5000000};
+  queued_reclaim = proof;
+  errno = EDOM;
+  assert(!nanosleep(&short_wait, NULL));
+  assert(!queued_reclaim && errno == EDOM);
+
+  queued_reclaim = proof;
+  retry_seen = 0;
+  assert(!ppoll(NULL, 0, &short_wait, &temporary));
+  assert(!queued_reclaim && retry_seen == 1 && errno == EDOM);
+  hidden_mode = 0;
+  check_mask(1);
+
+  /* The older fault action was published with a full kernel mask. The
+   * idle relay joins the actual native census using its private channel. */
+  assert(!signal_router_action(SIGTRAP, action, NULL));
+  assert(!signal_host_relay_start());
+  unsigned reclaimed = 0;
+  assert(!gw_host_signal_reclaim(1000, &reclaimed) && reclaimed == 1);
+  assert(!signal_host_relay_stop());
+}
+
 int main(int argc, char **argv) {
   int native = argc == 2 && !strcmp(argv[1], "--native");
   assert(argc == 1 || native);
@@ -587,6 +620,7 @@ int main(int argc, char **argv) {
     readiness_after_retry();
     select_native_comparison();
     native_wait_gateway();
+    reclaim_waits(&action);
   }
   wait_jumps();
   assert(!close(epoll_fd));
@@ -609,7 +643,8 @@ int main(int argc, char **argv) {
                "\"original_deadline\":true,\"host_delivery_interrupts\":true,"
                "\"null_and_plain_wait_retry\":true,"
                "\"hidden_nested_wait\":true,\"select_timeout_semantics\":true,"
-               "\"readiness_after_retry\":true,\"native_wait_gateway\":true");
+               "\"readiness_after_retry\":true,\"native_wait_gateway\":true,"
+               "\"reclaim_waits\":true");
   fprintf(stderr, "waits_exercised=%u waits_skipped=%u jumps=%d\n", exercised,
           skipped, jumps);
 }

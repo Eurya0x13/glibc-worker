@@ -1714,6 +1714,29 @@ static void retry_preclaim_failure(JNIEnv *env,
   }
 }
 
+static void reclaim_fixture_action(int number) {
+  (void)number;
+}
+
+static void check_live_reclaim(void) {
+  struct sigaction action = {.sa_handler = reclaim_fixture_action,
+                             .sa_flags = SA_RESTART};
+  uint64_t mask = UINT64_MAX;
+  sigemptyset(&action.sa_mask);
+  memcpy(&action.sa_mask, &mask, sizeof mask);
+  assert(!sigaction(48, &action, NULL));
+  action.sa_handler = SIG_DFL;
+  assert(!sigaction(48, &action, NULL));
+
+  unsigned reclaimed = 0;
+  int result = gw_host_signal_reclaim(1000, &reclaimed);
+  if (result) {
+    fprintf(stderr, "Live runtime reclaim: %s (%d)\n", strerror(result),
+            result);
+  }
+  assert(!result && reclaimed);
+}
+
 /* argv: libjvm classpath loader library-path service module directory backend.
  * This consumer uses installed headers/libraries, with no source-tree include.
  */
@@ -1737,6 +1760,9 @@ int main(int argc, char **argv) {
     const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                  SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
     assert(!gw_host_signal_channel_enable(notifications, 6));
+  }
+  if (test_vm_signals) {
+    assert(!gw_host_signal_reclaim_enable(47));
   }
 #endif
   if (!strcmp(argv[8], "nonlocal")) {
@@ -1771,6 +1797,9 @@ int main(int argc, char **argv) {
   }
   assert(!installed);
   consumer_action = signal_router_action;
+  if (test_vm_signals) {
+    assert(!domain_late_signal_reclaim_enable(47));
+  }
 #endif
 #ifdef __ANDROID__
   private_host_registration();
@@ -1847,6 +1876,9 @@ int main(int argc, char **argv) {
   assert(full_host_state() == GW_HOST_READY);
   long owner_tid = guest_owner_tid();
   assert(owner_tid > 0);
+  if (test_vm_signals) {
+    check_live_reclaim();
+  }
   const struct gw_loader_api_v1 *loader =
       gw_loader_query(GW_LOADER_ABI_V1, sizeof *loader);
   assert(loader);

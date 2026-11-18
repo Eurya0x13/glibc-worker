@@ -134,6 +134,7 @@ host_sources = [
     core / "signal-deferred.c",
     core / "signal-stack.S",
     core / "signal-router.c",
+    core / "signal-quiescence.c",
     core / "signal-relay.c",
     core / "signal-interpose.c",
     root / "core/src/bootstrap/clone.S",

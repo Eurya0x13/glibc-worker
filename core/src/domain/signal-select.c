@@ -499,19 +499,32 @@ void gw_signal_mask_wait_cancel_check(void *record) {
   cancellation_check(record, test_cancel, NULL);
 }
 
-static struct sleep_record *interrupted_wait(void *context, int hidden) {
-  ucontext_t *frame = context;
+enum wait_location { WAIT_OUTSIDE, WAIT_SYSCALL, WAIT_SETUP };
+
+static inline __attribute__((always_inline)) enum wait_location locate_wait(
+    const ucontext_t *frame) {
 #if defined(__x86_64__)
   uintptr_t pc = frame->uc_mcontext.gregs[REG_RIP];
 #else
   uintptr_t pc = frame->uc_mcontext.pc;
 #endif
-  int native_setup = (pc >= (uintptr_t)gw_signal_native_unmasked &&
-                      pc < (uintptr_t)gw_signal_native_resume) ||
-                     (pc >= (uintptr_t)gw_signal_native_rearm &&
-                      pc < (uintptr_t)gw_signal_native_rearm_blocked);
-  if (pc != (uintptr_t)gw_signal_wait_resume &&
-      pc != (uintptr_t)gw_signal_native_resume && !native_setup) {
+  if (pc == (uintptr_t)gw_signal_wait_resume ||
+      pc == (uintptr_t)gw_signal_native_resume) {
+    return WAIT_SYSCALL;
+  }
+  if ((pc >= (uintptr_t)gw_signal_native_unmasked &&
+       pc < (uintptr_t)gw_signal_native_resume) ||
+      (pc >= (uintptr_t)gw_signal_native_rearm &&
+       pc < (uintptr_t)gw_signal_native_rearm_blocked)) {
+    return WAIT_SETUP;
+  }
+  return WAIT_OUTSIDE;
+}
+
+static struct sleep_record *interrupted_wait(void *context, int hidden) {
+  ucontext_t *frame = context;
+  enum wait_location location = locate_wait(frame);
+  if (location == WAIT_OUTSIDE) {
     return NULL;
   }
 
@@ -521,7 +534,7 @@ static struct sleep_record *interrupted_wait(void *context, int hidden) {
   while (record && (record->retired || record->syscall_stack != stack)) {
     record = record->previous;
   }
-  if (native_setup && !hidden) {
+  if (location == WAIT_SETUP && !hidden) {
     /* A visible handler before native entry must leave an unstarted sleep
      * intact. It restores the caller's cancellation mode before user code;
      * rearm under a full mask before exposing the next syscall entry. */
@@ -535,7 +548,7 @@ static struct sleep_record *interrupted_wait(void *context, int hidden) {
     }
     return NULL;
   }
-  if (record && native_setup) {
+  if (record && location == WAIT_SETUP) {
     /* A notification can arrive when rt_sigprocmask returns, before the
      * blocking syscall starts. Skip that not-yet-entered syscall, then let
      * the stable record's ordinary retry/visible-interruption path decide.
@@ -678,6 +691,19 @@ int gw_signal_selection_hidden(void *context, uint64_t *execution) {
     gw_signal_hidden_wait_test_point();
   }
   return 1;
+}
+
+__attribute__((no_stack_protector)) void gw_signal_quiescence_hide_wait(
+    void *context) {
+  /* The assembly gateway executes on Host TLS. Check its PC before reading
+   * any TLS, because the private rendezvous also reaches real GNU threads. */
+  if (locate_wait(context) == WAIT_OUTSIDE) {
+    return;
+  }
+  int saved = errno;
+  uint64_t execution;
+  gw_signal_selection_hidden(context, &execution);
+  errno = saved;
 }
 
 void gw_signal_wait_host_delivery(int restart) {

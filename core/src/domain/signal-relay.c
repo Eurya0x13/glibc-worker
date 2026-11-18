@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <unistd.h>
 
 enum relay_state { STOPPED, STARTING, RUNNING, STOPPING, EXITING };
 
@@ -86,6 +87,13 @@ static void deliver(struct relay_request *request) {
 
 static void *dispatch(void *unused) {
   (void)unused;
+  int proof = signal_router_reclaim_signal();
+  if (proof) {
+    uint64_t bit = UINT64_C(1) << (proof - 1);
+    if (gw_raw4(SYS_rt_sigprocmask, SIG_UNBLOCK, (long)&bit, 0, sizeof bit)) {
+      _exit(125);
+    }
+  }
   atomic_store_explicit(&state, RUNNING, memory_order_release);
   wake(&state);
 

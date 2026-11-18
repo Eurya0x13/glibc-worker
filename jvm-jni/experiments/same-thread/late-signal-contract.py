@@ -39,11 +39,13 @@ flags = [
     "-Wextra",
     "-Werror",
     "-I" + str(core),
+    "-I" + str(core.parents[1] / "include"),
 ]
 files = [
     source / "late-signal-contract.c",
     core / "signal-router.c",
     core / "signal-stack.S",
+    core / "signal-quiescence.c",
     core / "signal-router.h",
     Path(__file__),
 ]
@@ -58,6 +60,7 @@ commands = [
         str(files[0]),
         str(files[1]),
         str(files[2]),
+        str(files[3]),
         "-ldl",
         "-o",
         str(out / "router.so"),

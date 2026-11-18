@@ -32,6 +32,7 @@ compiler = (
 files = [
     source / "signal-contract.c",
     domain / "signal-router.c",
+    domain / "signal-quiescence.c",
     domain / "signal-interpose.c",
     domain / "signal-stack.S",
 ]
@@ -39,6 +40,7 @@ command = [
     compiler,
     "-std=gnu17",
     "-I" + str(domain),
+    "-I" + str(domain.parents[1] / "include"),
     "-O2",
     "-g",
     "-Wall",

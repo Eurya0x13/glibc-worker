@@ -29,6 +29,7 @@ flags = [
     "-Wextra",
     "-Werror",
     "-I" + str(core),
+    "-I" + str(core.parents[1] / "include"),
 ]
 commands = [
     [
@@ -38,6 +39,7 @@ commands = [
         "-DROUTER_STUB",
         str(source),
         str(core / "signal-router.c"),
+        str(core / "signal-quiescence.c"),
         str(core / "signal-stack.S"),
         "-ldl",
         "-o",
@@ -89,6 +91,7 @@ evidence.update(
             source,
             Path(__file__),
             core / "signal-router.c",
+            core / "signal-quiescence.c",
             core / "signal-stack.S",
             out / "probe",
             out / "router.so",

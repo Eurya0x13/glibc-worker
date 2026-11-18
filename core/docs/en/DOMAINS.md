@@ -123,23 +123,48 @@ Raw signal syscalls that bypass the runtime cannot supply the logical domain
 identity. There is also no implicit Host TLS/JVM thread identity on a GNU-created
 pthread. Such a thread must not run a Host handler with its Guest TP installed.
 
-Signal dispositions are immutable per registration generation. The optional
-`signal_router_reclaim` API releases retired generations only under a supplied
-recipient-quiescence gate. The provider must stop new recipients/registrations,
-prove every existing recipient has left routing entries and saved signal frames,
-and prohibit a later jump into those frames. It runs with the writer lock held
-and catchable signals blocked; it cannot reenter the router or wait for resumed
-threads to acquire that lock. A failed gate leaves all mappings unchanged.
-Current published actions remain alive; after restore the same gate can release
-the remaining records. Without this provider, entries remain pinned. A general
-JVM safepoint is not, by itself, a valid provider. Handler entry counters
-alone cannot justify freeing records: Linux can select the handler and construct a
-user signal frame before its first user instruction runs. A thread may also
-leave a handler through a nonlocal exit. The standalone
-contract validates reclamation with all owned workers joined, failure while an
-old delivery is paused, delivery after collection, and a completed Host-side
-`siglongjmp`. It does not prove a live JVM/ART-wide quiescence implementation or
-support for abandoning a Guest call through a cross-domain jump.
+<a id="reclaiming-host-registrations"></a>
+
+### Reclaiming Host registrations
+
+Each kernel routing entry binds one immutable registration. Linux can select
+that entry before the recipient executes its first instruction. A VM
+safepoint or a zero active-handler count leaves that window open.
+
+The optional `gw_host_signal_reclaim_enable` API leases one unused public
+realtime signal after router setup and before starting relay or Guest helpers.
+Call `gw_host_signal_reclaim` from normal Host control code with a timeout in
+milliseconds. The lease and its code belong to the process until exit. Keep
+the number available to native delivery and exclude it from application
+signals, consuming waits and descriptors.
+
+The collector detaches the retired batch under the registration lock, then
+lets recipients progress. It compares pinned Linux task identities with the
+kernel's thread count and requests an acknowledgement on each actual
+recipient, including VM internal threads and unattached pthreads. Every
+acknowledgement must belong to the same pinned identity. A missing reply or an
+unstable census returns `EBUSY` without freeing the batch. A subsequent
+attempt takes a fresh census.
+
+This live proof covers generations with a fully masked kernel entry, including
+new registrations through the deferred fault channel, and records that never
+published an entry. The entry mask orders the acknowledgement after the last
+registration read. Handlers and parked callbacks resume using their local
+action snapshots. Open registrations and older entries published with other
+masks stay pinned until the embedding supplies a full barrier through
+`signal_router_reclaim`. The router preserves those entries' original
+delivery masks. The native census assumes one Linux thread group and ordinary
+thread creation, where new tasks start without their parent's saved signal
+frames.
+
+Wrapped Host waits handle the private acknowledgement as a hidden
+notification. Enable live collection where the embedding can accept
+`EINTR` from native non-restartable waits outside the adapters.
+The original full barrier remains available for stopped VM integrations and
+after router restore. Its provider must freeze new recipients and
+registrations, cover saved continuations and avoid waiting on the writer lock
+held by the collector. The standalone contract tests this path with joined
+workers, a refused collection, subsequent delivery and a Host `siglongjmp`.
 
 Transparent cross-domain `siglongjmp`/`setcontext` recovery is required for the
 first release. Its restoration obligations and acceptance matrix are specified

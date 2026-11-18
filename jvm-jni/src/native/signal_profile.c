@@ -11,9 +11,21 @@ int domain_late_signal_install(JNIEnv *env) {
 int domain_late_signal_restore(void) {
   return ENOTSUP;
 }
+
+int domain_late_signal_reclaim_enable(int number) {
+  (void)number;
+  return ENOTSUP;
+}
+
+int domain_late_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed) {
+  (void)timeout_ms;
+  (void)reclaimed;
+  return ENOTSUP;
+}
 #else
 #include "late-signal-profile.h"
 #include "signal-router.h"
+#include "signal_channel.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdint.h>
@@ -402,6 +414,18 @@ int domain_late_signal_install(JNIEnv *env) {
       signal_router_registrations());
   fflush(stdout);
   return 0;
+}
+
+int domain_late_signal_reclaim_enable(int number) {
+  return installed && installed == binding_count
+             ? gw_host_signal_reclaim_enable(number)
+             : ENOTSUP;
+}
+
+int domain_late_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed) {
+  return installed && installed == binding_count
+             ? gw_host_signal_reclaim(timeout_ms, reclaimed)
+             : ENOTSUP;
 }
 
 int domain_late_signal_restore(void) {

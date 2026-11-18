@@ -275,8 +275,9 @@ JNI 验证还检查真实 Guest 调用、模块关闭、运行时停止与 JVM �
 拒绝继续执行并保留资源；测试所有者负责丢弃这个刻意保留资源的进程。Android 使用选定
 JRE17 的 shell 进程，不据此宣称 APK 沙盒或 ART 兼容。
 
-Guest 独立队列与标记发送、通用保存 continuation 生命周期，以及活跃 VM/ART 静止
-协议仍需独立验收。原生 Host 处理器选择只覆盖显式配置的启动适配契约。
+原生 Host 处理器选择覆盖显式配置的启动适配契约。可选的
+[在线信号注册回收](DOMAINS.md#reclaiming-host-registrations) 对接收线程的回执
+也使用同一内部等待恢复路径。
 
 上游实现：[Linux 信号选择](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c)、
 [原生 signalfd 复制](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)、

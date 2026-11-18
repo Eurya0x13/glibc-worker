@@ -362,9 +362,9 @@ retain resources. The test owner disposes of that deliberately pinned process.
 Android runs use the exact
 selected JRE17 in a shell process, not an APK/ART compatibility claim.
 
-Independent Guest queues/tagged sends, general saved-continuation lifetime and
-live VM/ART quiescence remain separate acceptance work. Native Host handler
-selection is covered only within the explicitly configured bootstrap contract.
+Native Host handler selection is covered within the explicitly configured
+bootstrap contract. Optional [live registration reclamation](DOMAINS.md#reclaiming-host-registrations)
+uses the same hidden-wait path for the native recipient acknowledgement.
 
 Upstream: [Linux signal selection](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c),
 [native signalfd copying](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c),

@@ -3,6 +3,8 @@
 #include "signal-stack.h"
 #include "nonlocal-mask.h"
 #include "signal-deferred.h"
+#include "signal-quiescence.h"
+#include "signal_channel.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdatomic.h>
@@ -36,21 +38,22 @@ struct disposition {
   struct sigaction action;
   uint64_t ignore_generation;
   _Atomic int fired;
-  int internal;
+  int internal, guarded;
   void *entry;
   size_t entry_size;
   struct disposition *next;
 };
 
-/* Records are immutable after publication. A signal may interrupt an updater
- * on any thread; no reader takes the writer lock or touches malloc. Retain
- * records until explicit recipient quiescence, including across siglongjmp.
- * Counting active readers after entry cannot cover a kernel-selected entry not
- * yet executed. Reclamation requires recipient quiescence, not just a zero
- * reader count. get_signal selects a disposition before ARM64 constructs the
- * user frame: https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
+/* A kernel frame can reference an immutable generation before its first
+ * instruction executes. Guarded entries block all catchable signals from
+ * kernel selection through the last use of their generation. Unguarded
+ * entries require the embedding's full recipient and continuation proof.
+ * https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c
  * https://github.com/torvalds/linux/blob/v6.12/arch/arm64/kernel/signal.c */
 static _Atomic(struct disposition *) current[NSIG];
+/* The low bit is the ignored disposition. Pending readers need a value
+ * snapshot, without borrowing a pointer from current[]. */
+static _Atomic uint64_t ignore_state[NSIG];
 static struct sigaction original[NSIG];
 /* Baseline records may be captured by a helper frame. Each router lifetime
  * gets a fresh array; never overwrite a previous lifetime's saved token. The
@@ -63,6 +66,9 @@ static _Atomic uint64_t guest_private;
 static _Atomic unsigned records, retained;
 static struct disposition *allocations;
 static atomic_flag writer = ATOMIC_FLAG_INIT;
+static atomic_flag reclaimer = ATOMIC_FLAG_INIT;
+static _Atomic int reclaim_signal;
+static int reclaim_process;
 static _Atomic(signal_router_backend) system_action;
 static _Atomic int enabled;
 static _Atomic int guest_faults;
@@ -86,6 +92,7 @@ static int make_entry(struct disposition *);
 static int fault_lane(int);
 static int fault_routed(int);
 static int widen_host_fault_routes(void);
+static int same_action(const struct sigaction *, const struct sigaction *);
 
 static void wide_fault_mask(struct sigaction *action) {
   uint64_t all = UINT64_MAX;
@@ -93,14 +100,12 @@ static void wide_fault_mask(struct sigaction *action) {
   memcpy(&action->sa_mask, &all, sizeof all);
 }
 
-static int wide_fault_mask_matches(const struct sigaction *action) {
-  for (int number = 1; number < NSIG; ++number) {
-    if (number != SIGKILL && number != SIGSTOP &&
-        !sigismember(&action->sa_mask, number)) {
-      return 0;
-    }
-  }
-  return 1;
+static int kernel_mask_is_full(const struct sigaction *action) {
+  uint64_t mask;
+  memcpy(&mask, &action->sa_mask, sizeof mask);
+  const uint64_t uncatchable =
+      (UINT64_C(1) << (SIGKILL - 1)) | (UINT64_C(1) << (SIGSTOP - 1));
+  return (mask | uncatchable) == UINT64_MAX;
 }
 
 static struct sigaction notification_action(struct disposition *record) {
@@ -137,7 +142,7 @@ const int *signal_router_fault_notifications(void) {
              : NULL;
 }
 
-void *signal_router_current_token(int number) {
+static struct disposition *current_token(int number) {
   struct disposition *record =
       atomic_load_explicit(&current[number], memory_order_acquire);
   return record ? record : &initial[number];
@@ -171,7 +176,7 @@ int signal_router_defer_faults(const int *notifications) {
   for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
     int number = notifications[i];
     if (number < SIGRTMIN || number > SIGRTMAX ||
-        (host_reservations & (UINT64_C(1) << (number - 1))) ||
+        (signal_router_reserved() & (UINT64_C(1) << (number - 1))) ||
         atomic_load_explicit(&current[number], memory_order_acquire) ||
         (used & (UINT64_C(1) << (number - 1)))) {
       unlock_writer(mask);
@@ -211,7 +216,7 @@ int signal_router_defer_faults(const int *notifications) {
   const int faults[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGSYS};
   int installed = 0, result = 0;
   for (; installed < GW_SIGNAL_FAULT_LANES; ++installed) {
-    struct disposition *record = signal_router_current_token(faults[installed]);
+    struct disposition *record = current_token(faults[installed]);
     if (!record->entry && make_entry(record)) {
       result = errno;
       break;
@@ -341,10 +346,10 @@ static struct sigaction logical_action(struct disposition *record, int number) {
 }
 
 uint64_t signal_router_ignore_generation(int number, int *ignored) {
-  struct disposition *record =
-      atomic_load_explicit(&current[number], memory_order_acquire);
-  *ignored = logical_action(record, number).sa_handler == SIG_IGN;
-  return record ? record->ignore_generation : 0;
+  uint64_t state =
+      atomic_load_explicit(&ignore_state[number], memory_order_acquire);
+  *ignored = state & 1;
+  return state >> 1;
 }
 
 static void lock_writer(uint64_t *previous) {
@@ -445,6 +450,7 @@ int signal_router_init_with_backend(signal_router_backend backend) {
       return errno;
     }
     atomic_store(&current[number], NULL);
+    atomic_store(&ignore_state[number], original[number].sa_handler == SIG_IGN);
     managed[number] = 1;
   }
   struct disposition *baseline =
@@ -523,6 +529,76 @@ static int same_action(const struct sigaction *left,
   return 1;
 }
 
+int signal_router_reclaim_signal(void) {
+  return atomic_load_explicit(&reclaim_signal, memory_order_acquire);
+}
+
+static struct sigaction reclaim_action(void) {
+  struct sigaction action = {.sa_sigaction = gw_signal_quiescence_ack,
+                             .sa_flags = SA_SIGINFO | SA_RESTART};
+  /* Use the interrupted stack. A bridged alternate stack can still contain
+   * a parked activation even when its interrupted SP is on another stack. */
+  wide_fault_mask(&action);
+  return action;
+}
+
+static int verify_reclaim_action(int number) {
+  struct sigaction actual;
+  if (system_action(number, NULL, &actual)) {
+    return errno;
+  }
+  struct sigaction expected = reclaim_action();
+  const unsigned relevant =
+      SA_SIGINFO | SA_RESTART | SA_ONSTACK | SA_NODEFER | SA_RESETHAND;
+  return actual.sa_sigaction == expected.sa_sigaction &&
+                 !((actual.sa_flags ^ expected.sa_flags) & relevant) &&
+                 kernel_mask_is_full(&actual)
+             ? 0
+             : EBUSY;
+}
+
+int gw_host_signal_reclaim_enable(int number) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+  if (!signal_router_enabled() || number < SIGRTMIN || number > SIGRTMAX) {
+    return EINVAL;
+  }
+
+  uint64_t previous;
+  lock_writer(&previous);
+  int error;
+  if (signal_router_reclaim_signal()) {
+    error = EALREADY;
+  } else if (!managed[number] || atomic_load(&current[number]) ||
+             ((signal_router_reserved() | GW_GUEST_NPTL_SIGNALS) &
+              (UINT64_C(1) << (number - 1))) ||
+             original[number].sa_handler != SIG_DFL) {
+    error = EBUSY;
+  } else {
+    struct sigaction existing;
+    if (system_action(number, NULL, &existing)) {
+      error = errno;
+    } else if (!same_action(&existing, &original[number])) {
+      error = EBUSY;
+    } else {
+      struct sigaction action = reclaim_action();
+      if (system_action(number, &action, NULL)) {
+        error = errno;
+      } else {
+        reclaim_process = getpid();
+        atomic_store_explicit(&reclaim_signal, number, memory_order_release);
+        error = verify_reclaim_action(number);
+        if (error) {
+          error = signal_router_quarantine();
+        }
+      }
+    }
+  }
+  unlock_writer(previous);
+  return error;
+}
+
 /* Only for an explicit late-loading integration, before enabling any Guest
  * carrier. The integrator must serialize Host registration during adoption.
  * Deliveries remain safe: immutable entries are complete before installation.
@@ -536,7 +612,7 @@ int signal_router_adopt_chain(void *reviewed_chain_base) {
     return EINVAL;
   }
   for (int number = 1; number < NSIG; ++number) {
-    if (!managed[number]) {
+    if (!managed[number] || number == signal_router_reclaim_signal()) {
       continue;
     }
     struct sigaction actual;
@@ -559,7 +635,8 @@ int signal_router_adopt_chain(void *reviewed_chain_base) {
     }
   }
   for (int number = 1; number < NSIG; ++number) {
-    if (managed[number] && original[number].sa_handler != SIG_DFL &&
+    if (managed[number] && number != signal_router_reclaim_signal() &&
+        original[number].sa_handler != SIG_DFL &&
         original[number].sa_handler != SIG_IGN &&
         signal_router_action(number, &original[number], NULL)) {
       /* The transaction owner restores all layers exactly once. Partial
@@ -733,6 +810,10 @@ static int router_action(int number, const struct sigaction *action,
                                             memory_order_acquire);
     errno = saved;
   }
+  if (number == signal_router_reclaim_signal() && number > 0) {
+    errno = EBUSY;
+    return -1;
+  }
   if (number > 0 && number < NSIG &&
       (atomic_load_explicit(&guest_private, memory_order_acquire) &
        (UINT64_C(1) << (number - 1)))) {
@@ -756,7 +837,7 @@ static int router_action(int number, const struct sigaction *action,
   lock_writer(&mask);
   struct disposition *old =
       atomic_load_explicit(&current[number], memory_order_acquire);
-  if ((old && old->internal) ||
+  if (number == signal_router_reclaim_signal() || (old && old->internal) ||
       (internal && (old || original[number].sa_handler != SIG_DFL))) {
     unlock_writer(mask);
     errno = EBUSY;
@@ -815,7 +896,7 @@ static int router_action(int number, const struct sigaction *action,
   next->internal = internal;
   next->ignore_generation = old ? old->ignore_generation : 0;
   if (action->sa_handler == SIG_IGN) {
-    if (next->ignore_generation == UINT64_MAX) {
+    if (next->ignore_generation == (UINT64_MAX >> 1)) {
       munmap(next, sizeof *next);
       unlock_writer(mask);
       errno = EOVERFLOW;
@@ -854,7 +935,8 @@ static int router_action(int number, const struct sigaction *action,
   struct sigaction replaced;
   int status = system_action(number, &installed, &replaced);
   int error = errno;
-  int exposed = !status && installed.sa_sigaction == next->entry;
+  int exposed = !status && next->entry && installed.sa_sigaction == next->entry;
+  int guarded = !exposed || kernel_mask_is_full(&installed);
   if (!status && lane >= 0) {
     struct sigaction helper = notification_action(next);
     if (system_action(notifications[lane], &helper, NULL)) {
@@ -866,12 +948,26 @@ static int router_action(int number, const struct sigaction *action,
       status = -1;
     }
   }
+  if (!status && next->entry && guarded && !internal) {
+    /* The approved bottom backend must actually publish the outer masks.
+     * SA_RESETHAND can consume the PC during this query, leaving its mask. */
+    struct sigaction actual;
+    next->guarded =
+        (!exposed || (!system_action(number, NULL, &actual) &&
+                      kernel_mask_is_full(&actual))) &&
+        (lane < 0 || (!system_action(notifications[lane], NULL, &actual) &&
+                      kernel_mask_is_full(&actual)));
+  }
   if (!status) {
     next->next = allocations;
     allocations = next;
     atomic_fetch_add_explicit(&retained, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&records, 1, memory_order_relaxed);
     atomic_store_explicit(&current[number], next, memory_order_release);
+    uint64_t ignored = action->sa_handler == SIG_IGN;
+    atomic_store_explicit(&ignore_state[number],
+                          (next->ignore_generation << 1) | ignored,
+                          memory_order_release);
     /* Retain a consumed one-shot's flags/mask. The kernel resets only its
      * handler; replacing the record with an empty SIG_DFL action would change
      * subsequent queries and the previous action returned by registration.
@@ -939,7 +1035,8 @@ int signal_router_dispatch_internal(int number, siginfo_t *information,
     return 0;
   }
   int saved_errno = errno;
-  record->action.sa_sigaction(number, information, context);
+  void (*entry)(int, siginfo_t *, void *) = record->action.sa_sigaction;
+  entry(number, information, context);
   errno = saved_errno;
   return 1;
 }
@@ -1027,9 +1124,8 @@ int signal_router_select(int number, const siginfo_t *info, void *token) {
 }
 
 static void invoke_delivery(int number, siginfo_t *info, void *context,
-                            const struct disposition *record) {
+                            const struct sigaction *action) {
   int saved_errno = errno;
-  const struct sigaction *action = &record->action;
   if (action->sa_flags & SA_SIGINFO) {
     action->sa_sigaction(number, info, context);
   } else {
@@ -1045,14 +1141,16 @@ void signal_router_forward(int number, siginfo_t *info, void *context,
     signal_router_default(number);
   }
   if (selected) {
-    invoke_delivery(number, info, context, token);
+    struct sigaction action = ((struct disposition *)token)->action;
+    invoke_delivery(number, info, context, &action);
   }
 }
 
 struct host_delivery {
   int number;
   siginfo_t *information;
-  void *context, *token;
+  void *context;
+  struct sigaction action;
   uint64_t mask;
   const stack_t *stack;
 };
@@ -1064,7 +1162,7 @@ static void host_delivery_run(void *argument) {
   }
   extern void gw_signal_wait_host_delivery(int) __attribute__((weak));
   if (gw_signal_wait_host_delivery) {
-    gw_signal_wait_host_delivery(signal_router_token_restart(delivery->token));
+    gw_signal_wait_host_delivery(!!(delivery->action.sa_flags & SA_RESTART));
   }
   gw_nonlocal_mask_restore(signal_host_physical_mask
                                ? signal_host_physical_mask(delivery->mask)
@@ -1074,7 +1172,7 @@ static void host_delivery_run(void *argument) {
     signal_router_delivery_observe(delivery->number);
   }
   invoke_delivery(delivery->number, delivery->information, delivery->context,
-                  delivery->token);
+                  &delivery->action);
   gw_nonlocal_mask_block();
   extern void gw_signal_wait_host_return(void) __attribute__((weak));
   if (gw_signal_wait_host_return) {
@@ -1159,10 +1257,12 @@ static void forward_selected(int number, siginfo_t *info, void *context,
       }
     }
   }
+  /* No saved callback frame may borrow the registration. Take its snapshot
+   * before host_delivery_run permits a rendezvous or an escaping handler. */
   struct host_delivery delivery = {.number = number,
                                    .information = info,
                                    .context = context,
-                                   .token = token,
+                                   .action = record->action,
                                    .mask = mask,
                                    .stack = configure ? &effective : NULL};
   domain_stack_call(host_delivery_run, &delivery, top, guest_floor);
@@ -1202,7 +1302,7 @@ _Noreturn void signal_router_default(int number) {
   _exit(128 + number);
 }
 
-int signal_router_verify(void) {
+static int verify_locked(void) {
   if (signal_router_error()) {
     return EIO;
   }
@@ -1220,6 +1320,13 @@ int signal_router_verify(void) {
   }
 #endif
 
+  int proof = signal_router_reclaim_signal();
+  if (proof) {
+    int error = verify_reclaim_action(proof);
+    if (error) {
+      return error;
+    }
+  }
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -1228,11 +1335,11 @@ int signal_router_verify(void) {
         return errno;
       }
       const int faults[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGSYS};
-      struct disposition *record = signal_router_current_token(faults[i]);
+      struct disposition *record = current_token(faults[i]);
       if (action.sa_sigaction != record->entry ||
           !(action.sa_flags & SA_SIGINFO) || (action.sa_flags & SA_RESETHAND) ||
           ((action.sa_flags ^ record->action.sa_flags) & SA_RESTART) ||
-          !wide_fault_mask_matches(&action)) {
+          !kernel_mask_is_full(&action)) {
         return EBUSY;
       }
     }
@@ -1241,7 +1348,7 @@ int signal_router_verify(void) {
   for (int number = 1; number < NSIG; ++number) {
     struct disposition *record =
         atomic_load_explicit(&current[number], memory_order_acquire);
-    if (!managed[number]) {
+    if (!managed[number] || number == proof) {
       continue;
     }
     struct sigaction actual;
@@ -1281,7 +1388,7 @@ int signal_router_verify(void) {
         return EBUSY;
       }
       int wide = notifications && fault_lane(number) >= 0 && custom;
-      if (wide && !wide_fault_mask_matches(&actual)) {
+      if (wide && !kernel_mask_is_full(&actual)) {
         return EBUSY;
       }
       if (!wide) {
@@ -1296,6 +1403,14 @@ int signal_router_verify(void) {
     }
   }
   return 0;
+}
+
+int signal_router_verify(void) {
+  uint64_t mask;
+  lock_writer(&mask);
+  int error = verify_locked();
+  unlock_writer(mask);
+  return error;
 }
 
 int signal_router_guest_ready(void) {
@@ -1326,7 +1441,11 @@ struct restore_step {
 static int snapshot_restore(struct restore_step *steps, unsigned *count,
                             uint64_t *notification_bits) {
   const int *notifications = signal_router_fault_notifications();
+  int proof = signal_router_reclaim_signal();
   for (int number = 1; number < NSIG; ++number) {
+    if (number == proof) {
+      continue;
+    }
     const struct sigaction *target = managed[number] ? &original[number] : NULL;
     if (notifications) {
       for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -1406,7 +1525,7 @@ int signal_router_restore(void) {
 
   uint64_t previous;
   lock_writer(&previous);
-  int error = signal_router_verify();
+  int error = verify_locked();
   struct restore_step steps[NSIG];
   unsigned count = 0, changed = 0;
   uint64_t notification_bits = 0;
@@ -1469,6 +1588,10 @@ unsigned signal_router_registrations(void) {
 
 uint64_t signal_router_reserved(void) {
   uint64_t mask = host_reservations;
+  int proof = signal_router_reclaim_signal();
+  if (proof) {
+    mask |= UINT64_C(1) << (proof - 1);
+  }
   const int *notifications = signal_router_fault_notifications();
   if (notifications) {
     for (int i = 0; i < GW_SIGNAL_FAULT_LANES; ++i) {
@@ -1486,34 +1609,9 @@ unsigned signal_router_retained(void) {
   return atomic_load_explicit(&retained, memory_order_relaxed);
 }
 
-int signal_router_reclaim(const struct signal_router_quiescence *gate,
-                          unsigned *reclaimed) {
-  if (signal_router_error()) {
-    return EIO;
-  }
-
-  if (!gate || gate->version != GW_SIGNAL_ROUTER_QUIESCENCE_V1 ||
-      gate->size != sizeof *gate || !gate->enter || !gate->leave ||
-      !reclaimed) {
-    return EINVAL;
-  }
-
-  uint64_t mask;
-  lock_writer(&mask);
-  int error = gate->enter(gate->context);
-  if (error) {
-    unlock_writer(mask);
-    return error;
-  }
-
-  if (signal_host_relay_busy && signal_host_relay_busy()) {
-    gate->leave(gate->context);
-    unlock_writer(mask);
-    return EBUSY;
-  }
-
-  unsigned count = 0;
+static struct disposition *detach_retired(int guarded_only) {
   int live = atomic_load_explicit(&enabled, memory_order_acquire);
+  struct disposition *batch = NULL;
   struct disposition **link = &allocations;
   while (*link) {
     struct disposition *record = *link;
@@ -1527,25 +1625,123 @@ int signal_router_reclaim(const struct signal_router_quiescence *gate,
         }
       }
     }
-    if (published) {
+    if (published || (guarded_only && record->entry && !record->guarded)) {
       link = &record->next;
       continue;
     }
     *link = record->next;
-    if (record->entry) {
-      munmap(record->entry, record->entry_size);
-    }
-    munmap(record, sizeof *record);
-    ++count;
+    record->next = batch;
+    batch = record;
   }
-  if (!live) {
+  if (!live && !guarded_only) {
     for (int number = 1; number < NSIG; ++number) {
       atomic_store_explicit(&current[number], NULL, memory_order_relaxed);
     }
   }
+  return batch;
+}
+
+static unsigned release_retired(struct disposition *batch) {
+  unsigned count = 0;
+  while (batch) {
+    struct disposition *record = batch;
+    batch = record->next;
+    if (record->entry) {
+      if (syscall(SYS_munmap, record->entry, record->entry_size)) {
+        record->next = allocations;
+        allocations = record;
+        continue;
+      }
+      record->entry = NULL;
+    }
+    if (syscall(SYS_munmap, record, sizeof *record)) {
+      record->next = allocations;
+      allocations = record;
+      continue;
+    }
+    ++count;
+  }
   atomic_fetch_sub_explicit(&retained, count, memory_order_relaxed);
-  *reclaimed = count;
-  gate->leave(gate->context);
+  return count;
+}
+
+int signal_router_reclaim(const struct signal_router_quiescence *gate,
+                          unsigned *reclaimed) {
+  if (signal_router_error()) {
+    return EIO;
+  }
+  if (!gate || gate->version != GW_SIGNAL_ROUTER_QUIESCENCE_V1 ||
+      gate->size != sizeof *gate || !gate->enter || !gate->leave ||
+      !reclaimed) {
+    return EINVAL;
+  }
+
+  uint64_t mask;
+  lock_writer(&mask);
+  if (atomic_flag_test_and_set_explicit(&reclaimer, memory_order_acquire)) {
+    unlock_writer(mask);
+    return EBUSY;
+  }
+  int error = gate->enter(gate->context);
+  if (!error) {
+    if (signal_host_relay_busy && signal_host_relay_busy()) {
+      error = EBUSY;
+    } else {
+      *reclaimed = release_retired(detach_retired(0));
+    }
+    gate->leave(gate->context);
+  }
+  atomic_flag_clear_explicit(&reclaimer, memory_order_release);
   unlock_writer(mask);
-  return 0;
+  return error;
+}
+
+int gw_host_signal_reclaim(unsigned timeout_ms, unsigned *reclaimed) {
+  if (!timeout_ms || !reclaimed) {
+    return EINVAL;
+  }
+  int proof = signal_router_reclaim_signal();
+  if (!proof || getpid() != reclaim_process) {
+    return ENOTSUP;
+  }
+
+  uint64_t previous;
+  lock_writer(&previous);
+  if (atomic_flag_test_and_set_explicit(&reclaimer, memory_order_acquire)) {
+    unlock_writer(previous);
+    return EBUSY;
+  }
+  int error = signal_router_error();
+  if (!error) {
+    error = signal_router_enabled() ? verify_locked() : ENOTSUP;
+  }
+  struct disposition *batch = error ? NULL : detach_retired(1);
+  /* Freeze this batch, then let pending deliveries select their actions and
+   * leave the masked prefix. They can need the writer to reach that point. */
+  unlock_writer(UINT64_MAX);
+  if (batch) {
+    error = gw_signal_quiescence_check(proof, timeout_ms);
+  }
+
+  uint64_t masked;
+  lock_writer(&masked);
+  if (!error) {
+    error = signal_router_error();
+  }
+  if (!error && batch && signal_host_relay_busy && signal_host_relay_busy()) {
+    error = EBUSY;
+  }
+  if (error) {
+    while (batch) {
+      struct disposition *record = batch;
+      batch = record->next;
+      record->next = allocations;
+      allocations = record;
+    }
+  } else {
+    *reclaimed = release_retired(batch);
+  }
+  atomic_flag_clear_explicit(&reclaimer, memory_order_release);
+  unlock_writer(previous);
+  return error;
 }

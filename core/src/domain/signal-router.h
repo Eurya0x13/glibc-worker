@@ -55,7 +55,6 @@ int signal_router_guest_faults(void);
  * Reserve six otherwise unused RT numbers before starting the VM. */
 int signal_router_defer_faults(const int *notifications);
 const int *signal_router_fault_notifications(void);
-void *signal_router_current_token(int);
 uint64_t signal_router_token_ignore_generation(void *);
 int signal_router_token_restart(void *);
 /* Select deferred logical delivery under the same writer transaction as Host
@@ -108,7 +107,8 @@ unsigned signal_router_retained(void);
  * changing the router; on success leave releases the gate without waiting on
  * code needing the router lock. Neither callback may call this router.
  * A general JVM safepoint alone does not establish this signal quiescence.
- * Without such a provider, records remain pinned and reclaim is not called. */
+ * For fully masked records, the built-in live proof is available separately
+ * through signal_channel.h. */
 struct signal_router_quiescence {
   uint32_t version, size;
   void *context;
@@ -119,5 +119,6 @@ struct signal_router_quiescence {
 #define GW_SIGNAL_ROUTER_QUIESCENCE_V1 1u
 int signal_router_reclaim(const struct signal_router_quiescence *,
                           unsigned *reclaimed);
+int signal_router_reclaim_signal(void);
 uint64_t signal_router_reserved(void);
 #endif

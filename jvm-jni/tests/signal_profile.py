@@ -1,4 +1,4 @@
-"""Check all five installed Android HotSpot/Bionic signal rollback sites."""
+"""Check installed Android HotSpot/Bionic signal rollback and reclamation."""
 
 import argparse
 import errno
@@ -156,6 +156,7 @@ try:
         )
         for index in range(len(rejections))
     ]
+    cases.append(("reclaim", {"GW_LATE_RECLAIM_TEST": "1"}, None))
     for label, overrides, point in cases:
         settings = {**environment, **overrides}
         command = [
@@ -199,13 +200,18 @@ try:
                 rollback.append(json.loads(line.split(" ", 1)[1]))
             elif line.startswith("LATE_SIGNAL_REJECTION "):
                 finished.append(json.loads(line.split(" ", 1)[1]))
+            elif line.startswith("LATE_SIGNAL_RECLAIM "):
+                finished.append(json.loads(line.split(" ", 1)[1]))
         expected = (
             [{"result": "PASS", "status": errno.ENOMEM, "bindings_restored": 5}]
             if point is not None
             else []
         )
         assert rollback == expected, rollback
-        assert finished == [{"result": "PASS", "vm_destroyed": True}], finished
+        outcome = {"result": "PASS", "vm_destroyed": True}
+        if label == "reclaim":
+            outcome["reclaimed"] = 1
+        assert finished == [outcome], finished
         assert "handler modified" not in result.stdout + result.stderr
         rows.append({"case": label, **finished[0]})
 except Exception as error:
