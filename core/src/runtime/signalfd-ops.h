@@ -6,9 +6,11 @@
 #include <ucontext.h>
 
 int __gw_domain_signalfd_open(int, const sigset_t *, int, int *);
-ssize_t __gw_domain_signalfd_read(int, void *, size_t, int *);
+ssize_t __gw_domain_signalfd_read(int, void *, size_t, enum gw_libc_io_policy,
+                                  int *);
 ssize_t __gw_domain_signalfd_readv(int, const struct iovec *, int, int *);
-int __gw_domain_descriptor(enum gw_libc_descriptor_op, int, int, int, int *);
+int __gw_domain_descriptor(enum gw_libc_descriptor_op, int, int, int,
+                           enum gw_libc_io_policy, int *);
 int __gw_domain_poll(struct pollfd *, nfds_t, const struct timespec *,
                      const sigset_t *, int *);
 int __gw_domain_select(int, fd_set *, fd_set *, fd_set *, struct timespec *,

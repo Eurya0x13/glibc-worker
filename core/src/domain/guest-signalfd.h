@@ -7,9 +7,11 @@
 int gw_guest_signalfd(struct gw_signal_target *, int, const sigset_t *, int,
                       int *handled);
 ssize_t gw_guest_signalfd_read(struct gw_signal_target *, int, void *, size_t,
-                               gw_libc_wait_event, int *handled);
+                               enum gw_libc_io_policy, gw_libc_wait_event,
+                               int *handled);
 ssize_t gw_guest_signalfd_readv(struct gw_signal_target *, int,
-                                const struct iovec *, int, gw_libc_wait_event,
+                                const struct iovec *, int,
+                                enum gw_libc_io_policy, gw_libc_wait_event,
                                 int *handled);
 int gw_guest_signalfd_stop(void);
 

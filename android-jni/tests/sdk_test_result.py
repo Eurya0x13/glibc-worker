@@ -241,6 +241,9 @@ def execute_case(
                     "interruption": True,
                     "restart": True,
                     "cancellation": True,
+                    "stdio": True,
+                    "stdio_nocancel": True,
+                    "stdio_close": True,
                 }
             ]
         )

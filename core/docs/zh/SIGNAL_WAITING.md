@@ -312,7 +312,14 @@ libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等
 
 适配层通过内核复制完整的 Linux `signalfd_siginfo` 记录，保留排队值、`SI_TKILL`、
 `EFAULT` 和部分成功时的字节数。首次 `readv` 探测当前内核，选用逐向量读取或
-跨向量分散复制。阻塞读取保留所属 libc 的取消点，并遵守 `SA_RESTART`。
+跨向量分散复制。公开读取使用所属 libc 的取消点，两条读取路径都遵守
+`SA_RESTART`。
+
+Guest 的 `fdopen`、`fread` 和 `fclose` 使用 GNU `FILE`，保留原生缓冲、
+错误标志和描述符所有权。私有 `__read_nocancel` 从同一个逻辑队列读取，
+并使用不可取消的 futex 等待。`__close_nocancel` 和 `__close_nocancel_nostatus`
+回收同一个打开文件描述，最后一个别名关闭时唤醒就绪等待者。无返回状态的关闭
+保留 `errno`。动态链接器在引导时使用自身的原生读取与关闭例程。
 
 `poll`、`ppoll`、`select`、`pselect` 和公开的 `epoll` 等待接口检查调用者的
 私有及共享待决队列，不消费其中的消息。掩码匹配时才报告输入就绪。普通描述符继续
@@ -328,10 +335,11 @@ libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等
 编号重新检查。复用的编号不会收到旧信号描述符的就绪事件。
 
 已安装的 worker 和收养载体回归覆盖混合就绪、独立接收者、嵌套 epoll、并发关闭、
-超时、掩码、取消和原生跳转清理。此契约适用于已注册 Guest 线程经所属 GNU libc
-发起的调用。裸系统调用、libc 私有 I/O 入口和 Host 使用 Guest signalfd 属于其他
-兼容性工作。
+超时、掩码、取消和原生跳转清理。回归也覆盖流的缓冲读取、非阻塞错误、不可取消读取
+期间推迟取消请求，以及私有关闭后的等待唤醒。此契约适用于已注册 Guest 线程经所属
+GNU libc 发起的调用。裸系统调用入口和 Host 使用 Guest signalfd 仍属于兼容性待办。
 
+- [GNU FILE 读取与关闭路径](https://github.com/bminor/glibc/blob/glibc-2.42/libio/fileops.c)
 - [Linux signalfd 选择与掩码更新](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
 - [Linux eventpoll 监听标识与生命周期](https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c)
 - [Linux 打开文件描述锁](https://github.com/torvalds/linux/blob/v6.12/fs/locks.c)

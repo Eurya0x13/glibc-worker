@@ -9,9 +9,10 @@ static unsigned gw_signalfd_state;
 
 int __gw_domain_signalfd_hook(unsigned version,
                               const struct gw_libc_signalfd_hook *hook) {
-  if (version != 2 || !hook || hook->size != sizeof *hook || !hook->open ||
-      !hook->read || !hook->readv || !hook->descriptor || !hook->poll ||
-      !hook->select || !hook->epoll_ctl || !hook->epoll_wait || !hook->unwind ||
+  if (version != GW_LIBC_SIGNALFD_VERSION || !hook ||
+      hook->size != sizeof *hook || !hook->open || !hook->read ||
+      !hook->readv || !hook->descriptor || !hook->poll || !hook->select ||
+      !hook->epoll_ctl || !hook->epoll_wait || !hook->unwind ||
       !hook->restore) {
     return EINVAL;
   }
@@ -30,10 +31,16 @@ static int signalfd_hook_ready(void) {
   return __atomic_load_n(&gw_signalfd_state, __ATOMIC_ACQUIRE) == 2;
 }
 
-static int signalfd_wait(void *word, uint32_t sequence,
-                         const struct timespec *deadline) {
+static int signalfd_wait_cancelable(void *word, uint32_t sequence,
+                                    const struct timespec *deadline) {
   return -__futex_abstimed_wait_cancelable64(word, sequence, CLOCK_MONOTONIC,
                                              deadline, FUTEX_PRIVATE);
+}
+
+static int signalfd_wait_nocancel(void *word, uint32_t sequence,
+                                  const struct timespec *deadline) {
+  return -__futex_abstimed_wait64(word, sequence, CLOCK_MONOTONIC, deadline,
+                                  FUTEX_PRIVATE);
 }
 
 int __gw_domain_signalfd_open(int fd, const sigset_t *set, int flags,
@@ -46,10 +53,13 @@ int __gw_domain_signalfd_open(int fd, const sigset_t *set, int flags,
 libc_hidden_def(__gw_domain_signalfd_open);
 
 ssize_t __gw_domain_signalfd_read(int fd, void *buf, size_t size,
-                                  int *handled) {
+                                  enum gw_libc_io_policy policy, int *handled) {
   *handled = 0;
+  gw_libc_wait_event wait = policy == GW_IO_CANCELLABLE
+                                ? signalfd_wait_cancelable
+                                : signalfd_wait_nocancel;
   return signalfd_hook_ready()
-             ? gw_signalfd_hook.read(fd, buf, size, signalfd_wait, handled)
+             ? gw_signalfd_hook.read(fd, buf, size, policy, wait, handled)
              : 0;
 }
 
@@ -58,9 +68,10 @@ libc_hidden_def(__gw_domain_signalfd_read);
 ssize_t __gw_domain_signalfd_readv(int fd, const struct iovec *vectors,
                                    int count, int *handled) {
   *handled = 0;
-  return signalfd_hook_ready() ? gw_signalfd_hook.readv(fd, vectors, count,
-                                                        signalfd_wait, handled)
-                               : 0;
+  return signalfd_hook_ready()
+             ? gw_signalfd_hook.readv(fd, vectors, count, GW_IO_CANCELLABLE,
+                                      signalfd_wait_cancelable, handled)
+             : 0;
 }
 
 libc_hidden_def(__gw_domain_signalfd_readv);
@@ -71,11 +82,12 @@ static int descriptor_wait(struct pollfd *fds, nfds_t count,
 }
 
 int __gw_domain_descriptor(enum gw_libc_descriptor_op op, int fd, int target,
-                           int flags, int *handled) {
+                           int flags, enum gw_libc_io_policy policy,
+                           int *handled) {
   *handled = 0;
-  return signalfd_hook_ready()
-             ? gw_signalfd_hook.descriptor(op, fd, target, flags, handled)
-             : 0;
+  return signalfd_hook_ready() ? gw_signalfd_hook.descriptor(
+                                     op, fd, target, flags, policy, handled)
+                               : 0;
 }
 
 libc_hidden_def(__gw_domain_descriptor);

@@ -410,8 +410,16 @@ queue before the shared Guest queue.
 The adapter copies complete Linux `signalfd_siginfo` records through the
 kernel and preserves queued values, `SI_TKILL`, `EFAULT` and partial byte
 counts. It probes the running kernel to select legacy per-vector or scatter
-`readv` behavior. A blocked read uses the owning libc's cancellation point
-and honors `SA_RESTART`.
+`readv` behavior. The owning libc supplies the public read cancellation
+point. Both read paths honor `SA_RESTART`.
+
+Guest `fdopen`, `fread` and `fclose` use a GNU `FILE` with native
+buffering, error flags and descriptor ownership. The private
+`__read_nocancel` entry uses the same logical dequeue with a non-cancellable
+futex wait. `__close_nocancel` and `__close_nocancel_nostatus` retire the
+same description and notify blocked readiness callers when the last alias
+closes. The no-status entry preserves `errno`. The dynamic loader uses its
+own native read and close routines during bootstrap.
 
 `poll`, `ppoll`, `select`, `pselect` and the public `epoll` wait APIs test
 the caller's private and shared pending queues without consuming entries.
@@ -434,10 +442,13 @@ signal description.
 
 Installed worker and adopted-carrier fixtures cover mixed readiness, independent
 recipients, nested epoll, concurrent close, timeouts, masks, cancellation and
-native jump cleanup. This contract covers calls through the owning GNU libc
-on a registered Guest thread. Raw syscalls, private libc I/O entrypoints and
-Host access to Guest signalfd descriptors are separate compatibility work.
+native jump cleanup. The same tests cover buffered stream reads, nonblocking
+stream errors, deferred cancellation during a no-cancel read and wakeups
+after private close. This contract covers calls through the owning GNU libc
+on a registered Guest thread. Raw syscall entry and Host access to Guest
+signalfd remain compatibility work.
 
+- [GNU FILE read and close paths](https://github.com/bminor/glibc/blob/glibc-2.42/libio/fileops.c)
 - [Linux signalfd selection and mask updates](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
 - [Linux eventpoll watch keys and lifetime](https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c)
 - [Linux OFD locks](https://github.com/torvalds/linux/blob/v6.12/fs/locks.c)

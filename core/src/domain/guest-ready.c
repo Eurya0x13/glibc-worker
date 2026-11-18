@@ -50,9 +50,10 @@ static int finish(int status, int saved) {
 
 int gw_guest_descriptor(struct gw_signal_target *target,
                         enum gw_libc_descriptor_op op, int fd, int new_fd,
-                        int flags, int *handled) {
+                        int flags, enum gw_libc_io_policy policy,
+                        int *handled) {
   int saved = errno;
-  if (op == GW_DESCRIPTOR_CLOSE) {
+  if (policy == GW_IO_CANCELLABLE) {
     pthread_testcancel();
   }
 

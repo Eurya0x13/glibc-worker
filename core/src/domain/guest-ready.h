@@ -4,7 +4,7 @@
 #include "signalfd-hook.h"
 
 int gw_guest_descriptor(struct gw_signal_target *, enum gw_libc_descriptor_op,
-                        int, int, int, int *);
+                        int, int, int, enum gw_libc_io_policy, int *);
 int gw_guest_poll(struct gw_signal_target *, struct pollfd *, nfds_t,
                   const struct timespec *, const sigset_t *, gw_libc_poll_wait,
                   int *);

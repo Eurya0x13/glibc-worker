@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 #include <assert.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -152,11 +154,11 @@ static void *reader(void *argument) {
   return NULL;
 }
 
-static void wait_for_read(struct blocked_read *call) {
+static void wait_for_syscall(_Atomic int *thread_id, long expected) {
   struct timespec start, now;
   assert(!clock_gettime(CLOCK_MONOTONIC, &start));
   for (;;) {
-    int tid = atomic_load_explicit(&call->tid, memory_order_acquire);
+    int tid = atomic_load_explicit(thread_id, memory_order_acquire);
     if (tid) {
       char name[80];
       assert(snprintf(name, sizeof name, "/proc/self/task/%d/syscall", tid) >
@@ -164,7 +166,7 @@ static void wait_for_read(struct blocked_read *call) {
       FILE *status = fopen(name, "r");
       assert(status);
       long number;
-      int waiting = fscanf(status, "%ld", &number) == 1 && number == SYS_futex;
+      int waiting = fscanf(status, "%ld", &number) == 1 && number == expected;
       assert(!fclose(status));
       if (waiting) {
         return;
@@ -174,6 +176,10 @@ static void wait_for_read(struct blocked_read *call) {
     assert(now.tv_sec - start.tv_sec < 5);
     sched_yield();
   }
+}
+
+static void wait_for_read(struct blocked_read *call) {
+  wait_for_syscall(&call->tid, SYS_futex);
 }
 
 static void mask_update(void) {
@@ -302,6 +308,134 @@ static void cancel_read(void) {
   assert(!close(call.fd));
 }
 
+static void stdio_reads(void) {
+  sigset_t mask = one(PACKET);
+  int fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+  assert(fd >= 0);
+  FILE *file = fdopen(fd, "r");
+  assert(file && fileno(file) == fd);
+  char buffer[4 * sizeof(struct signalfd_siginfo)];
+  assert(!setvbuf(file, buffer, _IOFBF, sizeof buffer));
+
+  send(pthread_self(), PACKET, 301);
+  send(pthread_self(), PACKET, 302);
+  struct signalfd_siginfo packet;
+  assert(fread(&packet, sizeof packet, 1, file) == 1);
+  check_packet(&packet, PACKET, 301);
+  struct pollfd watched = {.fd = fd, .events = POLLIN};
+  assert(poll(&watched, 1, 0) == 0);
+  assert(fread(&packet, sizeof packet, 1, file) == 1);
+  check_packet(&packet, PACKET, 302);
+
+  assert(fread(&packet, sizeof packet, 1, file) == 0);
+  assert(ferror(file) && !feof(file) && errno == EAGAIN);
+  clearerr(file);
+  send(pthread_self(), PACKET, 303);
+  assert(fread(&packet, sizeof packet, 1, file) == 1);
+  check_packet(&packet, PACKET, 303);
+  assert(!fclose(file));
+
+  fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+  assert(fd >= 0);
+  file = fdopen(fd, "r");
+  assert(file && !setvbuf(file, NULL, _IONBF, 0));
+  send(pthread_self(), PACKET, 304);
+  assert(fgetc(file) == EOF && ferror(file) && errno == EINVAL);
+  clearerr(file);
+  assert(fread(&packet, sizeof packet, 1, file) == 1);
+  check_packet(&packet, PACKET, 304);
+  assert(!fclose(file));
+}
+
+static void *nocancel_file_read(void *argument) {
+  struct blocked_read *call = argument;
+  FILE *file = fdopen(call->fd, "r");
+  assert(file);
+  /* fdopen does not parse fopen's 'c' flag. Exercise the reviewed native
+   * FILE read branch, as in the Host stdio control.
+   * https://github.com/bminor/glibc/blob/glibc-2.42/libio/libio.h
+   * https://github.com/bminor/glibc/blob/glibc-2.42/libio/fileops.c
+   */
+  file->_flags2 |= 2;
+
+  assert(!pthread_cancel(pthread_self()));
+  atomic_store_explicit(&call->tid, (int)syscall(SYS_gettid),
+                        memory_order_release);
+  assert(fread(&call->packet, sizeof call->packet, 1, file) == 1);
+  assert(!fclose(file));
+  call->result = 1;
+  pthread_testcancel();
+  assert(0);
+  return NULL;
+}
+
+static void stdio_nocancel(void) {
+  sigset_t mask = one(PACKET);
+  struct blocked_read call = {.fd = signalfd(-1, &mask, SFD_CLOEXEC)};
+  assert(call.fd >= 0);
+  pthread_t thread;
+  assert(!pthread_create(&thread, NULL, nocancel_file_read, &call));
+  wait_for_read(&call);
+  send(thread, PACKET, 311);
+
+  void *result;
+  assert(!pthread_join(thread, &result) && result == PTHREAD_CANCELED);
+  assert(call.result == 1);
+  check_packet(&call.packet, PACKET, 311);
+}
+
+struct closing_poll {
+  _Atomic int tid;
+  struct pollfd watch;
+  int result;
+};
+
+static void *poll_until_closed(void *argument) {
+  struct closing_poll *call = argument;
+  atomic_store_explicit(&call->tid, (int)syscall(SYS_gettid),
+                        memory_order_release);
+  call->result = poll(&call->watch, 1, -1);
+  return NULL;
+}
+
+static void close_notifies_waiter(FILE *file, int fd,
+                                  void (*close_nostatus)(int)) {
+  struct closing_poll call = {.watch = {.fd = fd, .events = POLLIN}};
+  pthread_t thread;
+  assert(!pthread_create(&thread, NULL, poll_until_closed, &call));
+  wait_for_syscall(&call.tid, SYS_ppoll);
+
+  if (file) {
+    assert(!fclose(file));
+  } else {
+    errno = EDOM;
+    close_nostatus(fd);
+    assert(errno == EDOM);
+  }
+
+  struct timespec deadline;
+  assert(!clock_gettime(CLOCK_REALTIME, &deadline));
+  deadline.tv_sec += 3;
+  assert(!pthread_timedjoin_np(thread, NULL, &deadline));
+  assert(call.result == 1 && call.watch.revents == POLLNVAL);
+}
+
+static void stdio_close(void) {
+  sigset_t mask = one(PACKET);
+  int fd = signalfd(-1, &mask, SFD_CLOEXEC);
+  assert(fd >= 0);
+  FILE *file = fdopen(fd, "r");
+  assert(file);
+  close_notifies_waiter(file, fd, NULL);
+
+  void (*close_nostatus)(int) =
+      dlvsym(RTLD_DEFAULT, "__close_nocancel_nostatus", "GLIBC_PRIVATE");
+  assert(close_nostatus);
+  fd = signalfd(-1, &mask, SFD_CLOEXEC);
+  assert(fd >= 0);
+  close_notifies_waiter(NULL, fd, close_nostatus);
+}
+
 void sdk_guest_signalfd_probe(void) {
   sigset_t mask = one(PACKET), inherited;
   sigaddset(&mask, OTHER);
@@ -313,6 +447,9 @@ void sdk_guest_signalfd_probe(void) {
   interrupt_read(SA_RESTART);
   cancel_read();
   close_read_description();
+  stdio_reads();
+  stdio_nocancel();
+  stdio_close();
   extern void sdk_guest_signalfd_ready_probe(void);
   sdk_guest_signalfd_ready_probe();
   assert(!pthread_sigmask(SIG_SETMASK, &inherited, NULL));
@@ -320,6 +457,7 @@ void sdk_guest_signalfd_probe(void) {
       "{\"stage\":\"guest-signalfd\",\"aliases\":true,\"copyout\":true,"
       "\"vectors\":true,\"mask_update\":true,\"interruption\":true,"
       "\"restart\":true,"
-      "\"cancellation\":true}");
+      "\"cancellation\":true,\"stdio\":true,\"stdio_nocancel\":true,"
+      "\"stdio_close\":true}");
   fflush(stdout);
 }

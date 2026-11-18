@@ -95,19 +95,20 @@ static int open_signalfd(int descriptor, const sigset_t *set, int flags,
 }
 
 static ssize_t read_signalfd(int descriptor, void *buf, size_t size,
+                             enum gw_libc_io_policy policy,
                              gw_libc_wait_event wait, int *handled) {
   *handled = 0;
-  return current ? gw_guest_signalfd_read(current, descriptor, buf, size, wait,
-                                          handled)
+  return current ? gw_guest_signalfd_read(current, descriptor, buf, size,
+                                          policy, wait, handled)
                  : 0;
 }
 
 static ssize_t readv_signalfd(int descriptor, const struct iovec *vectors,
-                              int count, gw_libc_wait_event wait,
-                              int *handled) {
+                              int count, enum gw_libc_io_policy policy,
+                              gw_libc_wait_event wait, int *handled) {
   *handled = 0;
   return current ? gw_guest_signalfd_readv(current, descriptor, vectors, count,
-                                           wait, handled)
+                                           policy, wait, handled)
                  : 0;
 }
 
@@ -120,9 +121,10 @@ const void *gw_guest_fd_scope(void) {
 }
 
 static int descriptor(enum gw_libc_descriptor_op op, int fd, int other,
-                      int flags, int *handled) {
+                      int flags, enum gw_libc_io_policy policy, int *handled) {
   *handled = 0;
-  return current ? gw_guest_descriptor(current, op, fd, other, flags, handled)
+  return current ? gw_guest_descriptor(current, op, fd, other, flags, policy,
+                                       handled)
                  : 0;
 }
 
@@ -266,7 +268,7 @@ static int install_hooks(void) {
   if (error || (error = mask_hook(1, mask_changed)) ||
       (error = thread_hook(1, &admission)) ||
       (error = send_hook(1, send_signal)) || (error = consume_hook(1, &wait)) ||
-      (error = signalfd_hook(2, &fd))) {
+      (error = signalfd_hook(GW_LIBC_SIGNALFD_VERSION, &fd))) {
     return error;
   }
   return 0;

@@ -85,8 +85,10 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   descriptors support logical `read`/`readv`, `poll`/`ppoll`,
   `select`/`pselect` and the public `epoll` wait APIs. Coverage includes
   alias mask updates, concurrent close/replacement, waiter cancellation and
-  nested epoll watches. See [Guest signal descriptors](core/docs/en/SIGNAL_WAITING.md#guest-signalfd).
-  Complete raw/private descriptor access, use of Guest descriptors by Host,
+  nested epoll watches. Guest streams also use the logical queue through
+  GNU libc's private no-cancel read and close entrypoints.
+  See [Guest signal descriptors](core/docs/en/SIGNAL_WAITING.md#guest-signalfd).
+  Complete raw syscall descriptor access, use of Guest descriptors by Host,
   job control and remaining kernel restart/EINTR semantics when the logical
   action changes or a notification has no deliverable Guest packet.
   [Private NPTL isolation](core/docs/en/PRIVATE_SIGNALS.md) separates GNU's

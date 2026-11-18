@@ -55,7 +55,7 @@ def patch_descriptors(linux, replace):
         (
             "read",
             "  return SYSCALL_CANCEL (read, fd, buf, nbytes);",
-            "__gw_domain_signalfd_read (fd, buf, nbytes, &handled)",
+            "__gw_domain_signalfd_read (fd, buf, nbytes, GW_IO_CANCELLABLE, &handled)",
             "ssize_t",
         ),
         (
@@ -67,13 +67,15 @@ def patch_descriptors(linux, replace):
         (
             "close",
             "  return SYSCALL_CANCEL (close, fd);",
-            "__gw_domain_descriptor (GW_DESCRIPTOR_CLOSE, fd, 0, 0, &handled)",
+            "__gw_domain_descriptor (GW_DESCRIPTOR_CLOSE, fd, 0, 0, "
+            "GW_IO_CANCELLABLE, &handled)",
             "int",
         ),
         (
             "dup2",
             "#ifdef __NR_dup2",
-            "__gw_domain_descriptor (GW_DESCRIPTOR_DUP2, fd, fd2, 0, &handled)",
+            "__gw_domain_descriptor (GW_DESCRIPTOR_DUP2, fd, fd2, 0, "
+            "GW_IO_NOCANCEL, &handled)",
             "int",
         ),
     ):
@@ -89,7 +91,8 @@ def patch_descriptors(linux, replace):
         "dup3",
         "int fd, int fd2, int flags",
         handled_call(
-            "__gw_domain_descriptor (GW_DESCRIPTOR_DUP3, fd, fd2, flags, &handled)"
+            "__gw_domain_descriptor (GW_DESCRIPTOR_DUP3, fd, fd2, flags, "
+            "GW_IO_NOCANCEL, &handled)"
         ),
         "fd, fd2, flags",
         hidden=True,
@@ -118,6 +121,63 @@ def patch_descriptors(linux, replace):
         misc + "CFLAGS-epoll_pwait.c += -fexceptions\n"
         "CFLAGS-epoll_pwait2.c += -fexceptions\n",
     )
+
+
+def patch_private_io(linux, replace):
+    # The discovery link would otherwise pull the libc variants into rtld
+    # before recompiling its libc dependencies as rtld objects.
+    line_end = " " + "\\" + "\n"
+    close_routines = (
+        "close_nocancel",
+        "close_nocancel_nostatus",
+        "read_nocancel",
+    )
+    entry = "sysdep-rtld-routines +=" + line_end
+    replace(
+        linux / "Makefile",
+        entry,
+        entry + "".join("  " + name + line_end for name in close_routines),
+    )
+
+    close = "__gw_domain_descriptor (GW_DESCRIPTOR_CLOSE, fd, 0, 0, "
+    for name, anchor, dispatch in (
+        (
+            "read_nocancel",
+            "  return INLINE_SYSCALL_CALL (read, fd, buf, nbytes);",
+            handled_call(
+                "__gw_domain_signalfd_read (fd, buf, nbytes, "
+                "GW_IO_NOCANCEL, &handled)",
+                typ="ssize_t",
+            ),
+        ),
+        (
+            "close_nocancel",
+            "  return INLINE_SYSCALL_CALL (close, fd);",
+            handled_call(close + "GW_IO_NOCANCEL, &handled)"),
+        ),
+        (
+            "close_nocancel_nostatus",
+            "  INTERNAL_SYSCALL_CALL (close, fd);",
+            "  int handled, saved = errno;\n"
+            f"  {close}GW_IO_NOCANCEL, &handled);\n"
+            "  __set_errno (saved);\n"
+            "  if (handled)\n"
+            "    return;\n",
+        ),
+    ):
+        path = linux / (name + ".c")
+        # rtld also compiles these sources and uses them before libc and TLS
+        # are initialized. Its calls still go directly to the kernel.
+        include = "#include <not-cancel.h>\n"
+        replace(
+            path,
+            include,
+            include
+            + "#if IS_IN (libc)\n#include <gw-signalfd-ops.h>\n#endif\n",
+        )
+        prepend_call(
+            path, replace, anchor, "#if IS_IN (libc)\n" + dispatch + "#endif\n"
+        )
 
 
 def milliseconds(timeout):
@@ -234,4 +294,5 @@ def patch_readiness(linux, replace):
 def patch_signalfd(source: Path, replace):
     linux = source / "sysdeps/unix/sysv/linux"
     patch_descriptors(linux, replace)
+    patch_private_io(linux, replace)
     patch_readiness(linux, replace)

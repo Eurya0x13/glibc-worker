@@ -11,6 +11,13 @@
 typedef int (*gw_libc_poll_wait)(struct pollfd *, nfds_t, struct timespec *,
                                  const void *);
 
+#define GW_LIBC_SIGNALFD_VERSION 3
+
+enum gw_libc_io_policy {
+  GW_IO_NOCANCEL,
+  GW_IO_CANCELLABLE,
+};
+
 enum gw_libc_descriptor_op {
   GW_DESCRIPTOR_CLOSE,
   GW_DESCRIPTOR_DUP2,
@@ -20,10 +27,12 @@ enum gw_libc_descriptor_op {
 struct gw_libc_signalfd_hook {
   size_t size;
   int (*open)(int, const sigset_t *, int, int *handled);
-  ssize_t (*read)(int, void *, size_t, gw_libc_wait_event, int *handled);
-  ssize_t (*readv)(int, const struct iovec *, int, gw_libc_wait_event,
-                   int *handled);
-  int (*descriptor)(enum gw_libc_descriptor_op, int, int, int, int *);
+  ssize_t (*read)(int, void *, size_t, enum gw_libc_io_policy,
+                  gw_libc_wait_event, int *handled);
+  ssize_t (*readv)(int, const struct iovec *, int, enum gw_libc_io_policy,
+                   gw_libc_wait_event, int *handled);
+  int (*descriptor)(enum gw_libc_descriptor_op, int, int, int,
+                    enum gw_libc_io_policy, int *);
   int (*poll)(struct pollfd *, nfds_t, const struct timespec *,
               const sigset_t *, gw_libc_poll_wait, int *);
   int (*select)(int, fd_set *, fd_set *, fd_set *, struct timespec *,

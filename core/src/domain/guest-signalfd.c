@@ -406,12 +406,13 @@ static ssize_t read_records(struct gw_signal_target *target,
 }
 
 static int begin_read(struct gw_signal_target *target, struct signal_read *read,
-                      int descriptor, int *handled) {
+                      int descriptor, enum gw_libc_io_policy policy,
+                      int *handled) {
   int match = atomic_load_explicit(&count, memory_order_acquire)
                   ? identify(target, read, descriptor)
                   : 0;
   *handled = match != 0;
-  if (match > 0) {
+  if (match > 0 && policy == GW_IO_CANCELLABLE) {
     pthread_testcancel();
   }
   return match;
@@ -423,10 +424,11 @@ static size_t max_read(void) {
 
 ssize_t gw_guest_signalfd_read(struct gw_signal_target *target, int descriptor,
                                void *output, size_t length,
+                               enum gw_libc_io_policy policy,
                                gw_libc_wait_event wait, int *handled) {
   int saved = errno;
   struct signal_read read __attribute__((cleanup(release_read))) = {0};
-  ssize_t result = begin_read(target, &read, descriptor, handled);
+  ssize_t result = begin_read(target, &read, descriptor, policy, handled);
   if (result > 0) {
     int error = gw_signal_user_validate_read(output, length);
     size_t maximum = max_read();
@@ -505,10 +507,11 @@ static ssize_t read_vector(struct gw_signal_target *target,
 
 ssize_t gw_guest_signalfd_readv(struct gw_signal_target *target, int descriptor,
                                 const struct iovec *vectors, int count,
+                                enum gw_libc_io_policy policy,
                                 gw_libc_wait_event wait, int *handled) {
   int saved = errno;
   struct signal_read read __attribute__((cleanup(release_read))) = {0};
-  ssize_t result = begin_read(target, &read, descriptor, handled);
+  ssize_t result = begin_read(target, &read, descriptor, policy, handled);
   if (result > 0) {
     result = read_vector(target, &read, vectors, count, wait);
   }
