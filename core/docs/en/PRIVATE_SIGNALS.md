@@ -73,7 +73,27 @@ These data sites preserve the reviewed ART front when present. Installed JNI
 tests exercise Bionic registration with the selected VM already running and
 verify that its kernel routes remain intact afterward.
 
-This is not arbitrary private syscall interception. GNU Host NPTL cancellation
-across an adopted carrier needs separate lifecycle coordination; the Bionic
-path does not validate it. Nor does a native registration test establish live
-ART recipient quiescence or general saved Guest continuations.
+## GNU Host lifecycle
+
+During same-thread bootstrap the router checks the kernel's GNU Host
+`SIGSETXID` action against its owning libc, retains its flags and restorer, and
+routes entry through the original Host TCB. A set-ID broadcast can receive its
+acknowledgement even while a Host pthread is executing Guest code. The router
+verifies the entry while active and restores the exact kernel action on
+shutdown. Each libc's credential broadcast covers its own registered
+pthreads. Process-wide credential changes spanning both registries remain
+outside the runtime contract.
+
+Signal 32 stays on the owning GNU Host libc path. The carrier blocks it while
+Guest TLS is installed. GNU native callers that can be cancelled must disable
+Host cancellation through their bridge scopes and restore their previous
+state after retirement. The native fixture cancels genuine GNU Host pthreads,
+fires Host `SIGEV_THREAD` timers, and broadcasts the existing GID while both
+carriers run Guest code. It also requests cancellation while a carrier's
+cancellation is disabled, then checks cleanup on the Host TCB after retirement.
+It repeats native operations after restoring the kernel actions. Native forced
+unwind through a suspended JNI or VM frame is outside this contract.
+
+[GNU cancellation](https://github.com/bminor/glibc/blob/glibc-2.42/nptl/pthread_cancel.c)
+and [GNU credential broadcast](https://github.com/bminor/glibc/blob/glibc-2.42/nptl/nptl_setxid.c)
+define these private entrypoints.

@@ -313,11 +313,14 @@ libc 执行原生取消点。Guest 处理器可以中断尚未选到消息的等
 适配层通过内核复制完整的 Linux `signalfd_siginfo` 记录，保留排队值、`SI_TKILL`、
 `EFAULT` 和部分成功时的字节数。首次 `readv` 探测当前内核，选用逐向量读取或
 跨向量分散复制。公开读取使用所属 libc 的取消点，两条读取路径都遵守
-`SA_RESTART`。
+`SA_RESTART`。读取按实际投递时选定的处置决定是否重启。另一线程在处理器
+运行期间修改注册，已选处置继续有效。唤醒时若没有实际投递，重新检查队列。
+就绪等待若被实际执行的处理器打断，返回 `EINTR`，包括设置了 `SA_RESTART`
+的处理器。
 
 Guest 的 `fdopen`、`fread` 和 `fclose` 使用 GNU `FILE`，保留原生缓冲、
 错误标志和描述符所有权。私有 `__read_nocancel` 从同一个逻辑队列读取，
-并使用不可取消的 futex 等待。`__close_nocancel` 和 `__close_nocancel_nostatus`
+并使用不可取消的等待。`__close_nocancel` 和 `__close_nocancel_nostatus`
 回收同一个打开文件描述，最后一个别名关闭时唤醒就绪等待者。无返回状态的关闭
 保留 `errno`。动态链接器在引导时使用自身的原生读取与关闭例程。
 
@@ -334,13 +337,39 @@ Guest 的 `fdopen`、`fread` 和 `fclose` 使用 GNU `FILE`，保留原生缓冲
 原有的打开文件描述，直到返回或展开。Poll 和 select 在并发关闭或替换后按当前
 编号重新检查。复用的编号不会收到旧信号描述符的就绪事件。
 
+调用者可以通过启动期拦截层把描述符交给 Host。同一内核 TID 若已绑定 Guest
+接收者，可读取自己的 Guest 定向队列和 Guest 共享队列。只有 Host 身份的线程
+可以读取 Guest 共享队列。Host 可更新别名的掩码、读取、等待就绪以及关闭描述符。
+已启用的 Host [stdio 后端](STDIO.md)提供原生 `FILE` 支持。关闭运行时前应
+关闭或替换最后一个应用侧别名，并结束仍在进行的 I/O。
+
+匹配 GNU libc 的 `syscall(2)` 入口也支持创建 Guest signalfd、更新掩码、
+读取、就绪等待、关闭和描述符替换。这些调用保留不可取消的系统调用语义，以及
+`ppoll`、`pselect6` 和架构提供的 `select` 的 Linux 剩余超时回写。
+内联机器指令直接进入 Linux 内核，只能访问内核队列。Host 通过公开 libc
+适配器访问 Guest 描述符。
+
+### 共享 Linux 作业控制
+
+`SIGTSTP`、`SIGTTIN`、`SIGTTOU` 和 `SIGCONT` 走原生作业控制。Host
+拥有进程级处置，Guest 注册返回 `EBUSY`。Guest 发送遵循 Linux 的停止和恢复、
+`SIGCONT` 清除待决停止信号及孤儿进程组规则。这四个信号使用当前执行域的
+物理线程掩码。
+
+一个 Guest 描述符可以同时监听逻辑信号和这四个原生信号。运行时同时检查
+逻辑队列和非阻塞内核 signalfd。调用者先从 Guest 定向队列取信号，再取 Guest
+共享队列和内核作业控制记录。内核队列内由 Linux 排序。`sigpending` 包含
+已屏蔽的原生作业控制信号，消费型等待也可同时选择它们和 Guest 信号。
+
 已安装的 worker 和收养载体回归覆盖混合就绪、独立接收者、嵌套 epoll、并发关闭、
 超时、掩码、取消和原生跳转清理。回归也覆盖流的缓冲读取、非阻塞错误、不可取消读取
-期间推迟取消请求，以及私有关闭后的等待唤醒。此契约适用于已注册 Guest 线程经所属
-GNU libc 发起的调用。裸系统调用入口和 Host 使用 Guest signalfd 仍属于兼容性待办。
+期间推迟取消请求，以及私有关闭后的等待唤醒。桌面 Linux 与 Android ARM64 的
+安装版 SDK 回归还验证了 Host 访问、GNU 系统调用入口、注册变化时的重启行为，
+以及由父进程观测的三次内核作业停止。
 
 - [GNU FILE 读取与关闭路径](https://github.com/bminor/glibc/blob/glibc-2.42/libio/fileops.c)
 - [Linux signalfd 选择与掩码更新](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
+- [Linux 作业控制和停止、恢复信号的选择](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c)
 - [Linux eventpoll 监听标识与生命周期](https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c)
 - [Linux 打开文件描述锁](https://github.com/torvalds/linux/blob/v6.12/fs/locks.c)
 - [旧版 VFS 向量读取](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c)

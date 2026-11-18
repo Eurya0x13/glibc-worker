@@ -65,11 +65,11 @@ All routed packets preserve the Guest sender's PID and real UID. Callback
 internals cannot alter a pthread caller's errno; successful process sends also
 retain it apart from a real handler's own changes. Thread signal zero probes the
 integration's live recipient without enqueuing a packet. Process signal zero,
-other PIDs, process groups, invalid
-numbers, NPTL's internal signals, `SIGKILL` and `SIGSTOP` retain native paths.
-The internal abort raise path remains native as well. Raw syscalls do not acquire
-Guest ownership tags. These are explicit boundaries, not a claim of complete
-process or signal virtualization.
+other PIDs, process groups, invalid numbers, NPTL's internal signals,
+`SIGKILL` and `SIGSTOP` retain native paths. The internal abort raise path
+remains native as well. The four shared [job-control signals](SIGNAL_WAITING.md#shared-linux-job-control)
+also use their native delivery paths. Kernel sends use the kernel recipient
+and process dispositions.
 
 For a still-valid joinable descriptor after kernel exit, modern
 `pthread_kill` keeps its upstream zero result and never invokes the hook.

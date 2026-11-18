@@ -411,12 +411,16 @@ The adapter copies complete Linux `signalfd_siginfo` records through the
 kernel and preserves queued values, `SI_TKILL`, `EFAULT` and partial byte
 counts. It probes the running kernel to select legacy per-vector or scatter
 `readv` behavior. The owning libc supplies the public read cancellation
-point. Both read paths honor `SA_RESTART`.
+point. Reads honor the `SA_RESTART` flag selected at delivery. Replacing the
+registration while a handler is running cannot retroactively change the wait's
+restart decision. A helper wake without a delivered packet causes a rescan.
+Readiness waits report `EINTR` for a delivered handler, including a handler
+selected with `SA_RESTART`.
 
 Guest `fdopen`, `fread` and `fclose` use a GNU `FILE` with native
 buffering, error flags and descriptor ownership. The private
-`__read_nocancel` entry uses the same logical dequeue with a non-cancellable
-futex wait. `__close_nocancel` and `__close_nocancel_nostatus` retire the
+`__read_nocancel` entry uses the same dequeue with a non-cancellable wait.
+`__close_nocancel` and `__close_nocancel_nostatus` retire the
 same description and notify blocked readiness callers when the last alias
 closes. The no-status entry preserves `errno`. The dynamic loader uses its
 own native read and close routines during bootstrap.
@@ -440,16 +444,49 @@ finishes or unwinds. Poll and select resolve numbers again after a concurrent
 close or replacement. A reused number cannot inherit readiness from the old
 signal description.
 
+An application can pass the descriptor to Host code using the bootstrap
+interposer. The calling native TID sees its own directed Guest queue when it
+has a Guest recipient, together with the shared Guest queue. A Host thread
+without a Guest recipient can consume the shared queue. Host callers can
+update the mask on an alias, read and wait for readiness, or close the
+descriptor. The Host [stdio backend](STDIO.md) supplies native `FILE`
+support when enabled. Close or replace the last application alias and finish
+outstanding I/O before shutting down the runtime.
+
+The matching GNU libc's `syscall(2)` entry also handles Guest signalfd
+creation, mask updates, read, readiness, close and descriptor replacement.
+These calls retain the non-cancellable syscall ABI and the Linux timeout
+copyout for `ppoll`, `pselect6` and `select` on architectures that provide it.
+Inline machine instructions enter the Linux kernel directly and see kernel
+queues. Host use of Guest descriptors goes through the public libc adapters.
+
+### Shared Linux job control
+
+`SIGTSTP`, `SIGTTIN`, `SIGTTOU` and `SIGCONT` use native job control.
+Host owns their single process-wide dispositions. Guest registration returns
+`EBUSY`. Guest sends use Linux delivery, including stop/resume, pending-stop
+flush on `SIGCONT` and the orphaned-group rule. The executing thread applies
+its domain's physical mask for these four signals.
+
+A Guest descriptor can include both logical signals and these four native
+signals. The runtime tests a nonblocking kernel signalfd alongside the
+logical queue. The calling recipient selects directed Guest packets first,
+then shared Guest packets and native job-control records. Linux selects
+within its own queue. `sigpending` includes blocked native job-control
+signals, and consuming waits can include them alongside Guest signals.
+
 Installed worker and adopted-carrier fixtures cover mixed readiness, independent
 recipients, nested epoll, concurrent close, timeouts, masks, cancellation and
 native jump cleanup. The same tests cover buffered stream reads, nonblocking
 stream errors, deferred cancellation during a no-cancel read and wakeups
-after private close. This contract covers calls through the owning GNU libc
-on a registered Guest thread. Raw syscall entry and Host access to Guest
-signalfd remain compatibility work.
+after private close. The installed SDK fixtures add Host descriptor access,
+the owning GNU syscall entry, restart across registration changes and three
+actual kernel job stops observed by a supervisor. The checks run on desktop
+Linux and Android ARM64.
 
 - [GNU FILE read and close paths](https://github.com/bminor/glibc/blob/glibc-2.42/libio/fileops.c)
 - [Linux signalfd selection and mask updates](https://github.com/torvalds/linux/blob/v6.12/fs/signalfd.c)
+- [Linux job control and stop/continue queue selection](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c)
 - [Linux eventpoll watch keys and lifetime](https://github.com/torvalds/linux/blob/v6.12/fs/eventpoll.c)
 - [Linux OFD locks](https://github.com/torvalds/linux/blob/v6.12/fs/locks.c)
 - [Legacy VFS vector reads](https://github.com/torvalds/linux/blob/v5.4/fs/read_write.c)

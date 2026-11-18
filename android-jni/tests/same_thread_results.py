@@ -32,7 +32,6 @@ SUITES = [
     "jvm-jni/build/tests/signal-profile-android",
 ]
 REMAINING = [
-    "Guest signalfd raw syscall I/O and Host access, job control and remaining I/O interruption semantics",
     "Continuation lifetimes beyond live signal scopes and additional Guest JNI targets",
     "Reviewed live VM/ART quiescence, VM signal protocols and late integration acceptance",
 ]

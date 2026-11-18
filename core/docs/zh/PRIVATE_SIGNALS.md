@@ -61,6 +61,21 @@ Android 后加载接入还必须在 [信号 profile](../../../jvm-jni/docs/zh/AD
 位置在存在 ART 时保留已审阅的前端。已安装 JNI 测试在选定 VM 已运行时
 执行 Bionic 注册，随后核对内核路由仍然完整。
 
-这不等于拦截任意私有系统调用。GNU Host NPTL 对收养载体的取消还需要
-独立生命周期协调，Bionic 路径不验证该语义。原生注册测试也不证明活跃
-ART 接收者静默或通用已保存 Guest 续体恢复。
+## GNU Host 生命周期
+
+同线程引导期间，路由器核对内核中的 GNU Host `SIGSETXID` 处置由 Host libc
+提供，保留其标志与 restorer，并以原有 Host TCB 执行处理器。即使 Host
+pthread 正在执行 Guest 代码，凭据广播也能得到该线程的确认。运行期间可校验
+路由，关闭时精确恢复内核处置。每套 libc 的凭据广播覆盖各自登记的 pthread。
+修改两个线程注册表所涵盖的进程凭据超出运行时契约。
+
+信号 32 由原有 GNU Host libc 处理。载体安装 Guest TLS 时屏蔽该信号。
+可能被取消的 GNU 原生调用者需要在桥接作用域内禁用 Host 取消，并在退出作用域后
+恢复原先状态。原生回归验证了真实 GNU Host pthread 的取消和 `SIGEV_THREAD`
+计时器，以及两个载体执行 Guest 时对原有 GID 的广播。回归在载体禁用取消时
+提交取消请求，并在其退出桥接后检查清理函数使用了原有 Host TCB。恢复内核
+处置后再次运行原生操作。原生强制展开跨越挂起的 JNI 或 VM 帧超出契约。
+
+私有入口定义见
+[GNU 取消实现](https://github.com/bminor/glibc/blob/glibc-2.42/nptl/pthread_cancel.c)
+和 [GNU 凭据广播实现](https://github.com/bminor/glibc/blob/glibc-2.42/nptl/nptl_setxid.c)。

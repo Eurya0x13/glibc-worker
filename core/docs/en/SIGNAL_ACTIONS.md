@@ -57,11 +57,11 @@ path rather than inventing an application delivery.
 
 ## Integration and validation
 
-The opt-in JNI Guest uses action snapshots for its six synchronous fault
-dispositions. Initializing with a null target registry supports this case
-without logical asynchronous queues. Public asynchronous Guest service wiring,
-kernel stop/continue job-control effects and general saved-frame recovery remain
-unfinished; this table does not establish their compatibility.
+The installed JNI Guest uses action snapshots for its six synchronous fault
+dispositions and the independent asynchronous service. Initializing with a
+null target registry provides the synchronous fault interface. The installed
+service keeps Linux stop/continue actions on the shared native
+[job-control path](SIGNAL_WAITING.md#shared-linux-job-control).
 
 `core/tests/signal_actions.c` covers snapshot replacement, aliased registration
 arguments, one-shot races, ignore flush, quota recovery, reservations, revision
@@ -74,5 +74,5 @@ through `core/tests/guest_async.py` on Linux and Android ARM64.
 
 The filtered send also cancels opposing pending stop/continue signals across
 all queues before ignore filtering, matching Linux generation-time ordering.
-Native controls verify both directions. Kernel process-stop and process-resume
-effects are separate unfinished integration obligations.
+Native controls verify both directions. The installed service delegates
+process stop and resume, including native pending-queue updates, to Linux.

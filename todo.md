@@ -88,14 +88,15 @@ nine Guest aliases have installed JNI recovery coverage on both platforms.
   nested epoll watches. Guest streams also use the logical queue through
   GNU libc's private no-cancel read and close entrypoints.
   See [Guest signal descriptors](core/docs/en/SIGNAL_WAITING.md#guest-signalfd).
-  Complete raw syscall descriptor access, use of Guest descriptors by Host,
-  job control and remaining kernel restart/EINTR semantics when the logical
-  action changes or a notification has no deliverable Guest packet.
+  The matching GNU syscall entry and the Host libc interposer also support
+  Guest descriptors. Installed tests cover native job stops and resume,
+  shared masks, and restart/EINTR with changed registration or empty wakes.
   [Private NPTL isolation](core/docs/en/PRIVATE_SIGNALS.md) separates GNU's
   cancellation/timer and credential channels from Bionic's private signals;
   Bionic bootstrap routing and reviewed late data-import routing now cover
-  real private registrations/entry. GNU Host cancellation and credential
-  protocols still require their own lifecycle validation.
+  real private registrations/entry. Native GNU Host tests cover cancellation
+  and timers, an unchanged-GID broadcast during Guest execution, and restored
+  kernel dispositions after shutdown.
   Real GNU hardware-fault entry now tail-transfers to its owning handler, with
   stack-switch unwind information and installed JNI/native-only cancellation
   and pthread-exit controls. This does not enable adopted-carrier cancellation.
