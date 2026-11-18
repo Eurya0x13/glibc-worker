@@ -27,6 +27,20 @@ Legacy single-DSO integration consumes `libglibc_bridge.so`, GNU service, helper
 
 Real VM smoke/coverage belongs to [jvm-jni](../../jvm-jni/docs/en/README.md). Pojav integration is outside the core projects.
 
+## GitHub Actions
+
+[CI](../../.github/workflows/ci.yml) runs for pushes and pull requests to
+`main` and can be dispatched manually. The Linux test job runs the core and
+loader CTest suites and uploads their JUnit reports. The x86_64 build also runs
+the same-thread JNI fixture in a desktop JDK17 and uploads its reports.
+
+The Android build jobs cross-compile arm64-v8a and x86_64 and link relocated
+C/C++ SDK consumers. Each `glibc-worker-android-<ABI>` artifact contains a
+checked archive with the four installed CMake SDKs under `prefixes/` and the
+legacy runtime package under `compat/`. The archive has a separate SHA256 file
+and source commit record. The runtime carries its own build properties and
+checksums. Download these artifacts from the corresponding workflow run.
+
 ## Cleaning generated caches
 
 Preview obsolete glibc source/object caches, then apply the same policy:

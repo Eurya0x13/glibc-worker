@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang libclang-rt-dev
+      - name: Check documentation
+        run: python3 scripts/check-docs.py
+      - name: Build native test targets
+        id: native-build
+        run: |
+          cmake -S core -B core/build/ci -DBUILD_TESTING=ON
+          cmake --build core/build/ci
+          cmake --install core/build/ci --prefix "$PWD/core/build/ci/install"
+
+          cmake -S bionic-dlopen -B bionic-dlopen/build/ci -DBUILD_TESTING=ON \
+            -DCMAKE_PREFIX_PATH="$PWD/core/build/ci/install"
+          cmake --build bionic-dlopen/build/ci
+      - name: Run core tests
+        run: |
+          ctest --test-dir core/build/ci --no-tests=error --output-on-failure \
+            --output-junit "$PWD/core/build/ci/ctest.xml"
+      - name: Run loader tests
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: |
+          ctest --test-dir bionic-dlopen/build/ci --no-tests=error --output-on-failure \
+            --output-junit "$PWD/bionic-dlopen/build/ci/ctest.xml"
+      - name: Upload CTest reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-test-results
+          path: |
+            core/build/ci/ctest.xml
+            core/build/ci/Testing/Temporary/LastTest.log
+            bionic-dlopen/build/ci/ctest.xml
+            bionic-dlopen/build/ci/Testing/Temporary/LastTest.log
+
+  build:
+    name: Build Android (${{ matrix.abi }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    env:
+      GW_ABI: ${{ matrix.abi }}
+      ANDROID_NDK_VERSION: '30.0.16138531'
+      GLIBC_BUILD_JOBS: '4'
+      GW_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install GNU build tools
+        run: |
+          packages=(bison gawk texinfo)
+          if [[ "$GW_ABI" == arm64-v8a ]]; then
+            packages+=(gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross)
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+      - name: Install Android NDK
+        run: |
+          ndk="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          if [[ ! -f "$ndk/source.properties" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+              "ndk;$ANDROID_NDK_VERSION"
+          fi
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+      - name: Install Zig 0.16.0
+        run: |
+          archive=zig-x86_64-linux-0.16.0.tar.xz
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://ziglang.org/download/0.16.0/$archive" -o "$RUNNER_TEMP/$archive"
+          sha=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+          echo "$sha  $RUNNER_TEMP/$archive" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Build Android SDK and runtime
+        run: scripts/build-runtime.sh --module jvm-jni
+      - name: Test same-thread JNI on Linux
+        if: matrix.abi == 'x86_64'
+        run: |
+          manifest="jvm-jni/build/$GW_ABI/compat/domain-runtime.json"
+          key=$(python3 - "$manifest" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as manifest:
+              print(json.load(manifest)["runtime"]["key"])
+          PY
+          )
+
+          python3 android-jni/tests/same-thread/build.py --abi "$GW_ABI" \
+            --ndk "$ANDROID_NDK_HOME" --jdk "$JAVA_HOME" \
+            --runtime "core/build/domain-runtime/$GW_ABI/$key"
+          python3 android-jni/tests/same-thread/run.py \
+            --build "android-jni/build/tests/same-thread/$GW_ABI" --jdk "$JAVA_HOME"
+      - name: Check relocated SDK and package outputs
+        run: |
+          jvm_build="$PWD/jvm-jni/build/$GW_ABI"
+          python3 jvm-jni/tests/scripts/check-sdk.py --abi "$GW_ABI" --ndk "$ANDROID_NDK_HOME" \
+            --core-prefix "core/build/$GW_ABI/install" \
+            --dlopen-prefix "bionic-dlopen/build/$GW_ABI/install" \
+            --android-jni-prefix "android-jni/build/$GW_ABI/install" \
+            --jvm-jni-prefix "$jvm_build/install" --output "$jvm_build/ci-sdk"
+          (cd "$jvm_build/compat" && sha256sum --check SHA256SUMS)
+
+          stage="$RUNNER_TEMP/glibc-worker-$GW_ABI"
+          archive="glibc-worker-android-$GW_ABI.tar.gz"
+          mkdir -p "$stage"
+          tar --exclude=compat/classes -czf "$stage/$archive" \
+            -C "$jvm_build/ci-sdk" prefixes -C "$jvm_build" compat
+          (cd "$stage" && sha256sum "$archive" > "$archive.sha256")
+          git rev-parse HEAD > "$stage/source-commit.txt"
+      - name: Upload SDK and runtime
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: glibc-worker-android-${{ matrix.abi }}
+          path: ${{ runner.temp }}/glibc-worker-${{ matrix.abi }}/
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload JNI test results
+        if: ${{ !cancelled() && matrix.abi == 'x86_64' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-jni-test-results
+          path: android-jni/build/tests/same-thread/x86_64/runs/
+          if-no-files-found: ignore
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-build-failure-${{ matrix.abi }}
+          path: |
+            core/build/domain-runtime/${{ matrix.abi }}/*/configure.log
+            core/build/domain-runtime/${{ matrix.abi }}/*/build.log
+            jvm-jni/build/${{ matrix.abi }}/ci-sdk/build.log
+          if-no-files-found: ignore

@@ -27,6 +27,18 @@ android-jni 的 Host 资源存储固定使用 Zig 0.16.0，构建机器必须提
 
 真实 VM 冒烟/覆盖入口归 [jvm-jni](../../jvm-jni/docs/zh/README.md)。Pojav 集成不属于任何核心项目。
 
+## GitHub Actions
+
+推送到 `main` 或向 `main` 发起拉取请求时会运行 [CI](../../.github/workflows/ci.yml)，
+也可以手动运行。Linux 测试任务执行 core 和 loader 的 CTest 套件并上传 JUnit 报告。
+x86_64 构建还会在桌面 JDK 17 上运行同线程 JNI 测试并上传结果。
+
+Android 构建任务交叉编译 arm64-v8a 和 x86_64，并验证 C/C++ 调用方能链接到迁移后的
+SDK。每个 `glibc-worker-android-<ABI>` 制品包含一份经过验证的归档，其中 `prefixes/`
+包含四个已安装的 CMake SDK，`compat/` 包含现有宿主所需的兼容运行时。制品附带归档的
+SHA256 校验文件和源码提交记录，运行时带有自己的构建属性和校验文件。可从对应的工作流
+运行页面下载。
+
 ## 清理生成缓存
 
 先预览过期的 glibc 源码和对象缓存，再按相同策略执行清理：
