@@ -16,6 +16,12 @@ The start configuration is versioned and explicit:
 - `signals`: the immutable ownership contract matching the already prepared
   Host signal router.
 
+The worker backend is in maintenance mode. Embedders can select
+`GW_EXECUTION_WORKER` explicitly for compatibility and diagnostic comparisons.
+Worker continues to receive correctness and compatibility fixes and retains SDK
+regression coverage. New execution features and performance work target the
+default same-thread backend.
+
 The selected VM comes from the supplied real `JNIEnv`. android-jni neither
 creates a VM nor chooses an ART/HotSpot profile. An embedder prepares the signal
 chain before admitting application calls; any pinned VM-specific late routing

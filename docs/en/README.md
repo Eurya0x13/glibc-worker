@@ -35,9 +35,10 @@ Downloads, source caches and outputs belong to each project's `vendor/`, `work/`
 ## Same-thread domains
 
 Core maintains context switching, adoption patches and signal routing. The
-`runtime_bridge.h` startup API in android-jni defaults to same-thread execution and
-offers an explicit worker backend. The experiment directories retain
-validation entrypoints and historical evidence. See
+`runtime_bridge.h` startup API in android-jni defaults to same-thread execution.
+Embedders can explicitly select the worker backend for compatibility. It is
+in maintenance mode. The experiment directories retain validation entrypoints
+and historical evidence. See
 [domain and signal boundaries](../../core/docs/en/DOMAINS.md) and
 [runtime integration](../../android-jni/docs/en/RUNTIME.md).
 

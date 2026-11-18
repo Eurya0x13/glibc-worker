@@ -11,6 +11,10 @@
 - bridge：已有映像策略、JNI flags 和可选已注册 VM adapter。
 - signals：与已准备 Host 信号路由器匹配的不可变所有权契约。
 
+worker 后端进入兼容性维护模式。接入方可显式选择 `GW_EXECUTION_WORKER`，
+用于兼容既有环境或诊断对照。worker 继续接受正确性和兼容性修复，并保留 SDK
+回归覆盖。新增执行能力和性能优化面向默认的同线程后端。
+
 目标 VM 由传入的真实 JNIEnv 确定。android-jni 不创建 VM，也不选择 ART/HotSpot profile。宿主在允许应用调用前准备信号链；固定 VM 的晚接入由 jvm-jni 提供，不得传入另一个 VM 的 JNIEnv。
 
 start 在桥初始化前检查 `signal_router_guest_ready()`。已有自定义 Host 动作未经显式接管时

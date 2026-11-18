@@ -8,6 +8,7 @@
 
 enum gw_execution_backend {
   GW_EXECUTION_SAME_THREAD = 0,
+  /* Compatibility backend in maintenance mode. */
   GW_EXECUTION_WORKER = 1
 };
 

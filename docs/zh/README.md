@@ -35,7 +35,8 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 ## 同线程域
 
 core 维护同线程域切换、收养补丁和信号路由。android-jni 的 `runtime_bridge.h` 启动接口默认
-同线程，可显式选择 worker。实验目录保留验证入口和历史证据。参见
+同线程。worker 进入兼容性维护模式，接入方仍可显式选择该后端。实验目录保留验证入口和
+历史证据。参见
 [core 域机制与信号边界](../../core/docs/zh/DOMAINS.md) 和
 [JNI runtime 接入](../../android-jni/docs/zh/RUNTIME.md)。
 
