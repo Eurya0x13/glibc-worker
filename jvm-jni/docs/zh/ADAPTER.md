@@ -114,7 +114,7 @@ VM。回收用例安装已审阅的 profile，在 JRE17 运行时释放一代已
 Android ART 接收线程。传入 `--core-prefix` 和 `--jdk`，ARM64 另需
 `--serial`、`--ndk` 和 `--d8`。用例覆盖接收线程屏蔽回执、旧回调暂停
 期间释放映射、正常返回及再次投递。Shell 通过 `dalvikvm64` 保留 ART 自己安装
-的信号链。[应用内夹具](../../experiments/same-thread/LATE_SIGNALS.md) 在 VM 启动后
+的信号链。[应用内夹具](LATE_SIGNALS.md) 在 VM 启动后
 安装已审阅的 ART 和 Bionic 导入适配，通过 ART 公开入口替换一代普通掩码注册，
 在应用 ART 主线程的旧回调暂停时释放旧映射，再验证同一线程返回并收到新注册。
 

@@ -44,8 +44,8 @@ Use identical filenames and reciprocal language navigation. Project-root README
 files contain the full English version, with links to both languages; keep them
 in sync with `docs/en/README.md`. Update both versions in the same change,
 preserving API names, commands, units, error semantics and validation limits.
-Historical experiment evidence remains in its original language and location.
-Do not translate or edit raw results as if they were new test runs.
+Keep reviewed historical evidence under the owning project's `tests/results/`.
+Preserve the original language and raw file contents.
 
 Run `python3 scripts/check-docs.py` from the workspace root to check paired
 filenames, language navigation, local links/anchors and executable examples.

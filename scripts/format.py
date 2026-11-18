@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXTENSIONS = {".c", ".h", ".java", ".py", ".sh", ".zig"}
-# Hand-maintained C fragments injected into the experimental runtime. Generated
+# Hand-maintained C fragments injected into the patched Guest runtime. Generated
 # JNI .inc files are intentionally absent: their generators own their format.
 C_FRAGMENTS = {
     "core/src/runtime/adopt-nptl.inc",

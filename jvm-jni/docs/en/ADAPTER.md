@@ -124,7 +124,7 @@ ARM64 variant also takes `--serial`, `--ndk` and `--d8`. It verifies a
 blocked recipient, mapping release while the old callback is parked,
 successful return and subsequent delivery. The shell ART run uses
 `dalvikvm64` and keeps ART's installed chain in place. The
-[inline application fixture](../../experiments/same-thread/LATE_SIGNALS.md)
+[inline application fixture](LATE_SIGNALS.md)
 additionally installs the reviewed ART and Bionic imports after VM startup.
 It replaces an ordinary registration through ART's public entrypoints and
 releases the old mapping while the application's main ART thread runs its

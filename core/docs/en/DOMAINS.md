@@ -27,9 +27,9 @@ or with another value is rejected. This is capability negotiation, not a claim
 that any arbitrary GNU distribution can be embedded without validation.
 
 The maintained patch fragments live in `core/src/runtime/`; the recipe and
-its generated source/object trees remain owned by core. `experiments/` contains
-validation entrypoints and historical evidence, not the implementation used by
-the installed domain target.
+its generated source/object trees remain owned by core. Mechanism checks
+and the Android application fixture live under
+[`core/tests/same-thread/`](../../tests/same-thread/README.md).
 
 The adoption runtime uses glibc's `mmap` heap fallback. The process break is
 shared with Host even when the Guest's loader starts libc as its first

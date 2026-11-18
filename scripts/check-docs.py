@@ -85,6 +85,9 @@ def main():
                         errors.append(f"{path}: missing {sibling} navigation")
                 check_links(path, errors)
         check_links(base / "README.md", errors)
+        for directory in ("tests/same-thread", "tests/results/same-thread"):
+            for path in (base / directory).rglob("*.md"):
+                check_links(path, errors)
         if "README.md" in en and canonical_links(
             base / "README.md"
         ) != canonical_links(en["README.md"]):

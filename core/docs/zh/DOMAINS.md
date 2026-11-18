@@ -16,7 +16,8 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 
 制品发布到 `core/build/domain-runtime/<ABI>/<key>/`。清单绑定 ABI、源码/补丁输入及私有收养 ABI。服务允许 JNI 调用前检查 `__gw_domain_capabilities`，缺少该入口或值不匹配的 libc 会被拒绝。这是能力协商，不表示任意 GNU 发行版都能未经验证嵌入。
 
-维护的补丁片段位于 `core/src/runtime/`；构建配方及生成的源码/对象目录也归 core。`experiments/` 保留验证入口与历史证据，不再作为已安装域目标的实现来源。
+维护的补丁片段位于 `core/src/runtime/`，构建配方及生成的源码与对象目录也归 core。
+机制回归和 Android 应用夹具位于 [`core/tests/same-thread/`](../../tests/same-thread/README.md)。
 
 收养版运行时使用 glibc 的 `mmap` 堆回退路径。Guest 装载器将自己的 libc 作为首个
 实例启动时，仍与 Host 共用进程的 break。Guest libc 保留 `sbrk(0)` 查询，修改 break

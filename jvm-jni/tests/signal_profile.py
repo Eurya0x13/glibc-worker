@@ -56,7 +56,7 @@ compiler = (
 )
 if not compiler.is_file():
     parser.error("The selected NDK has no Linux ARM64 API29 compiler")
-source = project / "experiments/same-thread"
+source = project / "tests/same-thread"
 harness = project / "tests/native/harness"
 files = [
     source / "late-host.c",

@@ -213,7 +213,7 @@ restores one `getcontext` snapshot twice with `setcontext`. The subsequent
 ordinary calls and carrier teardown still run. This fixture preserves its Host
 frames cooperatively; it does not provide asynchronous Guest signal delivery,
 abandon a JNI/VM callback, or implement continuation lifetime management.
-Run `core/experiments/same-thread/run.py --adopt --signals` with a matching
+Run `core/tests/same-thread/run.py --adopt --signals` with a matching
 adoption runtime; Android validation additionally requires `--abi arm64-v8a`,
 `--ndk`, and `--serial`.
 

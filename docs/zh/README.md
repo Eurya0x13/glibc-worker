@@ -35,9 +35,13 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 ## 同线程域
 
 core 维护同线程域切换、收养补丁和信号路由。android-jni 的 `runtime_bridge.h` 启动接口默认
-同线程。worker 进入兼容性维护模式，接入方仍可显式选择该后端。实验目录保留验证入口和
-历史证据。参见
+同线程。worker 进入兼容性维护模式，接入方仍可显式选择该后端。各项目的同线程夹具、
+生成结果和已复核历史记录分别位于 `tests/same-thread/`、`build/tests/` 和
+`tests/results/`。参见
 [core 域机制与信号边界](../../core/docs/zh/DOMAINS.md) 和
 [JNI runtime 接入](../../android-jni/docs/zh/RUNTIME.md)。
 
-[测量方法](../../jvm-jni/experiments/same-thread/PERFORMANCE.md) 与各实验 `results/` 下的历史原始证据分开维护。数组复制与分配器退页的开关对照见 [1–2 MiB 缓存验证](../../android-jni/experiments/same-thread/results/array-cache/README.md)；契约和调用者边界见 [数组副本缓存](../../android-jni/docs/zh/ARRAY_COPY_CACHE.md)。结果适用于已验证的固定 ART、JRE 和模组制品。
+[测量指南](../../jvm-jni/docs/zh/PERFORMANCE.md) 说明固定工作负载和计算方法。
+[1–2 MiB 缓存验证](../../android-jni/tests/results/same-thread/array-cache/README.md)
+覆盖数组复制与分配器退页。[数组副本契约](../../android-jni/docs/zh/ARRAY_COPY_CACHE.md)
+说明调用者义务。结果适用于已验证的固定 ART、JRE 和模组制品。

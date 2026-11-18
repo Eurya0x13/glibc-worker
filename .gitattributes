@@ -9,5 +9,4 @@
 **/third_party/** -whitespace
 
 # Captured VM output is evidence; preserve its original spacing and digest.
-**/experiments/same-thread/results/*.txt -whitespace
-**/experiments/same-thread/results/**/*.txt -whitespace
+**/tests/results/same-thread/**/*.txt -whitespace

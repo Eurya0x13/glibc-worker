@@ -89,12 +89,13 @@ struct host_signal_anchor {
  * returning to its kernel frame or retiring it through native recovery. */
 static _Thread_local struct host_signal_anchor *host_anchor;
 static _Atomic unsigned deferred_recipients;
-static _Atomic unsigned independent_entries;
 extern int gw_signal_selection_interrupt(void *, void *, uint64_t *)
     __attribute__((weak));
 extern int gw_signal_selection_hidden(void *, uint64_t *) __attribute__((weak));
 
 #ifdef GW_DOMAIN_CHAIN
+static _Atomic unsigned independent_entries;
+
 struct routed_guest {
   struct routed_guest *previous;
   struct signal_slot *slot;

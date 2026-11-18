@@ -54,7 +54,7 @@ core 收养测试另外验证受控的 Guest 目标恢复：Host 使用独立保
 并对同一个 `getcontext` 快照调用两次 `setcontext`；随后还要完成普通调用和载体清理。
 这个测试以协作方式保留 Host 帧，尚未实现 Guest 异步信号投递、放弃 JNI/VM 回调或
 continuation 生命周期管理。使用匹配的收养 runtime 运行
-`core/experiments/same-thread/run.py --adopt --signals`；Android 验证还需指定
+`core/tests/same-thread/run.py --adopt --signals`；Android 验证还需指定
 `--abi arm64-v8a`、`--ndk` 和 `--serial`。
 
 普通 native 调用接入在桥资源获取/释放、命令发布及 TP/栈切换期间屏蔽可捕获信号。

@@ -37,9 +37,15 @@ Downloads, source caches and outputs belong to each project's `vendor/`, `work/`
 Core maintains context switching, adoption patches and signal routing. The
 `runtime_bridge.h` startup API in android-jni defaults to same-thread execution.
 Embedders can explicitly select the worker backend for compatibility. It is
-in maintenance mode. The experiment directories retain validation entrypoints
-and historical evidence. See
+in maintenance mode. Each project keeps its same-thread fixtures under
+`tests/same-thread/`, generated outputs under `build/tests/`, and reviewed
+historical captures under `tests/results/`. See
 [domain and signal boundaries](core/docs/en/DOMAINS.md) and
 [runtime integration](android-jni/docs/en/RUNTIME.md).
 
-The [measurement method](jvm-jni/experiments/same-thread/PERFORMANCE.md) is separate from historical raw evidence under experiment `results/` directories. Controlled array-copy/allocator-page-return comparisons are in the [1–2 MiB cache results](android-jni/experiments/same-thread/results/array-cache/README.md); caller obligations are in the [array-copy contract](android-jni/docs/en/ARRAY_COPY_CACHE.md). Results apply to the pinned ART, JRE and mod artifacts tested.
+The [measurement guide](jvm-jni/docs/en/PERFORMANCE.md) describes the fixed
+workloads and calculation methods. The
+[1–2 MiB cache results](android-jni/tests/results/same-thread/array-cache/README.md)
+cover array copying and allocator page return. The
+[array-copy contract](android-jni/docs/en/ARRAY_COPY_CACHE.md) describes caller
+obligations. Results apply to the pinned ART, JRE and mod artifacts tested.

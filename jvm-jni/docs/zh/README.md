@@ -46,4 +46,4 @@ jvm-jni/tests/coverage/run.sh --device SERIAL
 
 ## 同线程信号接入
 
-维护的信号接入位于 `src/native/signal_profile.c`，公开头为 `signal_profile.h`。配置 `GW_SIGNAL_PROFILE_HEADER` 选择经过审阅的、固定 VM/ART 制品 profile；组合构建透传同名环境变量。不配置时安装函数明确返回 `ENOTSUP`。该部分不检测任意 JRE 版本或推导偏移；android-jni 不依赖这些 JVM 私有接口。接入前后顺序及适用边界见 [晚加载信号链](../../experiments/same-thread/LATE_SIGNALS.md) 和 [core 信号规则](../../../core/docs/zh/DOMAINS.md)。
+维护的信号接入位于 `src/native/signal_profile.c`，公开头为 `signal_profile.h`。配置 `GW_SIGNAL_PROFILE_HEADER` 选择经过审阅的、固定 VM/ART 制品 profile；组合构建透传同名环境变量。不配置时安装函数明确返回 `ENOTSUP`。该部分不检测任意 JRE 版本或推导偏移；android-jni 不依赖这些 JVM 私有接口。接入前后顺序及适用边界见 [晚加载信号链](LATE_SIGNALS.md) 和 [core 信号规则](../../../core/docs/zh/DOMAINS.md)。

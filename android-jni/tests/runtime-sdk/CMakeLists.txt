@@ -29,11 +29,11 @@ if(ANDROID)
   endif()
   configure_file(${GW_VM_STARTUP_PROFILE} ${CMAKE_CURRENT_BINARY_DIR}/jre-layout.h COPYONLY)
   target_sources(runtime_sdk PRIVATE
-    ${GW_VM_STARTUP_ROOT}/experiments/same-thread/vm-start.c
+    ${GW_VM_STARTUP_ROOT}/tests/same-thread/vm-start.c
     ${GW_VM_STARTUP_ROOT}/tests/native/harness/jre_layout_spike.c
     ${GW_VM_STARTUP_ROOT}/tests/native/harness/jre_exec_compat.c)
   target_include_directories(runtime_sdk PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
-    ${GW_VM_STARTUP_ROOT}/experiments/same-thread
+    ${GW_VM_STARTUP_ROOT}/tests/same-thread
     ${GW_VM_STARTUP_ROOT}/tests/native/harness)
   target_compile_options(runtime_sdk PRIVATE -fno-emulated-tls)
 endif()
