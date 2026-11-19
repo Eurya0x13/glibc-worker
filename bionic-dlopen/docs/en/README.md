@@ -35,7 +35,7 @@ Classifier bounds are 128 program headers, 512 dynamic entries, 256-byte names i
 
 `execution_scopes.c` checks ancestor/recursive scopes, thread ownership and cross-thread close; `close_waits.c` checks two/three-thread close cycles and unborrowed targets; `loader_quarantine.c` covers four quarantine cases. See [execution scopes](EXECUTION_SCOPES.md) for execution borrows versus transferable lifetime pins.
 
-`tests/elf_route.py` checks 49 real Android/GNU ELF, unmarked, malformed and resource-limit cases under ASan/UBSan, including classification and error codes. It can consume upper-layer test DSOs. C tests also ensure AUTO errors neither return PASS nor call Guest transport. jvm-jni owns real dual-libc lifecycle integration.
+`tests/elf_route.py` checks real Android/GNU ELF, exact SONAME matching, unmarked images, malformed metadata and resource limits under ASan/UBSan. It can consume upper-layer test DSOs. C tests also ensure AUTO errors neither return PASS nor call Guest transport. jvm-jni owns real dual-libc lifecycle integration.
 
 The backend is configured once per process. STOPPED and quarantine cannot be reconfigured. Stop checks/stops the loading backend; it does not cancel calls or destroy GNU runtime. Embedders must stop producers, return borrows and close modules. Close waits and transport execution have no universal deadline. Watchdog quarantine does not prove published calls stopped accessing resources; stacks, buffers and images must remain until safe. The embedder owns process disposal.
 

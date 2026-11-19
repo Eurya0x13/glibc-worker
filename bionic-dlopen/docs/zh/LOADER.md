@@ -14,7 +14,13 @@ transport 的 load/close/find/current-module 不规定 JavaVM、JNIEnv 或 JNI �
 
 通过 `gw_dlopen_query(GW_DLOPEN_ABI_V1, sizeof(struct gw_dlopen_api_v1))` 获取函数表，检查 NULL、版本和大小。open 返回带代数的逻辑句柄，不能转换为系统 dlopen 指针。find 的返回入口必须满足调用者与 transport 约定的 ABI。
 
-AUTO 根据 ELF GNU 标记分类；显式 GUEST 需要调用者确认 ABI。GW_PASS 允许原平台继续；GW_ERROR 表示 Guest 操作失败，不得用同一 GNU 文件盲目尝试 bionic loader。已经退休的 Guest tag 仍由 owns_handle 识别，避免错误 fallback。
+AUTO 在 `DT_NEEDED` 精确匹配随包发布的 glibc SONAME，或 ELF 元数据要求 `GLIBC_*`
+符号版本时，将映像交给 Guest。随包发布的名称包括 `libc.so.6`、`libdl.so.2`、
+`libm.so.6`、`libpthread.so.0`、`librt.so.1` 和目标架构的 GNU loader SONAME。
+仅依赖 `libdl.so.2` 即可分流到 Guest；单独的 `libdl.so` 不构成 GNU 标记。
+
+显式 GUEST 需要调用者确认 ABI。GW_PASS 允许原平台继续；GW_ERROR 不得交给 bionic
+重试。已经退休的 Guest tag 仍由 owns_handle 识别，避免错误 fallback。
 
 同一设备/inode 不能重复活跃打开。安全完成的加载失败回滚模块状态；代数让旧句柄在槽位重用后仍被拒绝。固定槽容量是 64，不是无限运行时命名空间。
 

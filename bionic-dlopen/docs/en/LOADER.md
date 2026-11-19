@@ -14,7 +14,15 @@ Transport load/close/find/current-module does not prescribe JavaVM, JNIEnv or JN
 
 Query `gw_dlopen_query(GW_DLOPEN_ABI_V1, sizeof(struct gw_dlopen_api_v1))`, checking NULL/version/size. Open returns a generation-tagged logical handle, never a system dlopen pointer. Find returns an entry satisfying the caller/transport ABI contract.
 
-AUTO classifies GNU ELF markers; explicit GUEST needs caller-confirmed ABI. GW_PASS permits platform handling. GW_ERROR must not trigger a blind bionic retry of the GNU file. owns_handle also recognizes retired Guest tags to prevent wrong fallback.
+AUTO routes to Guest when a `DT_NEEDED` entry exactly matches a bundled glibc
+SONAME or when ELF metadata requires a `GLIBC_*` symbol version. The bundled names
+are `libc.so.6`, `libdl.so.2`, `libm.so.6`, `libpthread.so.0`, `librt.so.1`, and
+the target GNU loader's SONAME. A sole dependency on `libdl.so.2` is sufficient;
+`libdl.so` alone is not a GNU marker.
+
+Explicit GUEST needs caller-confirmed ABI. GW_PASS permits platform handling.
+GW_ERROR must not trigger a bionic retry. owns_handle also recognizes retired
+Guest tags to prevent wrong fallback.
 
 The same device/inode cannot have duplicate active opens. Safe load-failure rollback restores state; generations reject stale handles after reuse. Capacity is fixed at 64 modules, not an unlimited runtime namespace.
 

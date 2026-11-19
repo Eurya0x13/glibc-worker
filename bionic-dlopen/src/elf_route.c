@@ -190,8 +190,25 @@ static int read_dynamic(struct image *image, struct dynamic *dynamic) {
   return fail(image, GW_E_IMAGE, "ELF dynamic table has no terminator");
 }
 
-/* Marks the image GNU when any DT_NEEDED names libc.so.6 or the GNU loader
-   itself. Names are only compared, never resolved or loaded. */
+/* Match the complete SONAMEs shipped by the core domain runtime. The
+   unversioned bionic names, such as libdl.so, are not GNU markers. */
+static int is_glibc_soname(const char *name) {
+  static const char *const sonames[] = {
+      "libc.so.6",       "libdl.so.2", "libm.so.6",
+      "libpthread.so.0", "librt.so.1", GW_LOADER_NAME,
+  };
+
+  for (size_t i = 0; i < sizeof sonames / sizeof sonames[0]; i++) {
+    if (!strcmp(name, sonames[i])) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+/* Names are only compared, never resolved or loaded. Keep validating each
+   DT_NEEDED after a match so malformed metadata still fails classification. */
 static int scan_needed(struct image *image, const struct dynamic *dynamic,
                        int *glibc) {
   for (size_t j = 0; j < dynamic->count; j++) {
@@ -201,7 +218,7 @@ static int scan_needed(struct image *image, const struct dynamic *dynamic,
       if (!text_at(image, dynamic, entry->d_un.d_val, name)) {
         return 0;
       }
-      if (!strcmp(name, "libc.so.6") || !strcmp(name, GW_LOADER_NAME)) {
+      if (!*glibc && is_glibc_soname(name)) {
         *glibc = 1;
       }
     }

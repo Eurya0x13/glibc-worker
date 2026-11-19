@@ -25,7 +25,7 @@ a.libraries = a.libraries.resolve()
 a.core_include = a.core_include.resolve()
 root = Path(__file__).resolve().parents[1]
 os.chdir(root)
-work = root / "build/test-work/elf-route"
+work = root / "build/test-work/elf-route" / ABI
 work.mkdir(parents=True, exist_ok=True)
 (work / "probe.c").write_text(
     '#include "elf_route.h"\n#include <stdio.h>\n'
@@ -189,7 +189,40 @@ def metadata(needed=b"libother.so", version=None):
     return image
 
 
-case("synthetic-glibc-needed", metadata(b"libc.so.6"), 1, 0)
+arm_loader = "ld-linux-aarch64.so.1"
+x86_loader = "ld-linux-x86-64.so.2"
+loader, other_loader = (
+    (arm_loader, x86_loader) if ABI == "arm64-v8a" else (x86_loader, arm_loader)
+)
+for soname in (
+    "libc.so.6",
+    "libdl.so.2",
+    "libm.so.6",
+    "libpthread.so.0",
+    "librt.so.1",
+    loader,
+):
+    case(f"needed-guest-{soname}", metadata(soname.encode("ascii")), 1, 0)
+
+for name in (
+    "libc.so",
+    "libdl.so",
+    "libm.so",
+    "libpthread.so",
+    "librt.so",
+    "libdl.so.20",
+    "libdl.so.2.extra",
+    "./libdl.so.2",
+    "libgcc_s.so.1",
+    other_loader,
+):
+    case(
+        "needed-unmarked-" + name.replace("/", "_"),
+        metadata(name.encode("ascii")),
+        0,
+        0,
+    )
+
 case("synthetic-glibc-version", metadata(version=b"GLIBC_2.17"), 1, 0)
 case("synthetic-unmarked", metadata(), 0, 0)
 case("name-at-limit", metadata(b"x" * 255), 0, 0)
@@ -209,7 +242,7 @@ for name, offset, fmt, value, error in [
 ]:
     # Put a GNU marker before the malformed field: incomplete parsing must
     # still be an error, not a positive guess or an unmarked fallback.
-    image = metadata(b"libc.so.6", b"GLIBC_2.17")
+    image = metadata(b"libdl.so.2", b"GLIBC_2.17")
     if name == "no-dynamic-terminator":
         image = metadata()
     struct.pack_into("<" + fmt, image, offset, value)
