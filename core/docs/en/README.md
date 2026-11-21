@@ -16,7 +16,7 @@ cmake --install build
 ctest --test-dir build --output-on-failure
 ```
 
-Outputs stay in this project's `build/`. Select Android through the CMake NDK toolchain, `ANDROID_ABI` and `ANDROID_PLATFORM`; no JDK, JNI headers or other project's source is required. The `GlibcWorkerCore` package exports `glibc_worker::core`, `glibc_worker::domains` and opt-in `glibc_worker::signal_interpose`. See [same-thread domains](DOMAINS.md).
+Outputs stay in this project's `build/`. Select Android through the CMake NDK toolchain, `ANDROID_ABI` and `ANDROID_PLATFORM`; no JDK, JNI headers or other project's source is required. The `GlibcWorkerCore` package exports `glibc_worker::core`, `glibc_worker::domains` and opt-in [`glibc_worker::signal_bootstrap`](SIGNAL_BOOTSTRAP.md). See [same-thread domains](DOMAINS.md).
 
 `scripts/build-glibc.sh` builds matching GNU loader/libc artifacts; `scripts/build-ffi.sh /path/to/ndk-clang` builds Host/Guest libffi. These optional dependency tools do not add link dependencies to the base core library. Configuration and Termux patches belong to core. Downloads use `vendor/`, sources use `work/`, runtime artifacts use `build/glibc-runtime/<ABI>/`, and libffi uses `build/ffi-{android,linux}/<ABI>/`. Runtime packaging publishes matching loader, libc, libpthread, libm, librt and libdl; callers do not inspect glibc's internal build tree.
 

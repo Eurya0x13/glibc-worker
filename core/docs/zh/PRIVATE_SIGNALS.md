@@ -56,10 +56,8 @@ GNU 私有处理器直接在 GNU TLS 下进入，取消仍由所属展开实现�
 收养载体执行 GNU 代码时运行，原生 Bionic 处理器使用恢复后的 Host TLS。
 它们对普通 Guest 系统调用的中断保留原生 EINTR 语义。
 
-Android 后加载接入还必须在 [信号 profile](../../../jvm-jni/docs/zh/ADAPTER.md#signal-registration-integration)
-中提供经审阅的所属 libc 制品和两个 Bionic action 导入位置。这些数据
-位置在存在 ART 时保留已审阅的前端。已安装 JNI 测试在选定 VM 已运行时
-执行 Bionic 注册，随后核对内核路由仍然完整。
+已安装的 JNI 测试在所选 VM 运行期间执行 bionic 注册，随后核对内核路由。
+加载 VM 前完成 [Host 启动期信号路由](SIGNAL_BOOTSTRAP.md)。
 
 ## GNU Host 生命周期
 

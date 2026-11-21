@@ -1,12 +1,11 @@
 #define _GNU_SOURCE
 #include "domain_runtime.h"
 #include "vm-start.h"
-#ifdef GW_EXPERIMENT_LATE_SIGNAL
-#include "signal_profile.h"
+#include "signal_bootstrap.h"
 #ifdef __ANDROID__
-void domain_check_art_reclaim(void);
+#include "bootstrap-check.h"
 #endif
-#endif
+
 static pthread_barrier_t loaded, finished;
 static JavaVM *vm;
 static jclass bench_class;
@@ -133,18 +132,7 @@ static void *system_load_carrier(void *unused) {
 }
 #endif
 
-#ifdef GW_EXPERIMENT_LATE_SIGNAL
-int domain_run_existing_vm(JavaVM *existing_vm, JNIEnv *env, int argc,
-                           char **argv) {
-  vm = existing_vm;
-  int late_status = domain_late_signal_install(env);
-  if (late_status) {
-    fprintf(stderr, "LATE_SIGNAL_REJECT errno=%d\n", late_status);
-  }
-  REQUIRE(!late_status);
-#else
 int main(int argc, char **argv) {
-#endif
   REQUIRE(argc == 5);
   const char *mode = getenv("GW_DOMAIN_MODE");
   int selected = jni_domain_select(mode);
@@ -157,18 +145,19 @@ int main(int argc, char **argv) {
          mode ? mode : "default", session.domain ? "domain" : "worker");
   mode = session.domain ? "domain" : "worker";
   measuring = getenv("GW_BENCH") && !strcmp(getenv("GW_BENCH"), "1");
-#if defined(GW_EXPERIMENT_LATE_SIGNAL) && defined(__ANDROID__)
-  int check_art_reclaim = getenv("GW_INLINE_VM") && !measuring;
-  if (check_art_reclaim) {
-    REQUIRE(!domain_late_signal_reclaim_enable(47));
-  }
-#endif
   threads = getenv("GW_THREADS") ? atoi(getenv("GW_THREADS")) : 1;
   REQUIRE(threads > 0 && threads <= 64);
-#ifndef GW_EXPERIMENT_LATE_SIGNAL
-  REQUIRE(!signal_router_init());
+  REQUIRE(!gw_host_signal_bootstrap());
+#ifdef __ANDROID__
+  check_native_bootstrap("before-vm");
+#endif
   JNIEnv *env;
   REQUIRE(!domain_vm_start(&vm, &env, !measuring));
+#ifdef __ANDROID__
+  check_native_bootstrap("after-vm");
+  if (!measuring) {
+    check_bionic_reregistration();
+  }
 #endif
   module_path = argv[4];
   char *directory = strdup(module_path);
@@ -191,16 +180,13 @@ int main(int argc, char **argv) {
   int started = full_host_start(&session.shared, env, &config);
   int pending = exception(env);
   REQUIRE(started == JNI_OK && !pending);
-  session.reserved_signals = signal_router_reserved();
+  struct gw_signal_contract signals;
+  REQUIRE(!gw_host_signal_contract_init(&signals));
+  session.reserved_signals = signals.host_reserved;
   session.note_guest = signal_note_guest_thread;
   session.guest_thread = signal_guest_lifecycle;
   start_owner(argv);
   REQUIRE(full_host_ready() == JNI_OK);
-#if defined(GW_EXPERIMENT_LATE_SIGNAL) && defined(__ANDROID__)
-  if (check_art_reclaim) {
-    domain_check_art_reclaim();
-  }
-#endif
   loader = gw_loader_query(GW_LOADER_ABI_V1, sizeof *loader);
   REQUIRE(loader);
 #ifdef GW_EXPERIMENT_SYSTEM_LOAD
@@ -213,21 +199,22 @@ int main(int argc, char **argv) {
    * their idle bindings stay pinned until process disposal, never freed on a
    * foreign thread. No claim of full runtime reclamation is made. */
   REQUIRE(!atomic_load(&gw_host_bridge->errors));
+#ifdef __ANDROID__
+  check_native_bootstrap("after-guest-jni");
+#endif
+  if (!measuring && session.domain && getenv("GW_BOOTSTRAP_SIGNAL_PRESSURE")) {
+    extern _Atomic int domain_sr_guest_deliveries;
+    int sr = atomic_load(&domain_sr_deliveries);
+    int guest_sr = atomic_load(&domain_sr_guest_deliveries);
+
+    REQUIRE(guest_sr >= 3 && sr >= guest_sr);
+    printf("NATIVE_SIGNAL_DELIVERIES {\"sr\":%d,\"sr_guest\":%d}\n", sr,
+           guest_sr);
+  }
   REQUIRE(full_host_shutdown() == JNI_OK);
   REQUIRE(!owner_command(NULL, JNI_DOMAIN_STOP));
   REQUIRE((*vm)->DestroyJavaVM(vm) == JNI_OK);
-#ifdef GW_EXPERIMENT_LATE_SIGNAL
-  extern _Atomic int domain_sr_guest_deliveries;
-  REQUIRE(measuring || atomic_load(&domain_sr_deliveries) > 0);
-  REQUIRE(measuring || !session.domain ||
-          atomic_load(&domain_sr_guest_deliveries) > 0);
-  printf("LATE_SIGNAL_DELIVERIES {\"sr\":%d,\"sr_guest\":%d}\n",
-         atomic_load(&domain_sr_deliveries),
-         atomic_load(&domain_sr_guest_deliveries));
-  REQUIRE(!domain_late_signal_restore());
-#else
-  REQUIRE(!signal_router_restore());
-#endif
+  REQUIRE(!gw_host_signal_restore());
   printf(
       "SYSTEM_LOAD_LIFECYCLE "
       "{\"result\":\"PASS\",\"domains_created\":%d,\"domains_finished\":%d,"
@@ -288,14 +275,7 @@ int main(int argc, char **argv) {
   REQUIRE(full_host_shutdown() == JNI_OK);
   (*env)->DeleteGlobalRef(env, bench_class);
   REQUIRE((*vm)->DestroyJavaVM(vm) == JNI_OK);
-#ifdef GW_EXPERIMENT_LATE_SIGNAL
-  REQUIRE(measuring || atomic_load(&domain_sr_deliveries) > 0);
-  printf("LATE_SIGNAL_DELIVERIES {\"sr\":%d}\n",
-         atomic_load(&domain_sr_deliveries));
-  REQUIRE(!domain_late_signal_restore());
-#else
-  REQUIRE(!signal_router_restore());
-#endif
+  REQUIRE(!gw_host_signal_restore());
   printf(
       "JNI_DOMAIN_RESULT "
       "{\"result\":\"%s\",\"backend\":\"%s\",\"threads\":%d,\"benchmark\":%d,"

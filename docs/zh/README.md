@@ -36,6 +36,8 @@ GW_ABI=arm64-v8a scripts/build-runtime.sh --module jvm-jni
 
 ## 同线程域
 
+加载 JVM 前在原生主程序中完成[启动期信号路由](../../core/docs/zh/SIGNAL_BOOTSTRAP.md)。JVM 侧接入由启动器维护。
+
 core 维护同线程域切换、收养补丁和信号路由。android-jni 的 `runtime_bridge.h` 启动接口默认
 同线程。worker 进入兼容性维护模式，接入方仍可显式选择该后端。各项目的同线程夹具、
 生成结果和已复核历史记录分别位于 `tests/same-thread/`、`build/tests/` 和

@@ -242,7 +242,7 @@ JFR 必须记录该线程处于 Guest JNI 的 `jdk.NativeMethodSample`。随后 
 可核验 23 组选定桌面/Android 测试的输入散列，输出
 `android-jni/build/tests/same-thread-compatibility.json`。证据缺失、失败或过期均使检查失败。
 用 `evidence_current` 查看这个矩阵的结果。`full_compatibility: INCOMPLETE` 字段
-体现该报告的适用范围。另有同进程应用夹具覆盖已审阅的 ART 晚接入 profile 和在线注册回收。
-参见 [VM 适配验证](../../../jvm-jni/docs/zh/ADAPTER.md)。
+体现该报告的适用范围。另有 [System.load 应用夹具](../../../jvm-jni/docs/zh/SYSTEM_LOAD.md)
+验证应用 UID 下的启动期信号路由。
 
 输出位于 android-jni/build/tests/，由 -android、-nonlocal、-recovery 后缀区分。它们是生成证据，不能修改清单使过期制品看似匹配。

@@ -4,6 +4,7 @@ find_package(GlibcWorkerJvmJni CONFIG REQUIRED)
 add_executable(c_consumer main.c)
 add_executable(cxx_consumer main.cpp)
 foreach(t c_consumer cxx_consumer)
-  target_link_libraries(${t} PRIVATE glibc_worker::jvm_jni_static)
+  target_link_libraries(${t} PRIVATE
+    glibc_worker::signal_bootstrap glibc_worker::jvm_jni_static)
   target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
 endforeach()

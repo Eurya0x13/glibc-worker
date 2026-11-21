@@ -64,59 +64,12 @@ JNI 跳板必须知道完整方法描述符。当前私有适配器包含反射�
 
 OpenJDK 8–25 的装载接口可分为若干版本族，且维护分支存在参数回移植，见 [JRE 兼容性契约](JRE_COMPATIBILITY.md)。不能把固定旧制品的钩子直接套到其他 JRE。该项目没有宣称已实现通用 JRE 源码补丁或 ART 私有接口。
 
-<a id="signal-registration-integration"></a>
+## JVM 接入由启动器维护
 
-## 信号注册接入
-
-后加载信号接入使用独立审阅的 `GW_SIGNAL_PROFILE_HEADER`，原生库装载
-family/profile 不包含这些信息。除 VM/ART 位置外，Android 还要求
-`GW_HOST_LIBC_SHA256`、`GW_HOST_SIGACTION_OFFSET` 和
-`GW_HOST_SIGACTION64_OFFSET`，标识确切所属 Bionic 制品及其两个数据导入。
-缺少或不匹配时，在修改导入或接纳 Guest 接收者之前返回 `ENOTSUP`。
-桌面原生接入不使用 Bionic 参数。
-
-维护者必须审阅实际制品的私有信号注册调用路径。运行时核对文件哈希、
-所属映射、槽位对齐、原指针及数据页权限。普通 HotSpot 将导入路由至
-core；ART 保留已审阅的公开前端和底层路由。两个导入纳入原有安装、
-回滚和恢复事务，并恢复原 RELRO 权限，不改写 libc 指令。绕过这些
-审阅导入的原始注册仍不属于本适配器的范围。
-
-实验构建器通过 `--host-libc-signal-profile` 接受显式的 `schema: 1`、
-`abi: "arm64-v8a"`、`sha256` 和 `imports` 对象，后者包含经审阅的
-`sigaction`、`sigaction64` 整数偏移。它不推断 JRE family，也不自动
-批准新的兼容制品。安装时停止应用注册/JNI 进入，接收者和 VM 关闭前
-保留接入层。
-
-原生调用方需通过 `signal_router_action`/`signal_router_action64` 注册自己的
-处理器，或提供单独审阅的导入点。修改 VM 和 Bionic 内部的 PLT 导入点并不会
-拦截其他所有 DSO 对 libc 公开符号的调用。已安装的 late JNI 测试使用这一显式
-调用边界；Bionic 的全线程回调测试则走 Bionic 自身真正的内部注册路径。
-
-安装所选 profile 后，在启动 Guest 或转交线程前调用
-`domain_late_signal_reclaim_enable`，预留一个未使用的公开实时信号。
-在正常 Host 控制线程调用 `domain_late_signal_reclaim`。证明检查实际
-Linux 接收线程，包括 VM 内部原生线程，结果为已释放的旧注册数量。
-缺少回执时返回 `EBUSY`。路由完整接管后发布的普通旧代可使用这一证明。
-仍被保存的原生上下文指向未绑定入口时，由接入方通过完整屏障回收。
-见 [core 契约](../../../core/docs/zh/DOMAINS.md#reclaiming-host-registrations)。
-
-`tests/signal_profile.py` 复用显式准备的 Android late SDK payload 和匹配的
-VM 启动头文件。传入 `--payload`、`--vm-startup-profile`、`--ndk` 和
-`--serial`。脚本在普通 HotSpot/Bionic 的五个导入点每次写入后分别注入失败，
-要求五个原值全部恢复、路由器关闭，并正常完成 `DestroyJavaVM`。可重复传入
-`--rejection-prefix`，选择单独构建、故意缺少 Host 字段、Bionic 摘要错误或
-导入偏移非法的 SDK；每个都必须在启用路由器前以 `ENOTSUP` 拒绝，并仍可销毁
-VM。回收用例安装已审阅的 profile，在 JRE17 运行时释放一代已被替换的普通掩码
-注册，随后销毁 VM 并还原路由器。输入摘要和各用例输出保存在
-`build/tests/signal-profile-android`。
-
-`tests/signal_reclaim.py` 使用进程自有测试信号验证运行中的 HotSpot 和
-Android ART 接收线程。传入 `--core-prefix` 和 `--jdk`，ARM64 另需
-`--serial`、`--ndk` 和 `--d8`。用例覆盖接收线程屏蔽回执、旧回调暂停
-期间释放映射、正常返回及再次投递。Shell 通过 `dalvikvm64` 保留 ART 自己安装
-的信号链。[应用内夹具](LATE_SIGNALS.md) 在 VM 启动后
-安装已审阅的 ART 和 Bionic 导入适配，通过 ART 公开入口替换一代普通掩码注册，
-在应用 ART 主线程的旧回调暂停时释放旧映射，再验证同一线程返回并收到新注册。
+启动器选定、部署并启动自己的 JVM。使用私有 `System.load` 适配器时，启动器负责
+维护各制品的接口族映射及已审阅的 libjava/libjvm 散列。
+[Host 启动期信号路由](../../../core/docs/zh/SIGNAL_BOOTSTRAP.md)
+在加载 JVM 前由原生主程序完成，JVM 与其他宿主共用同一套平台符号拦截。
 
 ## 运行时组合
 

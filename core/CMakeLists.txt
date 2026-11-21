@@ -57,6 +57,13 @@ target_link_options(signal_interpose INTERFACE
   -Wl,-u,signal_sleep_prepare
   -Wl,-u,signal_stdio_enable)
 set_target_properties(signal_interpose PROPERTIES OUTPUT_NAME glibc_worker_signal_interpose)
+# The native Host executable exports these entrypoints to subsequently loaded
+# libraries. Other SDK targets remain usable without global interposition.
+add_library(signal_bootstrap STATIC src/domain/signal-bootstrap.c)
+add_library(glibc_worker::signal_bootstrap ALIAS signal_bootstrap)
+target_link_libraries(signal_bootstrap PUBLIC signal_interpose)
+target_link_options(signal_bootstrap INTERFACE -Wl,--export-dynamic)
+set_target_properties(signal_bootstrap PROPERTIES OUTPUT_NAME glibc_worker_signal_bootstrap)
 # Native capture/restore interposition stays opt-in during recovery integration.
 add_library(nonlocal_interpose STATIC src/domain/nonlocal-interpose.c
   src/domain/nonlocal-entry.S)
@@ -83,9 +90,12 @@ if(BUILD_TESTING)
   target_compile_options(signal_private_test PRIVATE -UNDEBUG)
   add_test(NAME signal_private COMMAND signal_private_test)
   add_executable(signal_bootstrap_test tests/signal_bootstrap.c)
-  target_link_libraries(signal_bootstrap_test PRIVATE signal_interpose)
+  target_link_libraries(signal_bootstrap_test PRIVATE signal_bootstrap)
   target_compile_options(signal_bootstrap_test PRIVATE -UNDEBUG)
-  add_test(NAME signal_bootstrap COMMAND signal_bootstrap_test)
+  add_library(signal_bootstrap_foreign SHARED tests/signal_bootstrap_foreign.c)
+  set_target_properties(signal_bootstrap_foreign PROPERTIES OUTPUT_NAME sigchain)
+  add_test(NAME signal_bootstrap
+    COMMAND signal_bootstrap_test $<TARGET_FILE:signal_bootstrap_foreign>)
   add_executable(carrier_lifecycle_test tests/carrier_lifecycle.c)
   target_link_libraries(carrier_lifecycle_test PRIVATE signal_interpose)
   target_compile_options(carrier_lifecycle_test PRIVATE -UNDEBUG)
@@ -236,7 +246,7 @@ install(FILES src/domain/signal-stack.S src/domain/signal-pending.c
         src/runtime/context-events.h
         src/domain/start.S DESTINATION
         ${CMAKE_INSTALL_INCLUDEDIR}/glibc-worker/core/internal)
-install(TARGETS core domains signal_interpose nonlocal_interpose EXPORT GlibcWorkerCoreTargets
+install(TARGETS core domains signal_interpose signal_bootstrap nonlocal_interpose EXPORT GlibcWorkerCoreTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(EXPORT GlibcWorkerCoreTargets NAMESPACE glibc_worker::

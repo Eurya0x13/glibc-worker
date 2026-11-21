@@ -5,8 +5,7 @@
 #include <stdint.h>
 
 /* Opt-in executable interposition for bootstrap-owned integrations. The
- * regular SDK never exports libc names merely by linking the domain target.
- * Late VM integrations route reviewed imports explicitly instead. */
+ * regular SDK never exports libc names merely by linking the domain target. */
 /* Archive retention must use a project-owned symbol: a weak sigaction supplied
  * by a sanitizer runtime otherwise satisfies -u,sigaction without extracting
  * this object. The opt-in CMake target forces this anchor, not a libc name. */

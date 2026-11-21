@@ -43,11 +43,9 @@ capability; it does not create Bionic state for GNU threads.
 
 ## Signal integration
 
-The regular domain target does not export libc's `sigaction`, `signal` or
-`sigaction64`. Early bootstrap integrations can explicitly link
-`glibc_worker::signal_interpose` and initialize the router before creating a VM.
-Late integrations must route their reviewed signal chain explicitly. A JVM/ART
-artifact profile and import patching belong to jvm-jni.
+Use the [Host signal bootstrap](SIGNAL_BOOTSTRAP.md) from the executable
+before loading a VM. The opt-in `glibc_worker::signal_bootstrap` target adds
+global registration interposition to the native Host.
 
 The opt-in target retains its archive objects through project-owned entrypoints.
 A libc-named linker reference alone is insufficient: a weak implementation from
@@ -62,16 +60,11 @@ the carrier's libc: GNU and bionic `signal()` behavior is checked separately.
 A consumed one-shot retains its original flags/mask, as native queries do.
 
 Host registration routing covers every catchable public signal, including
-`SIGUSR1`, `SIGALRM`, `SIGCHLD` and unreserved RT signals. A routed Host action
-does not add an exclusive VM reservation; `signal_router_reserved()` reports
-the selected ownership profile plus private notification signals.
-GNU Host NPTL remains native; Bionic private registrations use reviewed
-[owning-libc routing](PRIVATE_SIGNALS.md), while Guest NPTL leases 63/64.
-Existing custom actions require explicit adoption before Guest admission.
-`signal_router_guest_ready()` returns
-`ENOTSUP` for an unadopted custom action, without changing it. Bootstrap consumers
-can initialize and adopt before VM creation; late consumers retain the reviewed
-outer-chain requirement.
+`SIGUSR1`, `SIGALRM`, `SIGCHLD` and unreserved RT signals. The public
+`gw_host_signal_contract_init()` reports the ownership set with any selected
+private channels. GNU Host NPTL remains native. Bionic private registrations
+use [owning-libc routing](PRIVATE_SIGNALS.md), while Guest NPTL leases 63/64.
+Startup adopts existing custom Host actions before Guest admission.
 
 The native comparison fixture exercises each helper and verifies the kernel
 route after every mutation:
@@ -81,9 +74,8 @@ python3 core/tests/signal_aliases.py
 python3 core/tests/signal_aliases.py --ndk "$ANDROID_NDK_HOME" --serial "$ANDROID_SERIAL"
 ```
 
-This target covers executable bootstrap interposition. It does not expand a
-late-loaded VM profile to unreviewed imports or guarantee interception of
-explicit libc handles and raw syscalls.
+Use the executable's registration entrypoints for managed signals.
+Explicit libc handles and raw syscalls bypass this routing.
 
 The agreed ownership policy is:
 

@@ -47,25 +47,19 @@ the VM cleaning thread's idle binding stays mapped until process exit. The
 module and JNI closures unload according to the
 [runtime lifecycle contract](../../../android-jni/docs/en/LIFECYCLE.md).
 
-## Direct DSO loading control
+## Native Host startup
 
-The reviewed late integration explicitly installs the VM and ART signal profile.
-See the [late signal-chain guide](LATE_SIGNALS.md). The original control
-observed registrations and imports after loading a DSO in an existing process.
-In that setup, Pojav's premain called `System.load(libglibc_entry.so)` followed
-by `NativeEntry.start`, while the early fixture exported sigaction from the
-executable before VM startup.
+The application fixture starts a fresh app-UID native process and calls the
+[Host signal bootstrap](../../../core/docs/en/SIGNAL_BOOTSTRAP.md) before
+loading HotSpot. The test verifies the route before VM creation, after VM
+creation and after Guest JNI. Bionic's actual private registration API checks
+Host TLS while the VM is running. Each ClassLoader cycle runs eight concurrent
+native callers with JFR, Java stack walks, GC and explicit Guest signal sends.
 
-`late-signal-probe.py` installs a Host handler in a bionic process, then loads
-the signal-router DSO with `RTLD_GLOBAL`. The archive records this observation.
-
-```json
-{"result":"UNSUPPORTED","init_status":0,"existing_handler_wrapped":false,"global_sigaction_interposed":false}
-```
-
-The existing handler remains unwrapped. The symbol field compares two dynamic
-lookups. Existing VM import bindings require explicit inspection and routing.
-Pojav and mod results are maintained in the external validation workspace.
+The launcher maintains the JRE startup layout and native loading profile.
+The Android fixture accepts the pinned Pojav JRE17 and AngelAura JRE21 artifacts.
+JRE17 uses the test harness's reviewed path-cache adapter. AngelAura uses the
+public VM invocation API and its original read-only library layout.
 
 ## Reproduction
 
@@ -79,6 +73,14 @@ python3 android-jni/tests/same-thread/build.py --system-load \
 python3 jvm-jni/tests/same-thread/system-load.py \
   --build jvm-jni/build/tests/system-load/x86_64 --jdk "$JDK17"
 
+# Select the pinned Android artifact explicitly.
+export JAVA_HOME="$JDK17"
+export PATH="$JAVA_HOME/bin:$PATH"
+GW_ABI=arm64-v8a python3 jvm-jni/tests/scripts/prepare-zstd.py --fetch-only
+python3 android-jni/tests/gen-binding-capacity.py --output jvm-jni/build/native/generated
+GW_ABI=arm64-v8a GW_JRE_ARTIFACT=angelaura-21-arm64 \
+  python3 jvm-jni/tests/scripts/prepare-jre.py
+
 python3 android-jni/tests/same-thread/build.py --system-load \
   --abi arm64-v8a --jdk "$JDK17" --ndk "$ANDROID_NDK" \
   --runtime "$DOMAIN_RUNTIME_ARM64"
@@ -91,8 +93,6 @@ python3 jvm-jni/tests/same-thread/android.py --system-load \
   --jre-assets jvm-jni/build/tests/android/assets/android-jre \
   --jre-libs jvm-jni/build/tests/android/jniLibs/arm64-v8a \
   --gradle "$GRADLE" --sdk "$ANDROID_HOME" --serial "$ANDROID_SERIAL"
-python3 jvm-jni/tests/same-thread/late-signal-probe.py \
-  --ndk "$ANDROID_NDK" --serial "$ANDROID_SERIAL"
 ```
 
 Family 5 applies to the reviewed desktop artifact in this example. Stop on a

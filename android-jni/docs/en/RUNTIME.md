@@ -22,16 +22,11 @@ Worker continues to receive correctness and compatibility fixes and retains SDK
 regression coverage. New execution features and performance work target the
 default same-thread backend.
 
-The selected VM comes from the supplied real `JNIEnv`. android-jni neither
-creates a VM nor chooses an ART/HotSpot profile. An embedder prepares the signal
-chain before admitting application calls; any pinned VM-specific late routing
-is supplied by jvm-jni. It must not pass an environment from another VM.
-
-Start checks `signal_router_guest_ready()` before bridge initialization. A
-pre-existing custom Host action that has not been explicitly adopted returns
-`ENOTSUP`. Executable bootstrap consumers can initialize/adopt the router before
-creating the VM; late consumers use their reviewed integration. Host registration
-routing does not make unreserved signal numbers exclusive to the VM.
+The selected VM comes from the real `JNIEnv` supplied by the launcher.
+Before loading the VM, initialize the [Host signal bootstrap](../../../core/docs/en/SIGNAL_BOOTSTRAP.md)
+from the native executable. Once any optional channels have been configured,
+populate `signals` with `gw_host_signal_contract_init()`. Start verifies the
+Host registrations and the ownership contract before admitting Guest code.
 
 Use a dedicated bootstrap/lifecycle thread. Its context zero serves the Guest
 supervisor's control channel. Application native calls run on other attached VM

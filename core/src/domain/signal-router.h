@@ -14,13 +14,10 @@ int signal_router_error(void);
 int signal_router_quarantine(void);
 typedef int (*signal_router_backend)(int, const struct sigaction *,
                                      struct sigaction *);
-/* Explicit backend must be the bottom Host libc registration API. Late
- * integration owns registration quiescence and future import routing. */
+/* Explicit backend must be the bottom Host libc registration API.
+ * Used by isolated controls and fault-injection tests. */
 int signal_router_init_with_backend(signal_router_backend);
 int signal_router_adopt(void);
-/* Only after a reviewed outer chain's bottom registration/query pointers
- * have been routed. NULL keeps the conservative standalone policy. */
-int signal_router_adopt_chain(void *reviewed_chain_base);
 /* Matching adoption libc ABI 7 uses these process-private kernel numbers.
  * Lease before starting its loader; EBUSY preserves any existing Host owner.
  * The lease is permanent: the GNU owner, timer helpers and images are pinned

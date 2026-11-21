@@ -592,9 +592,7 @@ static int initialize_locked(signal_router_backend backend) {
   /* Routing a Host registration is not an exclusive VM reservation. Untagged
    * external packets belong to Host on every public signal, including USR1,
    * ALRM, CHLD and unreserved RT numbers. Bionic private handlers also need
-   * Host TLS restoration; owning GNU Host NPTL entries remain native. Late
-   * adapters separately route the reviewed owning-libc imports and adopt
-   * pre-existing handlers with the reviewed outer-chain requirement. */
+   * Host TLS restoration; owning GNU Host NPTL entries remain native. */
   int complete = domain_signal_masked != NULL;
   memset(managed, 0, sizeof managed);
   for (int number = 1; number < NSIG; ++number) {
@@ -775,11 +773,9 @@ int gw_host_signal_reclaim_enable(int number) {
   return error;
 }
 
-/* Only for an explicit late-loading integration, before enabling any Guest
- * carrier. The integrator must serialize Host registration during adoption.
- * Deliveries remain safe: immutable entries are complete before installation.
- * A layered backend cannot establish that its outer handler restores TLS. */
-int signal_router_adopt_chain(void *reviewed_chain_base) {
+/* Adopt inherited native actions during serialized startup. Immutable
+ * entries are complete before installation, including during delivery. */
+int signal_router_adopt(void) {
   if (signal_router_error()) {
     return EIO;
   }
@@ -803,8 +799,8 @@ int signal_router_adopt_chain(void *reviewed_chain_base) {
     if (actual.sa_handler != SIG_DFL && actual.sa_handler != SIG_IGN &&
         dladdr((void *)actual.sa_sigaction, &owner) && owner.dli_fname &&
         (strstr(owner.dli_fname, "libsigchain.so") ||
-         strstr(owner.dli_fname, "libart.so")) &&
-        owner.dli_fbase != reviewed_chain_base) {
+         strstr(owner.dli_fname, "libart.so") ||
+         strstr(owner.dli_fname, "libartd.so"))) {
       /* ART reads pthread TLS before its special handlers. Wrapping only the
        * user handler is too late; do not mutate this chain speculatively. */
       return ENOTSUP;
@@ -823,10 +819,6 @@ int signal_router_adopt_chain(void *reviewed_chain_base) {
   atomic_store_explicit(&routing_complete, domain_signal_masked != NULL,
                         memory_order_release);
   return 0;
-}
-
-int signal_router_adopt(void) {
-  return signal_router_adopt_chain(NULL);
 }
 
 /* A distinct immutable entry binds the kernel action (including its mask
@@ -959,7 +951,7 @@ int signal_router_route_host_setxid(void) {
 #endif
 }
 
-/* Exported by the experiment executable so libjvm's public sigaction calls
+/* Exported by the Host executable so libraries' public sigaction calls
  * enter here. Queries return the logical disposition, not the routing entry.
  * Explicit dlsym(libc, ...) and raw syscalls are outside this interception. */
 static int router_action(int number, const struct sigaction *action,
@@ -973,7 +965,6 @@ static int router_action(int number, const struct sigaction *action,
     /* Bionic's own constructors can call an executable-interposed sigaction
      * before main, including fdtrack's private signal registration. Forward
      * those calls natively instead of silently losing the initial handler.
-     * Explicit late backends still replace this cache during bootstrap.
      * https://android.googlesource.com/platform/bionic/+/android13-release/libc/bionic/fdtrack.cpp
      */
     int saved = errno;

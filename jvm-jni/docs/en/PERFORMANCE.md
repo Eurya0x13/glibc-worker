@@ -2,22 +2,21 @@
 
 [English](../en/PERFORMANCE.md) | [简体中文](../zh/PERFORMANCE.md)
 
-This measures synchronous native calls loaded through the real JVM
-`System.load` adapter, with ART, HotSpot, bionic and the GNU Guest in one
-Android application process. It uses the pinned late signal integration in
-[LATE_SIGNALS.md](LATE_SIGNALS.md). It does not measure game FPS or claim
-compatibility with additional Android/JRE artifacts.
+The fixture measures synchronous native calls through the JVM's
+`System.load` adapter. HotSpot, bionic and the GNU Guest share a native
+child under the application's UID. The executable installs the
+[Host signal bootstrap](../../../core/docs/en/SIGNAL_BOOTSTRAP.md) before
+starting the JVM.
 
 ## Reproduction
 
-Build and install the inline application using the [late signal integration guide](LATE_SIGNALS.md).
-The default install run is still a CheckJNI/signal/lifecycle compatibility test.
-Then run:
+Build and install the [System.load application fixture](SYSTEM_LOAD.md).
+After the CheckJNI and signal regression passes, run the benchmark.
 
 ```sh
 python3 jvm-jni/tests/same-thread/performance.py \
   --serial "$ANDROID_SERIAL" \
-  --build jvm-jni/build/tests/late-system-load/arm64-v8a \
+  --build jvm-jni/build/tests/system-load/arm64-v8a \
   --pairs 10 --threads 1 8
 ```
 
@@ -63,16 +62,16 @@ bridge benchmark, not a replication of arbitrary launcher JVM flags.
 
 ## Evidence
 
-Every run directory under `jvm-jni/build/tests/late-system-load/arm64-v8a/performance`
+Every run directory under `jvm-jni/build/tests/system-load/arm64-v8a/performance`
 contains native identities, APK hash, device state, compressed unedited output,
 and incremental structured summaries. Comparisons use paired ratios and report
-how many pairs improve and retain raw outliers. The completed ten-pair result,
-all raw timing samples and artifact identities are in the
+how many pairs improve and retain raw outliers. Historical ten-pair measurements from the former ART-inline fixture,
+raw timing samples and artifact identities are in the
 [performance archive](../../tests/results/same-thread/performance/REPORT.md).
 
 To generate a report from a completed capture:
 
 ```sh
 python3 jvm-jni/tests/same-thread/report-performance.py "$CAPTURE" \
-  --output jvm-jni/build/tests/late-system-load/arm64-v8a/performance-report
+  --output jvm-jni/build/tests/system-load/arm64-v8a/performance-report
 ```

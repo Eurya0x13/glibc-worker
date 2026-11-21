@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Compatibility pressure only; these timings are not a performance result. */
-public final class LateSignalPressure {
+public final class SignalPressure {
   static void run(Class<?> fixture) throws Exception {
     String mode = System.getenv("GW_DOMAIN_MODE");
     boolean adopted = mode == null || "domain".equals(mode);
@@ -33,7 +33,7 @@ public final class LateSignalPressure {
       } catch (Throwable failure) {
         error.compareAndSet(null, failure);
       }
-    }, "late-signal-guest-hold");
+    }, "bootstrap-signal-guest-hold");
     holder.start();
     int overlaps = 0;
     Thread[] workers = new Thread[8];
@@ -56,7 +56,7 @@ public final class LateSignalPressure {
           } catch (Throwable failure) {
             error.compareAndSet(null, failure);
           }
-        }, "late-signal-caller-" + i);
+        }, "bootstrap-signal-caller-" + i);
         workers[i].start();
       }
       for (int sample = 0; sample < 20; ++sample) {
@@ -83,9 +83,9 @@ public final class LateSignalPressure {
       recordingType.getMethod("close").invoke(recording);
     }
     if (holder.isAlive() || overlaps == 0 || error.get() != null) {
-      throw new AssertionError("late signal pressure", error.get());
+      throw new AssertionError("bootstrap signal pressure", error.get());
     }
-    System.out.println("LATE_SIGNAL_PRESSURE {\"result\":\"PASS\",\"threads\":8,"
+    System.out.println("NATIVE_SIGNAL_PRESSURE {\"result\":\"PASS\",\"threads\":8,"
         + "\"calls\":8000,\"samples\":20,\"guest_overlaps\":" + overlaps
         + ",\"explicit_guest_signals\":" + (adopted ? 3 : 0) + "}");
   }

@@ -29,7 +29,8 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 
 ## 信号接入
 
-普通域目标不导出 libc 的 sigaction、signal 或 sigaction64。早期启动可显式链接 `glibc_worker::signal_interpose`，在创建 VM 前初始化路由器；晚接入必须显式对接已审阅的信号链。固定 JVM/ART 制品 profile 与导入补丁归 jvm-jni。
+原生 Host 在加载 VM 前使用[启动期信号路由](SIGNAL_BOOTSTRAP.md)。
+`glibc_worker::signal_bootstrap` 为主程序提供全局信号注册拦截。
 
 显式拦截目标通过项目专有入口保留静态库对象。只引用 libc 名称不足以保证装载：
 检测工具运行时提供的弱实现可能在检查静态库之前就满足该引用。此目标提供强符号封装，
@@ -41,14 +42,11 @@ python3 core/scripts/build-domain-runtime.py --abi arm64-v8a --jobs 4
 GNU 与 bionic 的 `signal()` 行为分别对照原生实现。一次性动作耗尽后仍保留原 flags 和 mask，
 与原生查询一致。
 
-Host 注册路由覆盖所有可捕获的公开信号，包括 `SIGUSR1`、`SIGALRM`、`SIGCHLD` 和
-未保留的实时信号。路由 Host 动作不会增加 VM 独占保留；`signal_router_reserved()`
-只报告所选所有权 profile 及私有通知信号。GNU Host NPTL 保留原生实现；
-Bionic 私有注册使用已审阅的[所属 libc 路由](PRIVATE_SIGNALS.md)，
-Guest NPTL 独占租用 63/64。
-已有自定义动作须在 Guest 准入前显式接管。`signal_router_guest_ready()` 对尚未接管的
-自定义动作返回 `ENOTSUP`，不会修改它。启动阶段可在创建 VM 前初始化并接管；晚接入仍须
-满足外层信号链已经审阅的要求。
+Host 注册路由覆盖所有可捕获的公开信号，包括 `SIGUSR1`、`SIGALRM`、`SIGCHLD`
+和未保留的实时信号。公开接口 `gw_host_signal_contract_init()` 返回包含所选
+私有通道的所有权集合。GNU Host NPTL 保留原生实现。bionic 私有注册通过
+[所属 libc 路由](PRIVATE_SIGNALS.md)接入，Guest NPTL 租用 63/64。启动期入口在
+Guest 准入前接管已有的自定义 Host 动作。
 
 对照用例逐项执行辅助接口，每次修改后都验证内核路由：
 
@@ -57,8 +55,7 @@ python3 core/tests/signal_aliases.py
 python3 core/tests/signal_aliases.py --ndk "$ANDROID_NDK_HOME" --serial "$ANDROID_SERIAL"
 ```
 
-这覆盖可执行程序启动时的显式符号拦截，不会让晚接入 VM profile 自动处理未经审阅的导入，
-也不保证拦截显式 libc 句柄调用和原始系统调用。
+受管信号通过主程序导出的入口注册。显式 libc 句柄或裸系统调用会绕过该路由。
 
 已约定的所有权规则：
 

@@ -26,7 +26,6 @@ parser.add_argument(
     help="Validate the production JNI transport fixture",
 )
 parser.add_argument("--system-load", action="store_true")
-parser.add_argument("--inline-vm", action="store_true")
 args = parser.parse_args()
 if not args.build_only and not args.serial:
     parser.error("--serial is required unless --build-only is selected")
@@ -36,21 +35,11 @@ native, runtime = args.native.resolve(), args.runtime.resolve()
 manifest = json.loads((native / "manifest.json").read_text())
 if manifest["abi"] != "arm64-v8a" or manifest["host_libc"] != "bionic":
     parser.error("This APK fixture requires a built ARM64 bionic Host")
-if args.inline_vm and not (args.system_load and manifest.get("late_signal")):
-    parser.error("Inline VM requires the late System.load build")
 output = project / "build/tests/same-thread"
 libraries = output / "android-jniLibs/arm64-v8a"
-libraries.mkdir(parents=True, exist_ok=True)
-# Remove only this packager's optional payloads; avoid silently bundling a prior fixture.
-for name in (
-    "libdomain_conformance.so",
-    "libdomain_late_bridge.so",
-    "libdomain_inline_host.so",
-    "libdomain_system_load.so",
-    "libdomain_system_reject.so",
-    "libdomain_system_ordinary.so",
-):
-    (libraries / name).unlink(missing_ok=True)
+if libraries.parent.exists():
+    shutil.rmtree(libraries.parent)
+libraries.mkdir(parents=True)
 payload = {
     native / "host": "libdomain_host.so",
     native / "guest": "libdomain_guest.so",
@@ -63,15 +52,12 @@ payload = {
 if args.jni_domain:
     payload[native / "conformance.so"] = "libdomain_conformance.so"
 if args.system_load:
-    if not manifest.get("system_load"):
+    if not (manifest.get("system_load") and manifest.get("signal_bootstrap")):
         parser.error("System.load native fixture required")
     for item in ("load", "reject", "ordinary"):
         payload[native / ("system-" + item + ".so")] = (
             "libdomain_system_" + item + ".so"
         )
-if manifest.get("late_signal"):
-    payload[native / "late-bridge.so"] = "libdomain_late_bridge.so"
-    payload[native / "inline-host.so"] = "libdomain_inline_host.so"
 for path, name in payload.items():
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if manifest["sha256"].get(str(path)) != digest:
@@ -87,6 +73,7 @@ for name in ("jvm", "java", "verify", "net", "nio", "zip", "jimage"):
     shutil.copyfile(args.jre_libs / filename, libraries / filename)
 assets = output / "android-assets"
 (assets / "jre/lib/server").mkdir(parents=True, exist_ok=True)
+(assets / "jre/artifact.json").write_text(json.dumps(profile, indent=2) + "\n")
 for item in ("release", "conf", "lib/modules", "lib/tzdb.dat"):
     src, dst = args.jre_assets / item, assets / "jre" / item
     if src.is_dir():
@@ -130,7 +117,8 @@ evidence.mkdir(parents=True, exist_ok=True)
     json.dumps(manifest, indent=2) + "\n"
 )
 adb = ["adb", "-s", args.serial]
-package = "dev.glibc.worker.domains.hotspot"
+package = "dev.glibc.worker.domains.bootstrap"
+activity = package + "/dev.glibc.worker.domains.hotspot.MainActivity"
 # A previous run may have left a complete report. Remove it before launch so
 # polling cannot mistake that report for the result of the new executable.
 subprocess.run([*adb, "shell", "am", "force-stop", package], check=True)
@@ -157,24 +145,20 @@ subprocess.run(
     ["android", "install", "--device=" + args.serial, "--apks=" + str(apk)],
     check=True,
 )
-subprocess.run(
-    [*adb, "shell", "run-as", package, "mkdir", "-p", "files"], check=True
+installed = subprocess.check_output(
+    [*adb, "shell", "pm", "path", package], text=True
 )
+installed = installed.strip().removeprefix("package:")
+with apk.open("rb") as built_apk:
+    apk_sha256 = hashlib.file_digest(built_apk, "sha256").hexdigest()
+digest = subprocess.check_output(
+    [*adb, "shell", "sha256sum", installed], text=True
+).split()[0]
+if digest != apk_sha256:
+    raise SystemExit("Installed APK differs from the build")
+options = ["--ez", "signalPressure", "true"] if args.system_load else []
 subprocess.run(
-    [
-        *adb,
-        "shell",
-        "run-as",
-        package,
-        "touch",
-        "files/inline-vm.flag",
-    ]
-    if args.inline_vm
-    else [*adb, "shell", "run-as", package, "rm", "-f", "files/inline-vm.flag"],
-    check=True,
-)
-subprocess.run(
-    [*adb, "shell", "am", "start", "-n", package + "/.MainActivity"], check=True
+    [*adb, "shell", "am", "start", "-n", activity, *options], check=True
 )
 deadline = time.monotonic() + 180
 report = ""
@@ -189,118 +173,107 @@ while time.monotonic() < deadline:
     if any(
         marker in report
         for marker in (
-            "APP_DOMAIN_EXIT=",
+            "APP_DOMAIN_SUPERVISOR_PID=",
             "APP_DOMAIN_RESULT=",
-            "JNI_DOMAIN_FAILURE",
-            "LATE_SIGNAL_REJECT",
         )
     ):
         break
     time.sleep(1)
 (evidence / "native-report.txt").write_text(report)
+
+
+def records(marker):
+    prefix = marker + " "
+    return [
+        json.loads(line[len(prefix) :])
+        for line in report.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def values(key):
+    prefix = key + "="
+    return [
+        int(line[len(prefix) :])
+        for line in report.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
 if args.system_load:
-    outer_chain = (
-        report.count("LATE_OUTER_CHAIN installed=1 forwards_existing_art=1")
-        == 1
-    )
-    pressure = [
-        json.loads(line.removeprefix("LATE_SIGNAL_PRESSURE "))
-        for line in report.splitlines()
-        if line.startswith("LATE_SIGNAL_PRESSURE ")
-    ]
-    signal_install = [
-        json.loads(line.removeprefix("LATE_SIGNAL_INSTALL "))
-        for line in report.splitlines()
-        if line.startswith("LATE_SIGNAL_INSTALL ")
-    ]
-    signal_delivery = [
-        json.loads(line.removeprefix("LATE_SIGNAL_DELIVERIES "))
-        for line in report.splitlines()
-        if line.startswith("LATE_SIGNAL_DELIVERIES ")
-    ]
-    art_reclaim = [
-        json.loads(line.removeprefix("ART_SIGNAL_RECLAIM "))
-        for line in report.splitlines()
-        if line.startswith("ART_SIGNAL_RECLAIM ")
-    ]
-    if manifest.get("late_signal") and (
-        len(pressure) != 3
+    bootstrap = records("NATIVE_BOOTSTRAP")
+    pressure = records("NATIVE_SIGNAL_PRESSURE")
+    delivery = records("NATIVE_SIGNAL_DELIVERIES")
+    bionic = records("NATIVE_BIONIC_REGISTRATION")
+    rows = records("SYSTEM_LOAD_RESULT")
+    life = records("SYSTEM_LOAD_LIFECYCLE")
+    jvm = records("JVM_ARTIFACT")
+    uids = values("APP_DOMAIN_SUPERVISOR_UID")
+    supervisors = values("APP_DOMAIN_SUPERVISOR_PID")
+    if (
+        len(uids) != 1
+        or uids[0] < 10000
+        or len(supervisors) != 1
+        or [row["stage"] for row in bootstrap]
+        != ["before-vm", "after-vm", "after-guest-jni"]
+        or len({row["pid"] for row in bootstrap}) != 1
         or any(
-            row.get("result") != "PASS" or row.get("guest_overlaps", 0) < 1
+            row["pid"] == supervisors[0]
+            or row["uid"] != uids[0]
+            or row["art_loaded"]
+            or not row["router_verified"]
+            for row in bootstrap
+        )
+        or records("JNI_DOMAIN_SELECTION")
+        != [{"requested": "default", "backend": "domain"}]
+        or len(bionic) != 1
+        or bionic[0]["result"] != "PASS"
+        or bionic[0]["deliveries"] < 2
+        or not bionic[0]["host_tls"]
+        or len(pressure) != 3
+        or any(
+            row["result"] != "PASS"
+            or row["threads"] != 8
+            or row["calls"] != 8000
+            or row["guest_overlaps"] < 1
             for row in pressure
         )
-        or len(signal_install) != 1
-        or signal_install[0].get("result") != "PASS"
-        or len(signal_delivery) != 1
-        or signal_delivery[0].get("sr_guest", 0) < 3
-        or (args.inline_vm and not signal_install[0].get("art_chain"))
-        or (args.inline_vm and not outer_chain)
-        or (
-            args.inline_vm
-            and (
-                len(art_reclaim) != 1
-                or art_reclaim[0].get("result") != "PASS"
-                or art_reclaim[0].get("reclaimed", 0) < 1
-                or not art_reclaim[0].get("ordinary_mask")
-                or not art_reclaim[0].get("old_callback_returned")
-                or not art_reclaim[0].get("replacement_delivered")
-            )
-        )
-    ):
-        raise SystemExit(f"Late application signal coverage failed: {evidence}")
-    rows = [
-        json.loads(line.removeprefix("SYSTEM_LOAD_RESULT "))
-        for line in report.splitlines()
-        if line.startswith("SYSTEM_LOAD_RESULT ")
-    ]
-    life = [
-        json.loads(line.removeprefix("SYSTEM_LOAD_LIFECYCLE "))
-        for line in report.splitlines()
-        if line.startswith("SYSTEM_LOAD_LIFECYCLE ")
-    ]
-    uids = [
-        int(line.removeprefix("APP_DOMAIN_SUPERVISOR_UID="))
-        for line in report.splitlines()
-        if line.startswith("APP_DOMAIN_SUPERVISOR_UID=")
-    ]
-    if (
-        len(rows) != 1
+        or len(delivery) != 1
+        or delivery[0]["sr_guest"] < 3
+        or len(jvm) != 1
+        or not jvm[0]["resident"]
+        or not jvm[0]["vm_bound"]
+        or jvm[0]["family"] != profile["family"]
+        or jvm[0]["libjava_sha256"] != profile["libjava"]["sha256"]
+        or jvm[0]["libjvm_sha256"] != profile["libjvm"]["sha256"]
+        or len(rows) != 1
         or rows[0]["result"] != "PASS"
         or rows[0]["cycles"] != 3
+        or rows[0]["unloads"] != 3
+        or rows[0]["checks"] < 25
         or not rows[0]["bionic_passthrough"]
         or rows[0]["active_modules"]
         or rows[0]["live_closures"]
         or len(life) != 1
         or not life[0]["vm_destroyed"]
         or life[0]["domains_created"] < 2
-        or len(uids) != 1
-        or uids[0] < 10000
-        or "APP_DOMAIN_EXIT=0" not in report
+        or values("APP_DOMAIN_EXIT") != [0]
         or "WARNING in native method" in report
         or "handler modified" in report
-        or (args.inline_vm and "APP_DOMAIN_INLINE=1" not in report)
-        or (
-            manifest.get("late_signal")
-            and report.count("LATE_SIGNAL_PRESSURE ") != 3
-        )
     ):
         raise SystemExit(f"System.load application fixture failed: {evidence}")
     result = {
         "result": "PASS",
-        "execution": "android-art-hotspot-same-process"
-        if args.inline_vm
-        else "android-application-exec-child",
-        "late_signal": manifest.get("late_signal", False),
-        "outer_forwarding_chain": outer_chain,
+        "execution": "android-application-exec-child",
+        "bootstrap": bootstrap,
         "pressure": pressure,
-        "signal_install": signal_install,
-        "signal_delivery": signal_delivery,
-        "art_reclaim": art_reclaim,
+        "signal_delivery": delivery[0],
+        "bionic_registration": bionic[0],
         "supervisor_uid": uids[0],
         "contract": rows[0],
         "lifecycle": life[0],
-        "production_ready": False,
-        "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+        "jre": profile["id"],
+        "apk_sha256": apk_sha256,
     }
     (evidence / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
@@ -386,7 +359,7 @@ if args.jni_domain:
         "production_jni_paths_validated": True,
         "production_ready": False,
         "performance_measured": False,
-        "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+        "apk_sha256": apk_sha256,
     }
     (evidence / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
@@ -429,7 +402,7 @@ result.update(
     jit_callback_compiled=True,
     art_jni_validated=False,
     production_ready=False,
-    apk_sha256=hashlib.sha256(apk.read_bytes()).hexdigest(),
+    apk_sha256=apk_sha256,
 )
 (evidence / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
 print(json.dumps(result, indent=2))

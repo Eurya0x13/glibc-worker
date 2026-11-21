@@ -2,19 +2,19 @@
 
 [English](../en/PERFORMANCE.md) | [简体中文](../zh/PERFORMANCE.md)
 
-此测试通过真实 JVM `System.load` 适配器装载模块，测量同步 native 调用。ART、HotSpot、
-bionic 和 GNU Guest 位于同一 Android 应用进程，采用已审阅的固定信号 profile。
-结果适用于受测制品和工作负载。参见 [晚接入信号链](LATE_SIGNALS.md)。
+夹具通过 JVM 的 `System.load` 适配器测量同步 native 调用。HotSpot、bionic
+和 GNU Guest 在应用 UID 下共用原生子进程。主程序在启动 JVM 前完成
+[Host 启动期信号路由](../../../core/docs/zh/SIGNAL_BOOTSTRAP.md)。
 
 ## 复现
 
-按晚接入指南构建并安装应用内夹具。默认安装后的用例检查 CheckJNI、信号和生命周期。
-完成检查后运行性能测试。
+构建并安装 [System.load 应用夹具](SYSTEM_LOAD.md)。CheckJNI 与信号回归通过后，
+运行性能测试。
 
 ```sh
 python3 jvm-jni/tests/same-thread/performance.py \
   --serial "$ANDROID_SERIAL" \
-  --build jvm-jni/build/tests/late-system-load/arm64-v8a \
+  --build jvm-jni/build/tests/system-load/arm64-v8a \
   --pairs 10 --threads 1 8
 ```
 
@@ -43,14 +43,14 @@ VM 销毁及 ART 信号链。计时期间关闭 CheckJNI、JFR、主动信号探
 
 ## 测量结果
 
-`jvm-jni/build/tests/late-system-load/arm64-v8a/performance` 下的每个运行目录保存
+`jvm-jni/build/tests/system-load/arm64-v8a/performance` 下的每个运行目录保存
 native 制品身份、APK 散列、设备状态、压缩原始输出和结构化结果。统计使用配对比值，
-保留原始离群值，并报告改善的配对数。完整十对测量及对应制品见
+保留原始离群值，并报告改善的配对数。此前 ART 同进程夹具的十对测量及对应制品见
 [性能归档](../../tests/results/same-thread/performance/REPORT.md)。
 
 用完整采集结果生成报告。
 
 ```sh
 python3 jvm-jni/tests/same-thread/report-performance.py "$CAPTURE" \
-  --output jvm-jni/build/tests/late-system-load/arm64-v8a/performance-report
+  --output jvm-jni/build/tests/system-load/arm64-v8a/performance-report
 ```

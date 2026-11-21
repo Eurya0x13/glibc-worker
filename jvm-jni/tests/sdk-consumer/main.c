@@ -3,9 +3,10 @@
 #include <jni_vm_adapter.h>
 #include <jvm_adapter.h>
 #include <dlopen_backend.h>
+#include <signal_bootstrap.h>
 
 int main(void) {
-  if (full_host_state() != GW_HOST_NEW) {
+  if (gw_host_signal_bootstrap() || full_host_state() != GW_HOST_NEW) {
     return 1;
   }
 
@@ -19,5 +20,10 @@ int main(void) {
     return 1;
   }
 
-  return api && rejected == GW_ERROR ? gw_jvm_jni_register() : 1;
+  struct gw_signal_contract signals;
+  if (!api || rejected != GW_ERROR || gw_jvm_jni_register() != GW_OK ||
+      gw_host_signal_contract_init(&signals)) {
+    return 1;
+  }
+  return gw_host_signal_restore();
 }

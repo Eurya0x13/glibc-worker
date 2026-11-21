@@ -1,4 +1,4 @@
-"""Measure fresh-process ART/HotSpot worker-domain pairs in one installed APK."""
+"""Measure fresh-process native HotSpot worker-domain pairs in one installed APK."""
 
 import argparse
 import datetime
@@ -20,7 +20,8 @@ CASES = [
     "array65536",
     "compute10000",
 ]
-PACKAGE = "dev.glibc.worker.domains.hotspot"
+PACKAGE = "dev.glibc.worker.domains.bootstrap"
+ACTIVITY = PACKAGE + "/dev.glibc.worker.domains.hotspot.MainActivity"
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -116,10 +117,8 @@ def main():
     for name, digest in manifest["sha256"].items():
         if hashlib.sha256(Path(name).read_bytes()).hexdigest() != digest:
             parser.error(f"Changed build input: {name}")
-    if not manifest.get("late_signal") or not manifest.get(
-        "art_signal_profile"
-    ):
-        parser.error("Requires the pinned ART late-signal build")
+    if not manifest.get("signal_bootstrap") or not manifest.get("system_load"):
+        parser.error("Requires the Android System.load bootstrap build")
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%S%fZ")
     output = args.build / "performance" / stamp
     output.mkdir(parents=True)
@@ -136,7 +135,7 @@ def main():
         "pairs": args.pairs,
         "threads": args.threads,
         "serial": args.serial,
-        "scope": "ART+HotSpot same process; System.load JNI; no CheckJNI/JFR/forced GC in timed windows",
+        "scope": "app-UID HotSpot exec child; System.load JNI; no CheckJNI/JFR/forced GC in timed windows",
     }
     (output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     adb = ["adb", "-s", args.serial]
@@ -157,7 +156,6 @@ def main():
     if installed_hash != metadata["apk_sha256"]:
         raise SystemExit("Installed APK differs from local artifact")
     (output / "device.txt").write_text(shell("getprop"))
-    shell("run-as", PACKAGE, "touch", "files/inline-vm.flag")
     runs = []
     print(output, flush=True)
 
@@ -172,7 +170,7 @@ def main():
             "am",
             "start",
             "-n",
-            PACKAGE + "/.MainActivity",
+            ACTIVITY,
             "--ez",
             "benchmark",
             "true",
@@ -195,7 +193,6 @@ def main():
                     "APP_DOMAIN_EXIT=",
                     "APP_DOMAIN_RESULT=",
                     "JNI_DOMAIN_FAILURE",
-                    "LATE_SIGNAL_REJECT",
                 )
             ):
                 break
@@ -218,15 +215,14 @@ def main():
 
         result = rows("SYSTEM_BENCH_RESULT")
         life = rows("SYSTEM_LOAD_LIFECYCLE")
-        install = rows("LATE_SIGNAL_INSTALL")
+        bootstrap = rows("NATIVE_BOOTSTRAP")
         samples, resources = (
             rows("SYSTEM_BENCH_SAMPLES"),
             rows("SYSTEM_BENCH_RESOURCE"),
         )
         expected_loads = 0 if backend == "direct" else 1
         if (
-            "APP_DOMAIN_INLINE=1" not in report
-            or "APP_DOMAIN_EXIT=0" not in report
+            "APP_DOMAIN_EXIT=0" not in report
             or result
             != [
                 {
@@ -239,14 +235,18 @@ def main():
             or len(life) != 1
             or not life[0]["vm_destroyed"]
             or (life[0]["domains_created"] > 0) != (backend == "domain")
-            or len(install) != 1
-            or not install[0].get("art_chain")
+            or [row["stage"] for row in bootstrap]
+            != ["before-vm", "after-vm", "after-guest-jni"]
+            or any(
+                row["art_loaded"] or not row["router_verified"]
+                for row in bootstrap
+            )
             or any(
                 marker in report
                 for marker in (
                     "WARNING in native method",
                     "handler modified",
-                    "LATE_SIGNAL_PRESSURE",
+                    "NATIVE_SIGNAL_PRESSURE",
                     "Exception in thread",
                 )
             )

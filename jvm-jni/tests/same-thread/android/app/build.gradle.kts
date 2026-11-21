@@ -10,7 +10,7 @@ android {
     namespace = "dev.glibc.worker.domains.hotspot"
     compileSdk = 36
     defaultConfig {
-        applicationId = "dev.glibc.worker.domains.hotspot"
+        applicationId = "dev.glibc.worker.domains.bootstrap"
         minSdk = 29
         targetSdk = 36
         versionCode = 1

@@ -352,9 +352,8 @@ verifies input hashes for 23 selected desktop/Android suites
 and writes `android-jni/build/tests/same-thread-compatibility.json`. Missing,
 failed or stale evidence fails this check. Use `evidence_current` for the
 result of this matrix. The report's `full_compatibility: INCOMPLETE` field
-reflects its limited scope. The separate inline app fixture covers the reviewed
-ART late profile and live registration reclamation. See
-[VM adapter validation](../../../jvm-jni/docs/en/ADAPTER.md).
+reflects its limited scope. The separate [System.load application fixture](../../../jvm-jni/docs/en/SYSTEM_LOAD.md)
+validates the startup router under an application UID.
 
 Output directories are under `android-jni/build/tests/`, with `-android`,
 `-nonlocal` and `-recovery` suffixes identifying the selected fixture. They are

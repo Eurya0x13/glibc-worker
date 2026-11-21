@@ -6,16 +6,16 @@ import android.system.Os;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.concurrent.TimeUnit;
+import org.json.JSONObject;
 
 /** App-UID supervisor; HotSpot and both libc domains live in one native child. */
 public final class MainActivity extends Activity {
-  private static native void runInline(String[] arguments, String report);
-
   @Override
   public void onCreate(Bundle state) {
     super.onCreate(state);
@@ -65,14 +65,28 @@ public final class MainActivity extends Activity {
       if (!server.isDirectory() && !server.mkdirs()) {
         throw new IllegalStateException("Cannot create JRE server directory");
       }
-      // Preserve the JRE's expected layout while executable files stay in
-      // Android's extracted native-library directory.
+      JSONObject artifact = new JSONObject(
+          new String(Files.readAllBytes(new File(files, "jre/artifact.json").toPath()),
+              StandardCharsets.UTF_8));
+      boolean privateLayout = "private-readonly".equals(artifact.optString("deployment"));
+      String boot = privateLayout ? files + "/jre/lib" : nativePath;
+      String jvm = privateLayout ? boot + "/server/libjvm.so" : nativePath + "/libjvm.so";
+
       for (String name : new String[] {"jvm", "java", "verify", "net", "nio", "zip", "jimage"}) {
         String fileName = "lib" + name + ".so";
         File link =
             new File(getFilesDir(), "jre/lib/" + (name.equals("jvm") ? "server/" : "") + fileName);
         Files.deleteIfExists(link.toPath());
-        Os.symlink(nativePath + "/" + fileName, link.getAbsolutePath());
+        // AngelAura locates lib/modules from the mapped libjvm's physical path.
+        if (privateLayout) {
+          try (InputStream in = new FileInputStream(nativePath + "/" + fileName);
+              FileOutputStream out = new FileOutputStream(link)) {
+            Os.chmod(link.getAbsolutePath(), 0444);
+            in.transferTo(out);
+          }
+        } else {
+          Os.symlink(nativePath + "/" + fileName, link.getAbsolutePath());
+        }
       }
       File guestRuntime = new File(getFilesDir(), "guest-runtime");
       if (!guestRuntime.isDirectory() && !guestRuntime.mkdirs()) {
@@ -100,6 +114,9 @@ public final class MainActivity extends Activity {
       builder.environment().remove("GW_DOMAIN_MODE");
       builder.environment().put("GW_THREADS", "8");
       builder.environment().put("GW_BENCH", "0");
+      if (systemLoad && getIntent().getBooleanExtra("signalPressure", false)) {
+        builder.environment().put("GW_BOOTSTRAP_SIGNAL_PRESSURE", "1");
+      }
       // Explicit experiment-only launch options; one fresh process per sample.
       if (getIntent().getBooleanExtra("benchmark", false)) {
         String mode = getIntent().getStringExtra("backend");
@@ -114,33 +131,17 @@ public final class MainActivity extends Activity {
         builder.environment().put("GW_BENCH_DIRECT", "direct".equals(mode) ? "1" : "0");
       }
       builder.environment().put("GW_JAVA_HOME", files + "/jre");
-      builder.environment().put("GW_JAVA_BOOT_LIB", nativePath);
-      builder.environment().put("GW_JVM_LIB", nativePath + "/libjvm.so");
+      builder.environment().put("GW_JAVA_BOOT_LIB", boot);
+      builder.environment().put("GW_JVM_LIB", jvm);
       builder.environment().put("GW_DOMAIN_JAR", files + "/domain-probe.jar");
-      builder.environment().put("LD_LIBRARY_PATH", nativePath);
+      builder.environment().put("LD_LIBRARY_PATH",
+          privateLayout ? boot + "/server:" + boot + ":" + nativePath : nativePath);
       if (systemLoad) {
         builder.environment().put("GW_SYSTEM_JAR", files + "/system-fixture.jar");
         builder.environment().put("GW_SYSTEM_IMAGE", nativePath + "/libdomain_system_load.so");
         builder.environment().put("GW_SYSTEM_REJECT", nativePath + "/libdomain_system_reject.so");
         builder.environment().put(
             "GW_SYSTEM_ORDINARY", nativePath + "/libdomain_system_ordinary.so");
-      }
-      if (new File(nativePath, "libdomain_late_bridge.so").isFile()) {
-        builder.environment().put("GW_LATE_BRIDGE", nativePath + "/libdomain_late_bridge.so");
-        if (new File(getFilesDir(), "inline-vm.flag").isFile()) {
-          for (java.util.Map.Entry<String, String> setting : builder.environment().entrySet()) {
-            if (setting.getKey().startsWith("GW_") || setting.getKey().equals("LD_LIBRARY_PATH")) {
-              Os.setenv(setting.getKey(), setting.getValue(), true);
-            }
-          }
-          if (!builder.environment().containsKey("GW_DOMAIN_MODE")) {
-            Os.unsetenv("GW_DOMAIN_MODE");
-          }
-          System.loadLibrary("domain_inline_host");
-          runInline(builder.command().subList(1, builder.command().size()).toArray(new String[0]),
-              report.getAbsolutePath());
-          throw new IllegalStateException("Inline VM unexpectedly returned");
-        }
       }
       builder.redirectErrorStream(true);
       builder.redirectOutput(report);
@@ -153,6 +154,7 @@ public final class MainActivity extends Activity {
         result = "APP_DOMAIN_EXIT=" + process.exitValue() + "\n";
       }
       result += "APP_DOMAIN_SUPERVISOR_UID=" + Os.getuid() + "\n";
+      result += "APP_DOMAIN_SUPERVISOR_PID=" + android.os.Process.myPid() + "\n";
       try (FileOutputStream out = new FileOutputStream(report, true)) {
         out.write(result.getBytes(StandardCharsets.UTF_8));
       }
@@ -162,8 +164,9 @@ public final class MainActivity extends Activity {
             new StringBuilder("Compatibility fixture only; performance not measured.\n\n");
         for (String line : result.split("\n")) {
           if (line.startsWith("HOTSPOT_") || line.startsWith("JNI_DOMAIN_")
-              || line.startsWith("SYSTEM_LOAD_") || line.startsWith("{")
-              || line.startsWith("Warning:") || line.startsWith("APP_DOMAIN_")) {
+              || line.startsWith("SYSTEM_LOAD_") || line.startsWith("NATIVE_")
+              || line.startsWith("{") || line.startsWith("Warning:")
+              || line.startsWith("APP_DOMAIN_")) {
             summary.append(line).append("\n\n");
           }
         }

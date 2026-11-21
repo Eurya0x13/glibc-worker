@@ -27,6 +27,9 @@ android-jni 的 Host 资源存储固定使用 Zig 0.16.0，构建机器必须提
 
 真实 VM 冒烟/覆盖入口归 [jvm-jni](../../jvm-jni/docs/zh/README.md)。Pojav 集成不属于任何核心项目。
 
+原生启动期接入使用已安装的 SDK，将 `glibc_worker::signal_bootstrap` 与所需的 JNI
+静态 target 链接到同一个可执行程序。参见 [启动期信号路由](../../core/docs/zh/SIGNAL_BOOTSTRAP.md)。
+
 ## GitHub Actions
 
 推送到 `main` 或向 `main` 发起拉取请求时会运行 [CI](../../.github/workflows/ci.yml)，

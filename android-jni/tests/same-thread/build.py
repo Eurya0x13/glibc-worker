@@ -20,25 +20,11 @@ parser.add_argument("--ndk", type=Path, required=True)
 parser.add_argument("--jdk", type=Path, required=True)
 parser.add_argument("--runtime", type=Path, required=True)
 parser.add_argument("--system-load", action="store_true")
-parser.add_argument("--late-signal", action="store_true")
-parser.add_argument("--art-signal-profile", type=Path)
-parser.add_argument("--host-libc-signal-profile", type=Path)
 parser.add_argument("--jvm-family", type=int, choices=range(1, 7))
 args = parser.parse_args()
-if args.late_signal and not args.system_load:
-    parser.error("Late signal fixture requires --system-load")
 android = args.abi == "arm64-v8a"
-if args.art_signal_profile and not (android and args.late_signal):
-    parser.error("ART signal profile requires ARM64 late loading")
-if args.host_libc_signal_profile and not (android and args.late_signal):
-    parser.error("Host libc signal profile requires ARM64 late loading")
 out = (
-    root
-    / (
-        "jvm-jni/build/tests/late-system-load"
-        if args.late_signal
-        else "jvm-jni/build/tests/system-load"
-    )
+    root / "jvm-jni/build/tests/system-load"
     if args.system_load
     else project / "build/tests/same-thread"
 ) / args.abi
@@ -138,6 +124,7 @@ host_sources = [
     core / "nonlocal.c",
     core / "signal-relay.c",
     core / "signal-interpose.c",
+    core / "signal-bootstrap.c",
     root / "core/src/bootstrap/clone.S",
     root / "core/src/bootstrap/loader_image.c",
     root / "core/src/domain/signal-contract.c",
@@ -152,8 +139,8 @@ if android:
     libs = root / "jvm-jni/build/tests/android/jniLibs/arm64-v8a"
     profile = json.loads((assets / "jre-artifact.json").read_text())
     header = root / "jvm-jni/build/native/jre-layout.h"
-    if profile["major"] != 17:
-        parser.error("Pinned JRE17 required")
+    if profile["major"] != 17 and profile["id"] != "angelaura-21-arm64":
+        parser.error("Pinned Android JRE17 or AngelAura JRE21 required")
     for name in ["libjvm", "libjava"]:
         digest = hashlib.sha256(
             (libs / Path(profile[name]["path"]).name).read_bytes()
@@ -183,7 +170,7 @@ if args.system_load:
             for n in ("adapter", "profiles", "families", "calls")
         ],
     ]
-    # Explicitly reviewed JRE17 family; Android may carry an upstream backport.
+    # Use the explicitly selected artifact and its native-loading family.
     if android:
         family = profile["family"]
         java_hash = profile["libjava"]["sha256"]
@@ -200,8 +187,9 @@ if args.system_load:
         vm_hash = hashlib.sha256(
             (args.jdk / "lib/server/libjvm.so").read_bytes()
         ).hexdigest()
+    profile_name = profile["id"] if android else "same-thread-explicit-desktop"
     (out / "jre-adapter-profile.h").write_text(
-        '#define GW_JVM_PROFILE_NAME "same-thread-explicit-jre17"\n'
+        f'#define GW_JVM_PROFILE_NAME "{profile_name}"\n'
         + f"#define GW_JVM_PROFILE_FAMILY {family}\n"
         + f'#define GW_JVM_LIBJAVA_SHA256 "{java_hash}"\n'
         + f'#define GW_JVM_LIBJVM_SHA256 "{vm_hash}"\n'
@@ -225,131 +213,12 @@ def compile(cc, target, files, extra):
     subprocess.run(command, check=True)
 
 
-if args.late_signal:
-    vm_file = (
-        libs / "libjvm.so" if android else args.jdk / "lib/server/libjvm.so"
-    )
-    relocations = subprocess.check_output(
-        ["readelf", "-rW", str(vm_file)], text=True
-    )
-    entries = []
-    for row in relocations.splitlines():
-        columns = row.split()
-        if len(columns) >= 5 and columns[4].split("@")[0] in {
-            "sigaction",
-            "sigaction64",
-            "signal",
-            "bsd_signal",
-        }:
-            entries.append(columns)
-    if (
-        len(entries) != 1
-        or entries[0][4].split("@")[0] != "sigaction"
-        or entries[0][2]
-        != ("R_AARCH64_JUMP_SLOT" if android else "R_X86_64_JUMP_SLOT")
-    ):
-        parser.error("Review this VM's signal imports before adding a profile")
-    offset = int(entries[0][0], 16)
-    symbol_table = subprocess.run(
-        ["nm", "-a", str(vm_file)], capture_output=True, text=True, check=False
-    ).stdout
-    cache = [
-        line.split()[0]
-        for line in symbol_table.splitlines()
-        if line.endswith(" _ZZL20check_signal_handleriE12os_sigaction")
-    ]
-    lookup = [
-        line.split()[0]
-        for line in relocations.splitlines()
-        if len(line.split()) >= 5 and line.split()[4].split("@")[0] == "dlsym"
-    ]
-    if len(cache) != 1 or len(lookup) != 1:
-        parser.error(
-            "Late signal profile requires reviewed HotSpot query cache and dlsym import"
-        )
-    (out / "late-signal-profile.h").write_text(
-        f"#define GW_LATE_SIGACTION_OFFSET 0x{offset:x}UL\n"
-        f"#define GW_LATE_DLSYM_OFFSET 0x{int(lookup[0], 16):x}UL\n"
-        f"#define GW_LATE_QUERY_CACHE_OFFSET 0x{int(cache[0], 16):x}UL\n"
-        f'#define GW_LATE_JVM_SHA256 "{vm_hash}"\n'
-    )
-    if args.art_signal_profile:
-        art_profile = json.loads(args.art_signal_profile.read_text())
-        if art_profile["abi"] != "arm64-v8a" or art_profile["schema"] != 1:
-            parser.error("Unsupported ART signal profile")
-        with (out / "late-signal-profile.h").open("a") as header:
-            header.write(
-                f'#define GW_ART_SIGCHAIN_SHA256 "{art_profile["sha256"]}"\n'
-            )
-            for name in ("sigaction", "sigaction64"):
-                offset = art_profile["bottom_callbacks"][name]
-                header.write(
-                    f"#define GW_ART_{name.upper()}_OFFSET {offset}UL\n"
-                )
-    if args.host_libc_signal_profile:
-        host_profile = json.loads(args.host_libc_signal_profile.read_text())
-        imports = host_profile.get("imports", {})
-        digest = host_profile.get("sha256", "")
-        if (
-            host_profile.get("abi") != "arm64-v8a"
-            or host_profile.get("schema") != 1
-            or len(digest) != 64
-            or any(c not in "0123456789abcdef" for c in digest)
-            or set(imports) != {"sigaction", "sigaction64"}
-            or any(
-                type(offset) is not int or offset <= 0 or offset % 8
-                for offset in imports.values()
-            )
-        ):
-            parser.error("Unsupported Host libc signal profile")
-        with (out / "late-signal-profile.h").open("a") as header:
-            header.write(f'#define GW_HOST_LIBC_SHA256 "{digest}"\n')
-            for name, offset in imports.items():
-                header.write(
-                    f"#define GW_HOST_{name.upper()}_OFFSET {offset}UL\n"
-                )
-    # The launcher has no router exports. All bridge code is dlopened only
-    # after JNI_CreateJavaVM has completed, not linked into the launcher.
-    launcher = [jvm / "late-host.c", jvm / "vm-start.c"]
-    if android:
-        launcher += [
-            harness / "jre_layout_spike.c",
-            harness / "jre_exec_compat.c",
-        ]
-    compile(host_cc, "host", launcher, host_flags)
-    if android:
-        compile(
-            host_cc,
-            "inline-host.so",
-            launcher,
-            [*host_flags, "-shared", "-DGW_INLINE_VM"],
-        )
-
-    host_sources = [p for p in host_sources if p not in launcher]
-    host_sources += [root / "jvm-jni/src/native/signal_profile.c"]
-    if android:
-        host_sources.append(source / "signal-reclaim.c")
-    compile(
-        host_cc,
-        "late-bridge.so",
-        host_sources,
-        [
-            *host_flags,
-            "-shared",
-            "-Wl,-Bsymbolic-functions",
-            "-Wl,-z,defs",
-            "-DGW_EXPERIMENT_LATE_SIGNAL",
-            out / "host_store.o",
-            host_ffi / "lib/libffi.a",
-        ],
-    )
-else:
-    compile(
-        host_cc,
-        "host",
-        host_sources,
-        [*host_flags, out / "host_store.o", host_ffi / "lib/libffi.a"],
-    )
+compile(
+    host_cc,
+    "host",
+    host_sources,
+    [*host_flags, out / "host_store.o", host_ffi / "lib/libffi.a"],
+)
 
 guest_sources = [
     project / "src/guest/domain_service.c",
@@ -407,7 +276,7 @@ java = [
 if args.system_load:
     java += [
         jvm / "SystemLoadProbe.java",
-        jvm / "LateSignalPressure.java",
+        jvm / "SignalPressure.java",
         root / "jvm-jni/src/java/dev/glibc/worker/JvmAdapter.java",
     ]
     isolated = out / "isolated-classes"
@@ -508,22 +377,11 @@ if args.system_load:
             )
         ],
     ]
-if args.late_signal:
-    files += [
-        *launcher,
-        root / "jvm-jni/include/signal_profile.h",
-        out / "late-signal-profile.h",
-        out / "late-bridge.so",
-        vm_file,
-    ]
-if args.late_signal and android:
-    files += [out / "inline-host.so"]
-if args.art_signal_profile:
-    files += [args.art_signal_profile.resolve()]
 files += [core / "signal-router.h", project / "src/host/domain_runtime.h"]
+if android:
+    files.append(source / "bootstrap-check.h")
 manifest = {
-    "late_signal": args.late_signal,
-    "art_signal_profile": art_profile if args.art_signal_profile else None,
+    "signal_bootstrap": True,
     "system_load": args.system_load,
     "abi": args.abi,
     "host_libc": "bionic" if android else "glibc",

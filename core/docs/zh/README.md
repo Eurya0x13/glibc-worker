@@ -14,7 +14,7 @@ cmake --install build
 ctest --test-dir build --output-on-failure
 ```
 
-默认输出只在本项目 `build/`。Android 构建通过 CMake 的 NDK toolchain、`ANDROID_ABI` 与 `ANDROID_PLATFORM` 选择目标；不需要 JDK、JNI 头或其他项目源码。安装包为 `GlibcWorkerCore`，目标包括 `glibc_worker::core`、`glibc_worker::domains` 和显式选择的 `glibc_worker::signal_interpose`。详见 [同线程域与信号边界](DOMAINS.md)。
+默认输出只在本项目 `build/`。Android 构建通过 CMake 的 NDK toolchain、`ANDROID_ABI` 与 `ANDROID_PLATFORM` 选择目标；不需要 JDK、JNI 头或其他项目源码。安装包为 `GlibcWorkerCore`，目标包括 `glibc_worker::core`、`glibc_worker::domains` 和显式选择的 [`glibc_worker::signal_bootstrap`](SIGNAL_BOOTSTRAP.md)。详见 [同线程域与信号边界](DOMAINS.md)。
 
 匹配的 GNU loader/libc 由 `scripts/build-glibc.sh` 构建；Host/Guest libffi 由 `scripts/build-ffi.sh /path/to/ndk-clang` 构建。两项都是可选依赖工具，不进入基础 core 库的链接依赖。配置和 Termux 补丁都归本项目。下载在 `vendor/`、源码缓存在 `work/`、runtime 在 `build/glibc-runtime/<ABI>/`，libffi 在 `build/ffi-{android,linux}/<ABI>/`。runtime 发布匹配的 loader、libc、libpthread、libm、librt 和 libdl；调用者不读取 glibc 的内部构建树。
 

@@ -28,9 +28,6 @@ SUITES = [
             "-recovery-vm-signals",
         )
     ),
-    "android-jni/build/tests/runtime-sdk-android-late",
-    "android-jni/build/tests/runtime-sdk-android-late-nonlocal-recovery-pending",
-    "jvm-jni/build/tests/signal-profile-android",
 ]
 
 

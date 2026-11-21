@@ -27,6 +27,9 @@ Legacy single-DSO integration consumes `libglibc_bridge.so`, GNU service, helper
 
 Real VM smoke/coverage belongs to [jvm-jni](../../jvm-jni/docs/en/README.md). Pojav integration is outside the core projects.
 
+For native startup, use the installed SDK and link `glibc_worker::signal_bootstrap`
+with the required static JNI target. See the [bootstrap guide](../../core/docs/en/SIGNAL_BOOTSTRAP.md).
+
 ## GitHub Actions
 
 [CI](../../.github/workflows/ci.yml) runs for pushes and pull requests to

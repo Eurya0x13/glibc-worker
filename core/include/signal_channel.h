@@ -10,7 +10,7 @@ extern "C" {
 
 enum { GW_HOST_FAULT_SIGNAL_COUNT = 6 };
 
-/* Link glibc_worker::signal_interpose and prepare/adopt the Host router first.
+/* Link glibc_worker::signal_bootstrap and prepare the Host router first.
  * Before starting the VM, creating recipients or exposing Host signalfds,
  * reserve six distinct, unused public RT numbers. Supply the actual reviewed
  * numbers: this API does not select them or override existing registrations.

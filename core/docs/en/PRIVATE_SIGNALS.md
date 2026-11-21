@@ -67,11 +67,9 @@ forwards pre-`main` registrations natively before enabling the router. Its real
 carriers execute GNU code. The native Bionic handlers run with restored Host
 TLS. Their ordinary Guest syscall interruptions retain native EINTR semantics.
 
-Late Android integration additionally requires a reviewed owning-libc artifact
-and both Bionic action imports in the [signal profile](../../../jvm-jni/docs/en/ADAPTER.md#signal-registration-integration).
-These data sites preserve the reviewed ART front when present. Installed JNI
-tests exercise Bionic registration with the selected VM already running and
-verify that its kernel routes remain intact afterward.
+Installed JNI tests exercise Bionic registration with the selected VM already
+running and verify the kernel routes afterward. Start the
+[Host signal bootstrap](SIGNAL_BOOTSTRAP.md) before loading the VM.
 
 ## GNU Host lifecycle
 

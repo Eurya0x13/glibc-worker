@@ -30,26 +30,17 @@ worker 和 domain 三种选择，并检查缺省用例实际创建收养域。�
 1. 存在长期存活的 VM 清理线程时，先停止 Guest worker 会令其进入 DEAD，随后 Host 的空闲检查正确拒绝关闭。现已按既有生产合同改为 **先停止 Host、恢复 VM 钩子，再 join Guest worker**。
 2. 同线程模式创建两个域，其中调用线程的域正常析构，VM 清理线程的一个空闲域保留到进程退出。不能在其他线程上执行其 TLS 析构。该行为沿用公开生命周期合同的“空闲 Host binding 可保留”，不宣称所有域资源或整个 GNU runtime 已回收；模块与 JNI 跳板已经卸载。
 
-## 晚加载 DSO 对照
+## 原生 Host 启动
 
-显式晚接入及 ART 同进程夹具使用制品绑定的信号路由，见 [晚接入信号链](LATE_SIGNALS.md)。
-以下对照记录了直接装载 DSO 时的处理器和导入状态。
+应用夹具以应用 UID 启动新的原生进程，在加载 HotSpot 前调用
+[Host 启动期信号路由](../../../core/docs/zh/SIGNAL_BOOTSTRAP.md)。测试在创建 VM 前、
+创建后及执行 Guest JNI 后校验路由。VM 运行期间调用 bionic 的真实私有注册接口，
+校验 Host TLS。每轮 ClassLoader 循环包含八路并发 native 调用、JFR、Java 栈遍历、
+GC 与 Guest 显式发信号。
 
-这个对照的 Pojav 启动流程在已有 JVM 中执行 `System.load(libglibc_entry.so)`，
-随后调用 `NativeEntry.start`。对应的信号夹具通过主可执行文件导出的 sigaction
-在 VM 启动前介入。
-
-`late-signal-probe.py` 在 Android bionic 进程中先安装 Host 处理器，再以 `RTLD_GLOBAL`
-装载 signal-router DSO。归档记录了以下观测。
-
-```json
-{"result":"UNSUPPORTED","init_status":0,"existing_handler_wrapped":false,"global_sigaction_interposed":false}
-```
-
-已有处理器仍未经过域路由。符号字段比较两次动态查找，实际 VM 导入绑定需要独立检查
-和接入。
-
-该对照的验证范围是注册与符号绑定。Pojav 及真实模组结果由外部验证工作区维护。
+启动器维护 JRE 启动布局和原生库装载 profile。Android 夹具支持固定的 Pojav JRE17
+和 AngelAura JRE21 制品。JRE17 使用测试夹具已审阅的路径缓存适配，AngelAura 通过
+公开 VM 调用接口启动，按原始目录布局放置只读库。
 
 ## 复现
 
@@ -61,6 +52,14 @@ python3 android-jni/tests/same-thread/build.py --system-load \
   --runtime "$DOMAIN_RUNTIME_X86_64"
 python3 jvm-jni/tests/same-thread/system-load.py \
   --build jvm-jni/build/tests/system-load/x86_64 --jdk "$JDK17"
+
+# 显式选择固定的 Android JRE 制品。
+export JAVA_HOME="$JDK17"
+export PATH="$JAVA_HOME/bin:$PATH"
+GW_ABI=arm64-v8a python3 jvm-jni/tests/scripts/prepare-zstd.py --fetch-only
+python3 android-jni/tests/gen-binding-capacity.py --output jvm-jni/build/native/generated
+GW_ABI=arm64-v8a GW_JRE_ARTIFACT=angelaura-21-arm64 \
+  python3 jvm-jni/tests/scripts/prepare-jre.py
 
 python3 android-jni/tests/same-thread/build.py --system-load \
   --abi arm64-v8a --jdk "$JDK17" --ndk "$ANDROID_NDK" \
@@ -74,8 +73,6 @@ python3 jvm-jni/tests/same-thread/android.py --system-load \
   --jre-assets jvm-jni/build/tests/android/assets/android-jre \
   --jre-libs jvm-jni/build/tests/android/jniLibs/arm64-v8a \
   --gradle "$GRADLE" --sdk "$ANDROID_HOME" --serial "$ANDROID_SERIAL"
-python3 jvm-jni/tests/same-thread/late-signal-probe.py \
-  --ndk "$ANDROID_NDK" --serial "$ANDROID_SERIAL"
 ```
 
 族 5 仅对应本次已核对的桌面制品；不要对其他 JRE 照搬。Hash 验证失败或签名不匹配必须停止，不通过降低校验强行启用。

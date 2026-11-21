@@ -34,9 +34,10 @@ struct gw_host_runtime_config {
 extern "C" {
 #endif
 /* High-level start for one runtime and one selected real VM per process.
- * SAME_THREAD is the zero/default backend. The caller prepares the Host signal
- * router before releasing VM/application threads; jvm-jni supplies any pinned
- * VM/ART integration. This API never selects a VM profile automatically.
+ * SAME_THREAD is the zero/default backend. Link the native Host executable
+ * with glibc_worker::signal_bootstrap and call gw_host_signal_bootstrap before
+ * loading the VM. Use gw_host_signal_contract_init after reserving any
+ * optional signal channels. The launcher selects and starts its own JVM.
  * Paths must refer to the matching packaged loader, GNU service and libc.
  * Returns zero or an errno value. Validation failures that leave the bridge
  * NEW admit a corrected retry without creating helpers. Once the bridge

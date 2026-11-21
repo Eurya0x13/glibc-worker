@@ -35,7 +35,22 @@ int domain_vm_start(JavaVM **vm, JNIEnv **env, int checked) {
   if (!create) {
     return 1;
   }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && JRE_EXPECTED_MAJOR == 21
+  /* AngelAura uses the regular layout and public invocation API. */
+  const char *libraries[] = {"libverify.so", "libjava.so", "libnet.so",
+                             "libnio.so"};
+  for (size_t i = 0; i < sizeof libraries / sizeof libraries[0]; ++i) {
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof path, "%s/%s", boot, libraries[i]) >=
+        (int)sizeof path) {
+      return 1;
+    }
+    if (!dlopen(path, RTLD_NOW | RTLD_GLOBAL)) {
+      fprintf(stderr, "HotSpot dependency %s: %s\n", path, dlerror());
+      return 1;
+    }
+  }
+#elif defined(__ANDROID__)
   /* The runner verifies this exact libjvm profile before deploying it. */
   Dl_info info = {0};
   char cached_path[PATH_MAX];

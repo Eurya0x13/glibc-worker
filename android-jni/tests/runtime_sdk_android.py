@@ -30,9 +30,6 @@ for name in (
 ):
     parser.add_argument("--" + name, type=Path, required=True)
 parser.add_argument("--serial", required=True)
-parser.add_argument("--jvm-prefix", type=Path)
-parser.add_argument("--late-signals", action="store_true")
-parser.add_argument("--expect-unconfigured-profile", action="store_true")
 parser.add_argument("--nonlocal", dest="nonlocal_test", action="store_true")
 parser.add_argument("--native-unwind", action="store_true")
 parser.add_argument("--worker-signals", action="store_true")
@@ -57,11 +54,7 @@ args = parser.parse_args()
 if args.worker_signals and (not args.native_unwind or args.nonlocal_test):
     parser.error("--worker-signals requires --native-unwind without --nonlocal")
 if args.adopted_signals and (
-    not args.native_unwind
-    or args.nonlocal_test
-    or args.worker_signals
-    or args.late_signals
-    or args.expect_unconfigured_profile
+    not args.native_unwind or args.nonlocal_test or args.worker_signals
 ):
     parser.error("--adopted-signals requires the bootstrap native-unwind run")
 if args.vm_signals and (
@@ -69,8 +62,6 @@ if args.vm_signals and (
     or args.nonlocal_test
     or args.worker_signals
     or args.adopted_signals
-    or args.late_signals
-    or args.expect_unconfigured_profile
 ):
     parser.error("--vm-signals requires the bootstrap native-unwind run")
 if args.host_fault_mask and not (args.nonlocal_test and args.native_unwind):
@@ -82,25 +73,8 @@ if args.unwind_windows and not (args.nonlocal_test and args.native_unwind):
 for key, value in vars(args).items():
     if isinstance(value, Path):
         setattr(args, key, value.resolve())
-if (
-    args.late_signals or args.expect_unconfigured_profile
-) and not args.jvm_prefix:
-    parser.error(
-        "An explicit installed JVM prefix is required for profile testing"
-    )
 source = project / "tests/runtime-sdk"
-late = args.late_signals or args.expect_unconfigured_profile
-out = (
-    project
-    / "build/tests"
-    / (
-        "runtime-sdk-android-unconfigured"
-        if args.expect_unconfigured_profile
-        else "runtime-sdk-android-late"
-        if late
-        else "runtime-sdk-android"
-    )
-)
+out = project / "build/tests/runtime-sdk-android"
 if args.nonlocal_test:
     out = out.with_name(out.name + "-nonlocal")
 if args.native_unwind:
@@ -141,8 +115,6 @@ def run(command, **kwargs):
 
 
 prefixes = [args.core_prefix, args.dlopen_prefix, args.jni_prefix]
-if args.jvm_prefix:
-    prefixes.append(args.jvm_prefix)
 run(
     [
         "cmake",
@@ -158,7 +130,6 @@ run(
         "-DCMAKE_PREFIX_PATH=" + ";".join(str(p.resolve()) for p in prefixes),
         "-DGW_JNI_INCLUDE_DIR=" + str(args.jni_include.resolve()),
         "-DGW_TEST_NATIVE_UNWIND=" + ("ON" if args.native_unwind else "OFF"),
-        "-DGW_TEST_LATE_SIGNALS=" + ("ON" if late else "OFF"),
         "-DGW_VM_STARTUP_ROOT=" + str(args.vm_startup_root.resolve()),
         "-DGW_VM_STARTUP_PROFILE=" + str(args.vm_startup_profile.resolve()),
     ]
@@ -244,7 +215,9 @@ run(
     ]
 )
 payload = out / "payload"
-payload.mkdir(exist_ok=True)
+if payload.exists():
+    shutil.rmtree(payload)
+payload.mkdir()
 files = []
 
 
@@ -256,21 +229,10 @@ def copy(origin, destination):
 
 for name in ("runtime_sdk", "service", "module.so", "probe.jar"):
     copy(out / name, payload / name)
-for prefix, name in (
-    (args.jni_prefix, "libgw_android_jni.so"),
-    (args.dlopen_prefix, "libgw_dlopen.so"),
-):
-    copy(prefix / "lib" / name, payload / name)
 copy(
     args.jni_prefix / "share/glibc-worker/android-jni/android-jni-helpers.jar",
     payload / "helpers.jar",
 )
-if args.jvm_prefix:
-    copy(args.jvm_prefix / "lib/libgw_jvm_jni.so", payload / "libgw_jvm_jni.so")
-    copy(
-        args.jvm_prefix / "share/glibc-worker/jvm-jni/jvm-jni-helpers.jar",
-        payload / "jvm-helpers.jar",
-    )
 for directory, runtime in (
     (payload, args.runtime),
     (payload / "ordinary", args.ordinary_runtime),
@@ -308,12 +270,6 @@ files += [
     Path(__file__).with_name("sdk_test_result.py"),
     args.vm_startup_profile,
 ]
-if args.jvm_prefix:
-    profile_file = (
-        args.jvm_prefix / "share/glibc-worker/jvm-jni/signal-profile.h"
-    )
-    if profile_file.is_file():
-        files.append(profile_file)
 files.append(project / "build-guest.sh")
 files += [Path(p) for p in (out / "sdk-inputs.txt").read_text().splitlines()]
 for directory in (
@@ -357,8 +313,6 @@ cases = [
     ("reject-ordinary-libc", True),
     ("reject-service", True),
 ]
-if args.expect_unconfigured_profile:
-    cases = [("unconfigured-profile", False)]
 if args.nonlocal_test:
     cases = [("nonlocal", False)]
     if args.native_unwind:
@@ -382,8 +336,6 @@ for mode, reject in cases:
     )
     runtime = remote + ("/ordinary" if mode == "reject-ordinary-libc" else "")
     classpath = remote + "/probe.jar:" + remote + "/helpers.jar"
-    if args.jvm_prefix:
-        classpath += ":" + remote + "/jvm-helpers.jar"
     env = {
         **({"GW_TEST_FATAL_MODE": str(fatal)} if fatal else {}),
         "GW_JAVA_HOME": remote + "/jre",
@@ -400,11 +352,6 @@ for mode, reject in cases:
         + remote
         + "/jre/lib/server",
         **({"GW_EXPECT_RUNTIME_REJECTION": "1"} if reject else {}),
-        **(
-            {"GW_EXPECT_SIGNAL_PROFILE_REJECTION": "1"}
-            if args.expect_unconfigured_profile
-            else {}
-        ),
     }
     native = [
         "/system/bin/timeout",
@@ -412,7 +359,7 @@ for mode, reject in cases:
         "/system/bin/linker64",
         remote + "/runtime_sdk",
         remote + "/jre/lib/server/libjvm.so",
-        remote + "/probe.jar:" + remote + "/helpers.jar",
+        classpath,
         runtime + "/ld-linux-aarch64.so.1",
         runtime,
         remote + ("/module.so" if mode == "reject-service" else "/service"),

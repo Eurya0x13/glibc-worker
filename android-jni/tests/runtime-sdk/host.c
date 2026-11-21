@@ -1,14 +1,12 @@
 #define _GNU_SOURCE
 #include "runtime_bridge.h"
+#include "signal_bootstrap.h"
 #include "signal-router.h"
 #include "signal_channel.h"
 #include "signal-relay.h"
 #include "signals.h"
 #ifdef GW_TEST_NATIVE_UNWIND
 #include "nonlocal.h"
-#endif
-#ifdef GW_TEST_LATE_SIGNALS
-#include "signal_profile.h"
 #endif
 #include <assert.h>
 #include <dlfcn.h>
@@ -487,14 +485,6 @@ static struct sigaction original_segv;
 static _Thread_local volatile int relay_canary = 0x7193;
 static _Atomic unsigned relay_deliveries;
 static _Atomic long relay_tid;
-
-#ifdef GW_TEST_LATE_SIGNALS
-/* This explicitly participating consumer starts with native registrations.
- * A late profile patches reviewed VM/libc imports, not every application's
- * native call site. Route our own registrations only after installation. */
-static signal_router_backend consumer_action = sigaction;
-#define sigaction(...) consumer_action(__VA_ARGS__)
-#endif
 
 #ifdef __ANDROID__
 static _Atomic unsigned private_calls;
@@ -1757,9 +1747,7 @@ int main(int argc, char **argv) {
 #ifdef GW_TEST_NATIVE_UNWIND
   assert(!gw_nonlocal_init());
 #endif
-#ifndef GW_TEST_LATE_SIGNALS
-  assert(!signal_router_init());
-  assert(!signal_router_adopt());
+  assert(!gw_host_signal_bootstrap());
   if (getenv("GW_TEST_HOST_FAULT_MASK") || test_adopted_signals) {
     const int notifications[] = {SIGRTMIN,     SIGRTMIN + 1, SIGRTMIN + 2,
                                  SIGRTMIN + 3, SIGRTMIN + 4, SIGRTMIN + 5};
@@ -1768,7 +1756,6 @@ int main(int argc, char **argv) {
   if (test_vm_signals) {
     assert(!gw_host_signal_reclaim_enable(47));
   }
-#endif
   if (!strcmp(argv[8], "nonlocal")) {
     install_asynchronous_fault();
   }
@@ -1790,21 +1777,6 @@ int main(int argc, char **argv) {
   assert(create(&vm, (void **)&env, &args) == JNI_OK);
   free(classpath);
 #endif
-#ifdef GW_TEST_LATE_SIGNALS
-  int installed = domain_late_signal_install(env);
-  if (getenv("GW_EXPECT_SIGNAL_PROFILE_REJECTION")) {
-    assert(installed == ENOTSUP);
-    assert(!signal_router_enabled());
-    puts("{\"result\":\"PASS\",\"case\":\"unconfigured-signal-profile\"}");
-    fflush(NULL);
-    _exit(0);
-  }
-  assert(!installed);
-  consumer_action = signal_router_action;
-  if (test_vm_signals) {
-    assert(!domain_late_signal_reclaim_enable(47));
-  }
-#endif
 #ifdef __ANDROID__
   private_host_registration();
 #endif
@@ -1814,10 +1786,8 @@ int main(int argc, char **argv) {
       .flags = GW_HOST_DIRECT_IMAGES,
       .native_directory = argv[7],
       .image_catalog = argv[7]};
-  struct gw_signal_contract signals = {
-      .version = GW_SIGNAL_CONTRACT_V1,
-      .size = sizeof signals,
-      .host_reserved = signal_router_reserved()};
+  struct gw_signal_contract signals;
+  assert(!gw_host_signal_contract_init(&signals));
   struct gw_host_runtime_config config = {.version = GW_HOST_RUNTIME_CONFIG_V1,
                                           .size = sizeof config,
                                           .loader_path = argv[3],
@@ -1939,11 +1909,7 @@ int main(int argc, char **argv) {
       borrowed_relay ? "true" : "false");
 
   assert((*vm)->DestroyJavaVM(vm) == JNI_OK);
-#ifdef GW_TEST_LATE_SIGNALS
-  assert(!domain_late_signal_restore());
-#else
-  assert(!signal_router_restore());
-#endif
+  assert(!gw_host_signal_restore());
   printf(
       "{\"result\":\"PASS\",\"backend\":\"%s\",\"array_bytes\":%d,"
       "\"nonlocal\":%s}\n",

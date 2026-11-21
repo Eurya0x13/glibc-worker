@@ -74,8 +74,8 @@ public final class SystemLoadProbe {
       }
       check(rejected, "other ClassLoader cannot own same image");
     }
-    if (System.getenv("GW_LATE_BRIDGE") != null) {
-      LateSignalPressure.run(fixture);
+    if (System.getenv("GW_BOOTSTRAP_SIGNAL_PRESSURE") != null) {
+      SignalPressure.run(fixture);
     }
     WeakReference<ClassLoader> reference = new WeakReference<>(owner);
     owner.close();

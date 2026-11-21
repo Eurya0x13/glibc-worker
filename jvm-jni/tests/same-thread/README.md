@@ -75,7 +75,10 @@ python3 jvm-jni/tests/same-thread/android.py \
   --gradle "$GRADLE" --sdk "$ANDROID_HOME" --serial "$ANDROID_SERIAL"
 ```
 
-APK 包名为 `dev.glibc.worker.domains.hotspot`。Activity 只负责解包 JRE 数据、将 JRE 预期的库路径链接到 Android 原生库目录，并通过 linker64 启动隔离子进程。**HotSpot、bionic 和 glibc 位于同一个原生子进程中，具有应用 UID；它没有与父进程 ART 共存。** 测试限时 120 秒，失败/超时保存日志并丢弃子进程，不回退到现有 worker 冒充通过。
+APK 包名为 `dev.glibc.worker.domains.bootstrap`。Activity 按显式选定的制品布局
+部署 JRE，通过 linker64 启动应用 UID 下的原生子进程。HotSpot、bionic 和 glibc
+位于该子进程，ART 位于 Activity 所在的父进程。测试限时 120 秒，报告记录
+子进程退出状态。
 
 输出位于本项目 `build/tests/same-thread/`：`linux/`、`android/` 保存构建 manifest、stdout/stderr 和成功 summary；`android-app-evidence/` 保存应用报告和 APK 哈希。失败时清除上一轮成功摘要。
 
@@ -89,14 +92,6 @@ Android exec 子进程复用 `jre_exec_compat.c`，在启动旧 HotSpot 前关�
 
 ## Production System.load integration
 
-真实装载钩子、ClassLoader 自动卸载与应用身份验证现有独立入口，见 [SYSTEM_LOAD.md](../../docs/zh/SYSTEM_LOAD.md)。该接入通过不代表 Pojav 晚加载的信号路由已经可用；文档同时保留真机最小反例。
+真实装载钩子、ClassLoader 自动卸载和应用 UID 下的启动期路由见 [System.load 接入](../../docs/zh/SYSTEM_LOAD.md)。此夹具支持固定的 Android JRE17 和 JRE21 制品。
 
-
-## Explicit late loading and ART coexistence
-
-[LATE_SIGNALS.md](../../docs/zh/LATE_SIGNALS.md) describes the `--late-signal` build and
-`--inline-vm` APK mode. Unlike the original exec-child fixture above, inline mode
-keeps ART, HotSpot and both libc domains in the same process. It requires an
-explicitly reviewed ART signal profile; it is not generic late ELF interposition.
-
-生产装载与 ART 共存后的收益测试见 [PERFORMANCE.md](../../docs/zh/PERFORMANCE.md)。它比较同一 APK 中的 worker、同线程后端及普通 bionic JNI 参考。
+同一 APK 中的 worker、同线程后端与普通 bionic JNI 对比见 [性能测试](../../docs/zh/PERFORMANCE.md)。

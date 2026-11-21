@@ -633,18 +633,14 @@ def execute_case(
         ]
 
     if require_host_private:
-        expected = (
-            []
-            if mode == "unconfigured-profile"
-            else [
-                {
-                    "stage": "bionic-private-registration",
-                    "result": "PASS",
-                    "vm_running": True,
-                    "host_tls": True,
-                }
-            ]
-        )
+        expected = [
+            {
+                "stage": "bionic-private-registration",
+                "result": "PASS",
+                "vm_running": True,
+                "host_tls": True,
+            }
+        ]
         failed |= [
             r for r in rows if r.get("stage") == "bionic-private-registration"
         ] != expected

@@ -45,8 +45,7 @@ static int start_runtime(JNIEnv *env, const struct gw_host_runtime_config *c) {
 #endif
   }
 
-  /* Preparing a VM's existing signal chain belongs to its integration layer.
-   * Do not discover or patch ART/HotSpot from this generic JNI component. */
+  /* The native Host prepares its signal router before loading the VM. */
   if (!signal_router_enabled() ||
       c->signals->host_reserved != signal_router_reserved()) {
     return EBUSY;

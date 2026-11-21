@@ -89,7 +89,7 @@ python3 core/tests/same-thread/run.py \
 `--signals` 在登记的载体线程上安装替代信号栈。汇编入口先以无 TLS/libc 依赖的方式查找载体，恢复 Host TP（ARM64 同时恢复 x18），再进入 C 处理器；退出后恢复被中断域。覆盖 Linux 实时信号 50、处理器内嵌套信号 51，以及 Host/Guest 各一次明确识别的 SIGSEGV 故障指令和 PC 恢复，共 48 次同步故障恢复。安装前检查两个测试通知信号未被占用，不覆盖 HotSpot 的 SIGUSR2。
 
 夹具独占这三个信号并登记 8 个载体。未识别故障或未登记线程进入该入口会终止
-测试进程。已有 VM 使用已审阅的 [晚接入信号链](../../../jvm-jni/docs/zh/LATE_SIGNALS.md)。
+测试进程。应用接入参见 [Host 启动期信号路由](../../docs/zh/SIGNAL_BOOTSTRAP.md)。
 
 应用启动路径可能继承屏蔽测试通知的线程信号掩码（早期使用 SIGUSR1/SIGUSR2 时已观察到）。夹具记录 `inherited_blocked_signal_masks`，只在登记后解除两个测试通知信号的屏蔽，并在发送者停止、待处理测试信号排空后恢复原掩码，逐信号验证恢复结果。不会屏蔽或重放同步硬件故障。信号处理次数随调度变化，不作为性能指标。
 

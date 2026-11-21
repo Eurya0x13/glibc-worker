@@ -115,8 +115,7 @@ if ((level >= 2)); then
 fi
 if ((level >= 3)); then
   adapter_args=(-DGW_JNI_INCLUDE_DIR="$PWD/android-jni/build/jni-include"
-    -DGW_JRE_ADAPTER_HEADER="${GW_JRE_ADAPTER_HEADER:-}"
-    -DGW_SIGNAL_PROFILE_HEADER="${GW_SIGNAL_PROFILE_HEADER:-}")
+    -DGW_JRE_ADAPTER_HEADER="${GW_JRE_ADAPTER_HEADER:-}")
   build_project jvm-jni "${adapter_args[@]}"
   jvm-jni/scripts/package-runtime.sh "$out" "$ccndk"
 fi

@@ -36,6 +36,9 @@ Planned work is tracked in the [project TODO](TODO.md).
 
 ## Same-thread domains
 
+Prepare [Host signal routing](../../core/docs/en/SIGNAL_BOOTSTRAP.md) in the native executable before
+loading the VM. Launchers maintain their JVM integration.
+
 Core maintains context switching, adoption patches and signal routing. The
 `runtime_bridge.h` startup API in android-jni defaults to same-thread execution.
 Embedders can explicitly select the worker backend for compatibility. It is

@@ -78,9 +78,11 @@ foreach(target android_jni android_jni_static)
   target_include_directories(${target} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include/glibc-worker/android-jni>)
-  target_link_libraries(${target} PUBLIC glibc_worker::dlopen glibc_worker::domains PRIVATE glibc_worker::android_ffi ${CMAKE_DL_LIBS})
+  target_link_libraries(${target} PUBLIC glibc_worker::domains PRIVATE glibc_worker::android_ffi ${CMAKE_DL_LIBS})
   set_target_properties(${target} PROPERTIES OUTPUT_NAME gw_android_jni)
 endforeach()
+target_link_libraries(android_jni PUBLIC glibc_worker::dlopen)
+target_link_libraries(android_jni_static PUBLIC glibc_worker::dlopen_static)
 find_package(Java COMPONENTS Development REQUIRED)
 set(helper_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/src/java/dev/glibc/worker/BridgeTypes.java

@@ -15,11 +15,10 @@ worker 后端进入兼容性维护模式。接入方可显式选择 `GW_EXECUTIO
 用于兼容既有环境或诊断对照。worker 继续接受正确性和兼容性修复，并保留 SDK
 回归覆盖。新增执行能力和性能优化面向默认的同线程后端。
 
-目标 VM 由传入的真实 JNIEnv 确定。android-jni 不创建 VM，也不选择 ART/HotSpot profile。宿主在允许应用调用前准备信号链；固定 VM 的晚接入由 jvm-jni 提供，不得传入另一个 VM 的 JNIEnv。
-
-start 在桥初始化前检查 `signal_router_guest_ready()`。已有自定义 Host 动作未经显式接管时
-返回 `ENOTSUP`。可执行程序启动阶段可在创建 VM 前初始化并接管路由器；晚接入使用已经审阅的
-集成实现。Host 注册路由不会让未保留的信号编号变为 VM 独占。
+启动器提供实际 JVM 线程上的 `JNIEnv`。加载 VM 前在原生主程序中完成
+[Host 启动期信号路由](../../../core/docs/zh/SIGNAL_BOOTSTRAP.md)。可选通道配好后，
+用 `gw_host_signal_contract_init()` 填充 `signals`。启动接口在准入 Guest 代码前
+校验 Host 注册和所有权契约。
 
 使用独立启动/生命周期线程，其上下文零服务 Guest 监督线程的控制通道。应用 native 调用在其他已附着 VM 线程上执行，按后端获得同线程收养域或 worker 绑定，保留已有 owner/control 模型。
 

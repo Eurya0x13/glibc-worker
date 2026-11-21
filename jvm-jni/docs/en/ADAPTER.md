@@ -60,76 +60,14 @@ Trampolines require complete method descriptors. The current private adapter use
 
 OpenJDK8–25 has multiple interface families and maintenance backports; never apply a pinned old hook to arbitrary JREs. No universal JRE source patch or ART private adapter is claimed.
 
-<a id="signal-registration-integration"></a>
+## Launcher-owned JVM integration
 
-## Signal registration integration
-
-Late signal integration has its own reviewed `GW_SIGNAL_PROFILE_HEADER`; the
-native-load family/profile does not supply it. In addition to the VM/ART sites,
-Android requires `GW_HOST_LIBC_SHA256`, `GW_HOST_SIGACTION_OFFSET` and
-`GW_HOST_SIGACTION64_OFFSET`. These identify the exact owning Bionic artifact
-and its two data imports. Missing or mismatched inputs return `ENOTSUP` before
-changing imports or admitting Guest recipients. Native desktop integration
-does not use Bionic inputs.
-
-The maintainer reviews the actual artifact's private registration call paths.
-The runtime verifies its file hash, owning mapping, slot alignment, original
-pointer and data-page protection. Plain HotSpot routes the imports to core;
-ART retains its reviewed public front and bottom routing. Both imports join
-the existing installation/rollback/restore transaction, with original RELRO
-permissions restored. No libc instructions are rewritten. Raw registrations
-bypassing these reviewed imports remain outside this adapter.
-
-The experiment builder accepts `--host-libc-signal-profile` with explicit
-`schema: 1`, `abi: "arm64-v8a"`, `sha256` and an `imports` object containing
-reviewed integer offsets for `sigaction` and `sigaction64`. It does not infer
-JRE families or generate new compatibility approvals. Stop application
-registration/JNI entry during installation and retain the integration through
-recipient and VM shutdown.
-
-Participating native consumers must route their own registrations through
-`signal_router_action`/`signal_router_action64`, or supply separately reviewed
-imports. Patching the VM and Bionic's internal PLT sites does not interpose
-every other DSO's call to the public libc symbol. The installed late JNI test
-uses this explicit consumer boundary; the Bionic run-on-all-threads test uses
-Bionic's actual internal registration path.
-
-After installing the selected profile, use
-`domain_late_signal_reclaim_enable` to reserve an unused public realtime
-signal before starting Guest or relay helpers. Call
-`domain_late_signal_reclaim` from a normal Host control thread. The proof
-checks actual Linux recipients, including native VM threads. The result is
-the number of retired registrations released. A missing acknowledgement
-returns `EBUSY`. Ordinary generations published under complete routing are
-eligible for this proof. A saved native context that names an unbound entry
-requires the embedding's full barrier. See the
-[core contract](../../../core/docs/en/DOMAINS.md#reclaiming-host-registrations).
-
-`tests/signal_profile.py` reuses an explicitly prepared installed Android late
-SDK payload and the matching VM startup header. Pass `--payload`,
-`--vm-startup-profile`, `--ndk` and `--serial`. It injects failure after each of
-the five plain-HotSpot/Bionic import writes and requires all five originals
-restored, the router disabled and normal `DestroyJavaVM` completion. Optional
-repeated `--rejection-prefix` arguments select separately built SDKs with
-intentionally missing Host fields, a wrong Bionic digest or an invalid import
-offset; each must reject with `ENOTSUP` before enabling the router and still
-destroy the VM. The reclaim case installs the reviewed profile, releases a
-replaced ordinary registration with JRE17 running, then destroys the VM and
-restores the router. The script retains input hashes and per-case output under
-`build/tests/signal-profile-android`.
-
-`tests/signal_reclaim.py` exercises live HotSpot and Android ART recipients
-using a process-owned test signal. Pass `--core-prefix` and `--jdk`. The
-ARM64 variant also takes `--serial`, `--ndk` and `--d8`. It verifies a
-blocked recipient, mapping release while the old callback is parked,
-successful return and subsequent delivery. The shell ART run uses
-`dalvikvm64` and keeps ART's installed chain in place. The
-[inline application fixture](LATE_SIGNALS.md)
-additionally installs the reviewed ART and Bionic imports after VM startup.
-It replaces an ordinary registration through ART's public entrypoints and
-releases the old mapping while the application's main ART thread runs its
-old callback. The callback returns and the same thread receives the new
-generation.
+The launcher selects, deploys and starts its JVM. When using the private
+`System.load` adapter, the launcher maintains the family mapping and reviewed
+libjava/libjvm digests for its supported artifacts. The
+[Host signal bootstrap](../../../core/docs/en/SIGNAL_BOOTSTRAP.md) runs in
+the native executable before JVM loading. It uses platform symbol interposition
+and is shared by JVM and non-JVM hosts.
 
 ## Runtime composition
 

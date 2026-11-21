@@ -57,7 +57,7 @@ if android:
             libs / filename,
             home / "lib" / ("server/" if name == "jvm" else "") / filename,
         )
-    for name in (["late-bridge.so"] if manifest.get("late_signal") else []) + [
+    for name in [
         "host",
         "guest",
         "probe.so",
@@ -115,8 +115,6 @@ env.update(
     GW_SYSTEM_REJECT=location + "/system-reject.so",
     GW_SYSTEM_ORDINARY=location + "/system-ordinary.so" if android else "",
 )
-if manifest.get("late_signal"):
-    env["GW_LATE_BRIDGE"] = location + "/late-bridge.so"
 results = []
 for requested in (None, "worker", "domain"):
     mode = "domain" if requested is None else requested
@@ -152,8 +150,6 @@ for requested in (None, "worker", "domain"):
     (evidence / (label + ".stdout")).write_text(completed.stdout)
     (evidence / (label + ".stderr")).write_text(completed.stderr)
     output = completed.stdout + completed.stderr
-    if manifest.get("late_signal") and "LATE_SIGNAL_INSTALL " not in output:
-        raise SystemExit(f"Late signal installation failed: {evidence}")
     selection = [
         json.loads(line.removeprefix("JNI_DOMAIN_SELECTION "))
         for line in output.splitlines()
@@ -161,33 +157,6 @@ for requested in (None, "worker", "domain"):
     ]
     if selection != [{"requested": label, "backend": mode}]:
         raise SystemExit(f"Wrong backend selection: {label}; {evidence}")
-    pressure = [
-        json.loads(line.removeprefix("LATE_SIGNAL_PRESSURE "))
-        for line in output.splitlines()
-        if line.startswith("LATE_SIGNAL_PRESSURE ")
-    ]
-    signal_install = [
-        json.loads(line.removeprefix("LATE_SIGNAL_INSTALL "))
-        for line in output.splitlines()
-        if line.startswith("LATE_SIGNAL_INSTALL ")
-    ]
-    signal_delivery = [
-        json.loads(line.removeprefix("LATE_SIGNAL_DELIVERIES "))
-        for line in output.splitlines()
-        if line.startswith("LATE_SIGNAL_DELIVERIES ")
-    ]
-    if manifest.get("late_signal") and (
-        len(pressure) != 3
-        or any(
-            row.get("result") != "PASS" or row.get("guest_overlaps", 0) < 1
-            for row in pressure
-        )
-        or len(signal_install) != 1
-        or signal_install[0].get("result") != "PASS"
-        or len(signal_delivery) != 1
-        or signal_delivery[0].get("sr", 0) < 1
-    ):
-        raise SystemExit(f"Late signal pressure failed: {evidence}")
     rows = [
         json.loads(line.removeprefix("SYSTEM_LOAD_RESULT "))
         for line in output.splitlines()
@@ -222,73 +191,9 @@ for requested in (None, "worker", "domain"):
             "contract": rows[0],
             "lifecycle": life[0],
             "command": command,
-            "pressure": pressure,
-            "signal_install": signal_install,
-            "signal_delivery": signal_delivery,
         }
     )
     print(label, rows[0], life[0], flush=True)
-rejections = []
-if manifest.get("late_signal"):
-    for point in range(1, 4):
-        settings = {
-            **env,
-            "GW_DOMAIN_MODE": "worker",
-            "GW_THREADS": "1",
-            "GW_BENCH": "0",
-            "GW_LATE_FAIL_AFTER": str(point),
-        }
-        command = (
-            [
-                *adb,
-                "shell",
-                "cd "
-                + shlex.quote(remote)
-                + " && /system/bin/timeout -s KILL 120 env "
-                + shlex.join(
-                    [k + "=" + v for k, v in settings.items()] + native
-                ),
-            ]
-            if android
-            else native
-        )
-        rejected = subprocess.run(
-            command,
-            env={**environment, **settings},
-            cwd=build,
-            capture_output=True,
-            text=True,
-            timeout=130,
-            check=False,
-        )
-        (evidence / f"rollback-{point}.stdout").write_text(rejected.stdout)
-        (evidence / f"rollback-{point}.stderr").write_text(rejected.stderr)
-        rollback = [
-            json.loads(line.removeprefix("LATE_SIGNAL_ROLLBACK "))
-            for line in rejected.stdout.splitlines()
-            if line.startswith("LATE_SIGNAL_ROLLBACK ")
-        ]
-        finished = [
-            json.loads(line.removeprefix("LATE_SIGNAL_REJECTION "))
-            for line in rejected.stdout.splitlines()
-            if line.startswith("LATE_SIGNAL_REJECTION ")
-        ]
-        if (
-            rejected.returncode
-            or len(rollback) != 1
-            or rollback[0].get("result") != "PASS"
-            or len(finished) != 1
-            or not finished[0].get("vm_destroyed")
-            or "handler modified" in rejected.stdout + rejected.stderr
-        ):
-            raise SystemExit(f"Late signal rollback {point} failed: {evidence}")
-        rejections.append(
-            {
-                "after_binding": point,
-                "rollback": rollback[0],
-                "command": command,
-            }
-        )
 (evidence / "summary.json").write_text(
     json.dumps(
         {
@@ -296,9 +201,7 @@ if manifest.get("late_signal"):
             "build": identity,
             "execution": "android-shell" if android else "desktop-linux",
             "results": results,
-            "rejections": rejections,
             "production_ready": False,
-            "late_signal": manifest.get("late_signal", False),
         },
         indent=2,
     )
