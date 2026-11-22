@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "adapter_internal.h"
+#include "internal/jni_bytes.h"
 #include "jni_vm_adapter.h"
 #include "dlopen_backend.h"
 #include <dlfcn.h>
@@ -30,13 +31,12 @@ static void release(JNIEnv *env) {
 
   gw_jvm.handle = gw_jvm.version = gw_jvm.from = gw_jvm.loaded = NULL;
   gw_jvm.verify = gw_jvm.remember = gw_jvm.forget = gw_jvm.signature = NULL;
+  gw_jvm.encode_path = gw_jvm.load_error = NULL;
   gw_jvm.shape = NULL;
   gw_jvm.backend = NULL;
 }
 
-/* Pins JvmAdapter and its four static helpers (digest check, owner
- * bookkeeping, signature reflection) before anything is hooked, so a
- * missing helper fails install with the VM untouched. */
+/* Resolve and retain the Java helpers before installing the JVM hooks. */
 static int resolve_helper(JNIEnv *env) {
   jclass local = (*env)->FindClass(env, "dev/glibc/worker/JvmAdapter");
   if (!local) {
@@ -49,9 +49,8 @@ static int resolve_helper(JNIEnv *env) {
     return 0;
   }
 
-  gw_jvm.verify =
-      (*env)->GetStaticMethodID(env, gw_jvm.helper, "verifyLibrary",
-                                "(Ljava/lang/String;Ljava/lang/String;)Z");
+  gw_jvm.verify = (*env)->GetStaticMethodID(env, gw_jvm.helper, "verifyLibrary",
+                                            "([BLjava/lang/String;)Z");
   if (!gw_jvm.verify) {
     return 0;
   }
@@ -71,14 +70,26 @@ static int resolve_helper(JNIEnv *env) {
   gw_jvm.signature =
       (*env)->GetStaticMethodID(env, gw_jvm.helper, "nativeSignature",
                                 "(Ljava/lang/String;J)Ljava/lang/String;");
-  return gw_jvm.signature != NULL;
+  if (!gw_jvm.signature) {
+    return 0;
+  }
+
+  gw_jvm.encode_path = (*env)->GetStaticMethodID(
+      env, gw_jvm.helper, "encodePath", "(Ljava/lang/String;)[B");
+  if (!gw_jvm.encode_path) {
+    return 0;
+  }
+
+  gw_jvm.load_error = (*env)->GetStaticMethodID(
+      env, gw_jvm.helper, "loadError", "([B)Ljava/lang/UnsatisfiedLinkError;");
+  return gw_jvm.load_error != NULL;
 }
 
 /* Delegates hashing to the Java helper and compares with the profile
  * digest; any pending exception counts as a mismatch. Only past this gate
  * is libjava dlopened. */
 static int verify_image(JNIEnv *env, const char *path, const char *expected) {
-  jstring file = (*env)->NewStringUTF(env, path);
+  jbyteArray file = gw_jni_new_bytes(env, path);
   if (!file) {
     return 0;
   }

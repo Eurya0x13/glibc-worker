@@ -92,6 +92,7 @@ if android:
     ]
 else:
     home = args.jdk.resolve()
+    environment["LC_ALL"] = "C.UTF-8"
     env = {
         "GW_CONFORMANCE": str(build / "conformance.so"),
         "GW_JAVA_HOME": str(home),
@@ -123,6 +124,7 @@ for requested in (None, "worker", "domain"):
         **env,
         "GW_THREADS": "1",
         "GW_BENCH": "0",
+        "GW_SYSTEM_LOAD_REGRESSIONS": "1",
     }
     if requested is not None:
         settings["GW_DOMAIN_MODE"] = requested
@@ -167,6 +169,11 @@ for requested in (None, "worker", "domain"):
         for line in output.splitlines()
         if line.startswith("SYSTEM_LOAD_LIFECYCLE ")
     ]
+    regressions = [
+        json.loads(line.removeprefix("SYSTEM_LOAD_REGRESSIONS "))
+        for line in output.splitlines()
+        if line.startswith("SYSTEM_LOAD_REGRESSIONS ")
+    ]
     if (
         completed.returncode
         or len(rows) != 1
@@ -175,6 +182,7 @@ for requested in (None, "worker", "domain"):
         or rows[0]["active_modules"]
         or rows[0]["live_closures"]
         or rows[0]["bionic_passthrough"] != android
+        or regressions != [{"result": "PASS", "unicode_paths": 2}]
         or len(life) != 1
         or not life[0]["vm_destroyed"]
         or (mode == "domain" and life[0]["domains_created"] < 2)
@@ -189,11 +197,12 @@ for requested in (None, "worker", "domain"):
             "backend": mode,
             "selection": label,
             "contract": rows[0],
+            "regressions": regressions[0],
             "lifecycle": life[0],
             "command": command,
         }
     )
-    print(label, rows[0], life[0], flush=True)
+    print(label, rows[0], regressions[0], life[0], flush=True)
 (evidence / "summary.json").write_text(
     json.dumps(
         {

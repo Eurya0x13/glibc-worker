@@ -1,4 +1,6 @@
 #include "adapter_internal.h"
+#include "dlopen_backend.h"
+#include "internal/jni_bytes.h"
 #include <stdio.h>
 
 /* Turns a loader error into UnsatisfiedLinkError, the exception HotSpot
@@ -8,12 +10,19 @@ void gw_jvm_throw(JNIEnv *env, const struct gw_loader_error *error) {
     return;
   }
 
-  jclass cls = (*env)->FindClass(env, "java/lang/UnsatisfiedLinkError");
-  if (cls) {
-    (*env)->ThrowNew(
-        env, cls,
-        error->message[0] ? error->message : "Guest operation failed");
-    (*env)->DeleteLocalRef(env, cls);
+  const char *message =
+      error->message[0] ? error->message : "Guest operation failed";
+  jbyteArray bytes = gw_jni_new_bytes(env, message);
+  if (!bytes) {
+    return;
+  }
+
+  jthrowable failure = (jthrowable)(*env)->CallStaticObjectMethod(
+      env, gw_jvm.helper, gw_jvm.load_error, bytes);
+  (*env)->DeleteLocalRef(env, bytes);
+  if (!(*env)->ExceptionCheck(env) && failure) {
+    (*env)->Throw(env, failure);
+    (*env)->DeleteLocalRef(env, failure);
   }
 }
 
@@ -82,13 +91,23 @@ static int publish_library(JNIEnv *env, jobject impl,
  * return GW_PASS for the caller's original path. A publish failure rolls
  * the backend load back. */
 int gw_jvm_open(JNIEnv *env, jobject impl, jstring name, int throw_if_fail) {
-  const char *path = (*env)->GetStringUTFChars(env, name, NULL);
-  if (!path) {
+  jbyteArray bytes = (jbyteArray)(*env)->CallStaticObjectMethod(
+      env, gw_jvm.helper, gw_jvm.encode_path, name);
+  if ((*env)->ExceptionCheck(env) || !bytes) {
+    return GW_ERROR;
+  }
+
+  char path[GW_LOADER_PATH];
+  struct gw_loader_error error = {0};
+  bool valid = gw_jni_read_path(env, bytes, path, sizeof path);
+  (*env)->DeleteLocalRef(env, bytes);
+  if (!valid) {
+    gw_dlopen_fail(&error, GW_E_ARGUMENT, "Invalid native library path");
+    gw_jvm_throw(env, &error);
     return GW_ERROR;
   }
 
   struct gw_loader_library library = {0};
-  struct gw_loader_error error = {0};
   int rc = gw_jvm.backend->open(env, path, GW_OPEN_AUTO, &library, &error);
   if (rc == GW_OK) {
     printf(
@@ -96,7 +115,6 @@ int gw_jvm_open(JNIEnv *env, jobject impl, jstring name, int throw_if_fail) {
         "path=%s\n",
         (unsigned long long)library.handle, library.jni_version, path);
   }
-  (*env)->ReleaseStringUTFChars(env, name, path);
 
   if (rc == GW_OK && !publish_library(env, impl, &library)) {
     rollback_open(env, library.handle);

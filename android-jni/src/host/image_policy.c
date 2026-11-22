@@ -1,4 +1,5 @@
 #include "image_policy.h"
+#include "internal/jni_bytes.h"
 #include "loader_backend_internal.h"
 #include <stdio.h>
 #include <string.h>
@@ -25,31 +26,31 @@ int gw_image_policy_start(struct gw_image_policy *policy, JNIEnv *env,
                           "Cannot retain image policy helper");
   }
 
-  jmethodID configure =
-      (*env)->GetStaticMethodID(env, policy->helper, "configure",
-                                "(Ljava/lang/String;Ljava/lang/String;Z)V");
+  jmethodID configure = (*env)->GetStaticMethodID(
+      env, policy->helper, "configureNative", "([B[BZ)V");
   if (!configure) {
     goto fail;
   }
-  policy->resolve = (*env)->GetStaticMethodID(
-      env, policy->helper, "resolve", "(Ljava/lang/String;)Ljava/lang/String;");
+  policy->resolve =
+      (*env)->GetStaticMethodID(env, policy->helper, "resolveNative", "([B)[B");
   if (!policy->resolve) {
     goto fail;
   }
 
-  jstring dir = (*env)->NewStringUTF(env, directory);
+  jbyteArray dir = gw_jni_new_bytes(env, directory);
   if (!dir) {
     goto fail;
   }
-  jstring file = (*env)->NewStringUTF(env, catalog);
-  if (file) {
-    (*env)->CallStaticVoidMethod(env, policy->helper, configure, dir, file,
-                                 (jboolean)allow_direct);
+  jbyteArray file = gw_jni_new_bytes(env, catalog);
+  if (!file) {
+    (*env)->DeleteLocalRef(env, dir);
+    goto fail;
   }
+
+  (*env)->CallStaticVoidMethod(env, policy->helper, configure, dir, file,
+                               (jboolean)allow_direct);
+  (*env)->DeleteLocalRef(env, file);
   (*env)->DeleteLocalRef(env, dir);
-  if (file) {
-    (*env)->DeleteLocalRef(env, file);
-  }
   if ((*env)->ExceptionCheck(env)) {
     goto fail;
   }
@@ -71,12 +72,12 @@ int gw_image_policy_resolve(JNIEnv *env, const char *path,
                             char image[GW_LOADER_PATH],
                             struct gw_loader_error *error, void *context) {
   struct gw_image_policy *policy = context;
-  jstring requested = (*env)->NewStringUTF(env, path);
+  jbyteArray requested = gw_jni_new_bytes(env, path);
   if (!requested) {
     return gw_loader_fail(error, GW_E_IMAGE, "Cannot allocate image path");
   }
 
-  jstring value = (jstring)(*env)->CallStaticObjectMethod(
+  jbyteArray value = (jbyteArray)(*env)->CallStaticObjectMethod(
       env, policy->helper, policy->resolve, requested);
   (*env)->DeleteLocalRef(env, requested);
   if ((*env)->ExceptionCheck(env) || !value) {
@@ -84,22 +85,13 @@ int gw_image_policy_resolve(JNIEnv *env, const char *path,
                           "Image policy rejected the requested library");
   }
 
-  const char *text = (*env)->GetStringUTFChars(env, value, NULL);
-  int rc = GW_ERROR;
-  if (text) {
-    if (strlen(text) < GW_LOADER_PATH) {
-      snprintf(image, GW_LOADER_PATH, "%s", text);
-      rc = GW_OK;
-    }
-    (*env)->ReleaseStringUTFChars(env, value, text);
-  }
-
+  bool valid = gw_jni_read_path(env, value, image, GW_LOADER_PATH);
   (*env)->DeleteLocalRef(env, value);
-  if (rc != GW_OK) {
-    gw_loader_fail(error, GW_E_IMAGE,
-                   "Image policy returned an oversized path");
+  if (!valid) {
+    return gw_loader_fail(error, GW_E_IMAGE,
+                          "Image policy returned an invalid native path");
   }
-  return rc;
+  return GW_OK;
 }
 
 /* Must run on a thread attached to the same VM that started the policy;

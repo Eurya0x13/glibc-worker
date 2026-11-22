@@ -29,6 +29,10 @@ image. A module whose `JNI_OnLoad` returns `JNI_ERR` must roll back. Missing JNI
 exports must throw `UnsatisfiedLinkError`. Android also loads an ordinary bionic
 library and checks that it takes the native VM path and leaves Guest counts unchanged.
 
+The adapter exchanges filesystem paths with native code as bytes in the host's
+path encoding. The shell runner checks a Guest library and an ordinary Host
+library under a directory whose name contains a supplementary Unicode character.
+
 ## Results recorded on 2026-11-15
 
 | Environment | Worker | Same-thread | Assertions |

@@ -68,6 +68,18 @@ public final class JvmAdapter {
     return expected.equals(GuestImages.sha256(new File(path)));
   }
 
+  private static boolean verifyLibrary(byte[] path, String expected) throws Exception {
+    return verifyLibrary(GuestImages.decodePath(path), expected);
+  }
+
+  private static byte[] encodePath(String path) {
+    return GuestImages.encodePath(path);
+  }
+
+  private static UnsatisfiedLinkError loadError(byte[] message) {
+    return new UnsatisfiedLinkError(GuestImages.decodePath(message));
+  }
+
   /**
    * Decodes JNI symbol mangling: _1 is '_', _2 is ';', _3 is '[', _0xxxx is a UTF-16 unit and
    * a bare '_' is '/'. Inverse of the JVM's JNI name mangling.

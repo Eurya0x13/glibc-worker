@@ -1,6 +1,8 @@
 package dev.glibc.worker;
 
 import java.io.*;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -9,6 +11,22 @@ import java.util.*;
 /** Host-side image policy; the launcher explicitly chooses catalog or direct mode. */
 public final class GuestImages {
   private GuestImages() {}
+
+  private static final Charset PATH_CHARSET = platformPathCharset();
+
+  private static Charset platformPathCharset() {
+    // HotSpot's Unix file APIs use the native path encoding. Android uses UTF-8.
+    String encoding = System.getProperty("sun.jnu.encoding");
+    return encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
+  }
+
+  static byte[] encodePath(String path) {
+    return path.getBytes(PATH_CHARSET);
+  }
+
+  static String decodePath(byte[] path) {
+    return new String(path, PATH_CHARSET);
+  }
 
   /**
    * Immutable snapshot captured by configure; published once via the volatile field and never
@@ -41,6 +59,11 @@ public final class GuestImages {
       throw new IOException("Image policy paths are unavailable");
     }
     configuration = new Configuration(dir, file, direct);
+  }
+
+  private static void configureNative(byte[] directory, byte[] catalog, boolean direct)
+      throws IOException {
+    configure(decodePath(directory), decodePath(catalog), direct);
   }
 
   /**
@@ -121,5 +144,9 @@ public final class GuestImages {
     } catch (Exception e) {
       throw new UnsatisfiedLinkError("Guest image routing: " + e.getMessage());
     }
+  }
+
+  private static byte[] resolveNative(byte[] requested) {
+    return encodePath(resolve(decodePath(requested)));
   }
 }

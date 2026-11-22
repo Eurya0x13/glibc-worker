@@ -44,6 +44,7 @@ struct gw_jvm_adapter {
   jfieldID handle, version, from, loaded;
   /* Static helpers on dev.glibc.worker.JvmAdapter. */
   jmethodID verify, remember, forget, signature;
+  jmethodID encode_path, load_error;
   struct gw_jvm_hook hooks[3];
 };
 extern struct gw_jvm_adapter gw_jvm;

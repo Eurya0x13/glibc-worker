@@ -3,6 +3,9 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /** Real VM load/find/unload hooks over the production dual-libc bridge. */
 public final class SystemLoadProbe {
@@ -107,6 +110,44 @@ public final class SystemLoadProbe {
     }
   }
 
+  private static void checkOrdinaryLoad(String jar, String image) throws Exception {
+    int before = stats()[0];
+    try (URLClassLoader owner = loader(jar, image)) {
+      Class<?> fixture = owner.loadClass("SystemLoadFixture");
+      call(fixture, "load", new Class<?>[] {String.class}, image);
+      check((Long) call(fixture, "echo", new Class<?>[] {long.class}, 35L) == 42,
+          "ordinary native call");
+      check(stats()[0] == before, "ordinary image bypasses Guest loader");
+    }
+  }
+
+  private static void unicodePaths(String jar, Path image) throws Exception {
+    Path dir = Files.createTempDirectory(image.getParent(), "unicode-\uD83D\uDE80-");
+    Path guest = dir.resolve("guest.so");
+    Path host = dir.resolve("host.so");
+    try {
+      Files.copy(image, guest);
+      Files.copy(image.resolveSibling("system-ordinary.so"), host);
+
+      int unloads = stats()[1];
+      awaitUnload(cycle(jar, guest.toString(), false), unloads + 1);
+      checkOrdinaryLoad(jar, host.toString());
+    } finally {
+      Files.deleteIfExists(host);
+      Files.deleteIfExists(guest);
+      Files.delete(dir);
+    }
+  }
+
+  private static void loaderRegressions(String jar, String image) throws Exception {
+    unicodePaths(jar, Paths.get(image));
+
+    int[] result = stats();
+    check(result[2] == 0 && result[3] == result[4] && result[6] == 0,
+        "path tests balance image and closure lifetimes");
+    System.out.println("SYSTEM_LOAD_REGRESSIONS {\"result\":\"PASS\",\"unicode_paths\":2}");
+  }
+
   public static int run(String jar, String image, String rejectedImage, String ordinary)
       throws Exception {
     if ("1".equals(System.getenv("GW_BENCH"))) {
@@ -134,20 +175,16 @@ public final class SystemLoadProbe {
       awaitUnload(cycle(jar, image, cycle == 1), cycle + 1);
     }
     if (!ordinary.isEmpty()) {
-      int before = stats()[0];
-      try (URLClassLoader host = loader(jar, ordinary)) {
-        Class<?> fixture = host.loadClass("SystemLoadFixture");
-        call(fixture, "load", new Class<?>[] {String.class}, ordinary);
-        check((Long) call(fixture, "echo", new Class<?>[] {long.class}, 35L) == 42,
-            "ordinary bionic native call");
-        check(stats()[0] == before, "bionic bypasses Guest loader");
-      }
+      checkOrdinaryLoad(jar, ordinary);
     }
     int[] result = stats();
     check(result[1] == 3 && result[2] == 0 && result[3] == result[4], "balanced image lifecycle");
     System.out.println("SYSTEM_LOAD_RESULT {\"result\":\"PASS\",\"cycles\":3,\"checks\":" + checks
         + ",\"unloads\":" + result[1] + ",\"active_modules\":" + result[2] + ",\"live_closures\":"
         + result[6] + ",\"bionic_passthrough\":" + !ordinary.isEmpty() + "}");
+    if ("1".equals(System.getenv("GW_SYSTEM_LOAD_REGRESSIONS"))) {
+      loaderRegressions(jar, image);
+    }
     return 1;
   }
 }

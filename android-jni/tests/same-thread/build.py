@@ -256,7 +256,14 @@ if args.system_load:
         host_cc,
         "system-ordinary.so",
         [jvm / "system-load-fixture.c"],
-        ["-shared", "-Wl,--no-as-needed", "-lc"],
+        [
+            "-shared",
+            *(
+                ["-Wl,--no-as-needed", "-lc"]
+                if android
+                else ["-nostdlib", "-Wl,--as-needed"]
+            ),
+        ],
     )
 unwind = Path(
     subprocess.check_output(
@@ -342,6 +349,7 @@ files = [
     out / "conformance/fixture_generated.inc",
     *java,
     *sorted((project / "src/common").glob("*.h")),
+    project / "include/internal/jni_bytes.h",
     *sorted((out / "generated").glob("*")),
     *sorted((root / "core/include").glob("*.h")),
     runtime / loader,
