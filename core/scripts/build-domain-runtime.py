@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from context_mask import patch_context_masks
 from wait_mask import patch_wait_masks
@@ -18,6 +19,7 @@ from thread_lifecycle import patch_thread_lifecycle
 source = Path(__file__).resolve().parent
 core = source.parent
 fragments = core / "src/runtime"
+dependency_patch = core / "patches/domain/0001-verify-dependency-reuse.patch"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], required=True)
 parser.add_argument("--jobs", type=int, default=4)
@@ -30,6 +32,7 @@ base_source = Path(root_file.read_text().strip()) / "src"
 target = json.loads((core / "config/targets.json").read_text())[args.abi]
 inputs = [
     Path(__file__),
+    dependency_patch,
     fragments / "adopt-nptl.inc",
     fragments / "signal-guard.inc",
     fragments / "signal-send.h",
@@ -73,10 +76,19 @@ def replace(path, old, new):
     path.write_text(text.replace(old, new))
 
 
+patch_command = [
+    sys.executable,
+    str(source / "apply-patches.py"),
+    "--source",
+    str(src),
+]
 if not (root / "patched").exists():
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(base_source, src)
+    subprocess.run(
+        [*patch_command, str(dependency_patch)], stdout=sys.stderr, check=True
+    )
 
     # An independent loader considers its libc initial, but its process break
     # still belongs to the Host. Use the mmap fallback of a secondary libc.
@@ -300,6 +312,12 @@ if not (root / "patched").exists():
         "  xidcmd = cmdp;",
     )
     (root / "patched").touch()
+else:
+    subprocess.run(
+        [*patch_command, "--verify-only", str(dependency_patch)],
+        stdout=sys.stderr,
+        check=True,
+    )
 
 obj.mkdir(parents=True, exist_ok=True)
 environment = {
@@ -361,6 +379,7 @@ for origin, name in [
             "capabilities": [
                 "adopted-carriers",
                 "mmap-backed-embedded-heap",
+                "guest-dependency-reuse-check",
                 "host-signal-reservation",
                 "reserved-signal-masks",
                 "context-signal-masks",

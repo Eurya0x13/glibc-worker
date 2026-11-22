@@ -16,7 +16,9 @@ worker 和 domain 三种选择，并检查缺省用例实际创建收养域。�
 测试类独立打包，三轮 URLClassLoader 生命周期中重复装载、调用、释放强引用并触发 GC。中间一轮使用 `System.loadLibrary`，其 ClassLoader 的 `findLibrary` 返回测试文件绝对路径；这不代表测试了所有默认 library.path 搜索规则。另一 ClassLoader 同时装载同一映像必须失败。JNI_OnLoad 返回 JNI_ERR 的模块必须回滚，缺少的 JNI 导出必须抛出 UnsatisfiedLinkError。Android 另加载 bionic 控制库，要求走原 VM 装载路径且 Guest 计数不增加。
 
 适配器按宿主文件系统编码，以字节形式与原生代码交换路径。Shell 回归在名称含有
-Unicode 补充平面字符的目录中分别装载 Guest 库和普通 Host 库。
+Unicode 补充平面字符的目录中分别装载 Guest 库和普通 Host 库。回归还以两种顺序
+装载各自携带同 SONAME 不同文件的模块，检查第二次装载是否在构造函数前被拒绝，
+以及两条搜索路径解析到同一文件时能否共享该依赖。
 
 ## 2026-11-15 验证结果
 

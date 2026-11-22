@@ -239,6 +239,7 @@ compile(
     [project / "tests/native/guest_conformance.c"],
     ["-shared", "-I" + str(out / "conformance")],
 )
+dependency_fixtures = []
 if args.system_load:
     compile(
         guest_cc,
@@ -265,6 +266,46 @@ if args.system_load:
             ),
         ],
     )
+
+    directory = out / "system-dependencies"
+    dependency = "libgw_system_dependency.so"
+    provider = jvm / "system-dependency.c"
+    consumer = jvm / "system-dependant.c"
+    dependency_fixtures.extend([provider, consumer])
+
+    for label, value in (("a", 101), ("b", 202)):
+        image = directory / label / dependency
+        image.parent.mkdir(parents=True, exist_ok=True)
+        compile(
+            guest_cc,
+            image.relative_to(out),
+            [provider],
+            [
+                "-shared",
+                f"-Wl,-soname,{dependency}",
+                f"-DSYSTEM_DEPENDENCY_VALUE={value}",
+            ],
+        )
+        dependency_fixtures.append(image)
+
+    for label in ("a", "b", "shared"):
+        shared = label == "shared"
+        image = directory / label / "module.so"
+        image.parent.mkdir(parents=True, exist_ok=True)
+        compile(
+            guest_cc,
+            image.relative_to(out),
+            [consumer],
+            [
+                "-shared",
+                "-L" + str(directory / ("a" if shared else label)),
+                "-lgw_system_dependency",
+                "-Wl,-rpath," + ("$ORIGIN/../a" if shared else "$ORIGIN"),
+                "-Wl,--no-as-needed",
+                "-lc",
+            ],
+        )
+        dependency_fixtures.append(image)
 unwind = Path(
     subprocess.check_output(
         [guest_cc, "-print-file-name=libgcc_s.so.1"], text=True
@@ -374,6 +415,7 @@ if args.system_load:
         jvm / "system-load-fixture.c",
         jvm / "SystemLoadFixture.java",
         jvm / "SystemLoadBenchmark.java",
+        *dependency_fixtures,
         *[
             out / name
             for name in (

@@ -31,4 +31,6 @@ public final class SystemLoadFixture {
   public static native int overload(int value);
   public static native double overload(double value);
   public static native long missing(long value);
+  public static native int dependencyLoads();
+  public static native int dependencyValue();
 }

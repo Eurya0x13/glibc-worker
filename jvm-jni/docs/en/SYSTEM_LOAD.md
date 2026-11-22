@@ -32,6 +32,10 @@ library and checks that it takes the native VM path and leaves Guest counts unch
 The adapter exchanges filesystem paths with native code as bytes in the host's
 path encoding. The shell runner checks a Guest library and an ordinary Host
 library under a directory whose name contains a supplementary Unicode character.
+It also loads two modules with different bundled files for the same SONAME in
+both orders, checks that the second load fails before its constructor runs,
+and verifies that both modules can share a dependency when their search paths
+resolve to the same file.
 
 ## Results recorded on 2026-11-15
 

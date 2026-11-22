@@ -10,6 +10,32 @@ import shutil
 import subprocess
 from pathlib import Path
 
+
+def reported_conflicts(output, location):
+    dependency = "libgw_system_dependency.so"
+    first = f"{location}/system-dependencies/a"
+    second = f"{location}/system-dependencies/b"
+    paths = [
+        f"{directory}/{name}"
+        for directory in (first, second)
+        for name in ("module.so", dependency)
+    ]
+    reports = [
+        line
+        for line in output.splitlines()
+        if "Guest dependency conflict" in line
+        and all(path in line for path in paths)
+    ]
+    return all(
+        any(
+            line.index(f"{loaded}/{dependency}")
+            < line.index(f"{incoming}/{dependency}")
+            for line in reports
+        )
+        for loaded, incoming in ((first, second), (second, first))
+    )
+
+
 source = Path(__file__).resolve().parent
 root = source.parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -70,6 +96,11 @@ if android:
         "libgcc_s.so.1",
     ]:
         shutil.copyfile(build / name, payload / name)
+    shutil.copytree(
+        build / "system-dependencies",
+        payload / "system-dependencies",
+        dirs_exist_ok=True,
+    )
     for name in [manifest["loader"], "libc.so.6", "libm.so.6"]:
         shutil.copyfile(runtime / name, payload / name)
     subprocess.run([*adb, "shell", "mkdir", "-p", remote], check=True)
@@ -182,7 +213,16 @@ for requested in (None, "worker", "domain"):
         or rows[0]["active_modules"]
         or rows[0]["live_closures"]
         or rows[0]["bionic_passthrough"] != android
-        or regressions != [{"result": "PASS", "unicode_paths": 2}]
+        or regressions
+        != [
+            {
+                "result": "PASS",
+                "unicode_paths": 2,
+                "conflict_orders": 2,
+                "shared_dependency": True,
+            }
+        ]
+        or not reported_conflicts(output, location)
         or len(life) != 1
         or not life[0]["vm_destroyed"]
         or (mode == "domain" and life[0]["domains_created"] < 2)

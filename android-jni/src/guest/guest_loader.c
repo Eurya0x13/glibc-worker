@@ -92,8 +92,8 @@ void fg_execute(struct fb_call *cmd) {
   if (cmd->op == FB_LOAD) {
     /* Two-phase load: dlopen plus JNI_OnLoad run here, but the image stays
        provisional until the Host answers the returned version with
-       FB_COMMIT_LOAD or FB_ABORT_LOAD. RTLD_LOCAL keeps one image's symbols
-       from satisfying another image's links. */
+       FB_COMMIT_LOAD or FB_ABORT_LOAD. RTLD_LOCAL keeps exports out of the
+       global search scope. Dependencies still share the Guest namespace. */
     pthread_mutex_lock(&modules_lock);
     if (m->id) {
       pthread_mutex_unlock(&modules_lock);
@@ -106,7 +106,14 @@ void fg_execute(struct fb_call *cmd) {
     const char *path = (const char *)cmd->args[0].l;
     void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
-      snprintf(cmd->diagnostic, sizeof cmd->diagnostic, "%s", dlerror());
+      const char *diagnostic = dlerror();
+      if (!diagnostic) {
+        diagnostic = "Guest dlopen failed without a loader diagnostic";
+      }
+      if (snprintf(cmd->diagnostic, sizeof cmd->diagnostic, "%s", diagnostic) >=
+          (int)sizeof cmd->diagnostic) {
+        fprintf(stderr, "Guest dlopen: %s\n", diagnostic);
+      }
       cmd->result.i = JNI_ERR;
       goto done;
     }

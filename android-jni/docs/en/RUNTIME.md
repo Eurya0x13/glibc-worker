@@ -110,6 +110,15 @@ path. For a path-based open, use an existing alias entry, such as
 names. App-supplied dependencies use the normal GNU search rules in the
 directories and RUNPATHs supplied by the embedder or the dependency.
 
+When resolving `DT_NEEDED` for a Guest DSO with a RUNPATH or an applicable
+RPATH, the bundled loader checks the configured search paths in GNU order before
+reusing an already loaded dependency by name. If the search selects a different
+file, loading fails before the new image's constructors run. The diagnostic
+identifies the resident file, the candidate and their requesters when known.
+The full message goes to Guest stderr if it exceeds the bridge's diagnostic
+buffer. Requests that resolve to the same device and inode, or have no
+candidate on those paths, can share the resident dependency.
+
 Run the regression against the packaged loader and helper JAR. Add
 `--runner qemu-aarch64` for an arm64-v8a package on an x86_64 machine with the
 GNU cross compiler installed.

@@ -75,6 +75,12 @@ GNU loader 通过搜索路径处理裸库名和 `DT_NEEDED`。按路径装载时
 例如 `<别名目录>/libdl.so.2`。内置别名采用完整 ABI 名称。应用按需提供其他依赖，GNU loader
 按宿主配置的目录及依赖的 RUNPATH 查找。
 
+随包发布的 GNU loader 为带有 RUNPATH 或适用 RPATH 的 Guest DSO 解析 `DT_NEEDED` 时，
+会在按库名复用已装载的依赖前，按原有优先级检查配置的搜索路径。如果搜索结果是另一份文件，
+本次装载会在新映像的构造函数执行前被拒绝。诊断列出已装载文件、候选文件以及已知的请求者。
+诊断超出桥接缓冲区时，完整文本会写入 Guest stderr。解析到相同设备号和 inode，或配置路径
+中找不到候选时，可以复用已装载的依赖。
+
 下面的回归使用打包的 GNU loader 和辅助 JAR。在 x86_64 上测试 arm64-v8a 制品时，使用
 GNU 交叉编译器，并附加 `--runner qemu-aarch64`。
 

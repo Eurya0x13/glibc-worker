@@ -139,13 +139,64 @@ public final class SystemLoadProbe {
     }
   }
 
+  private static Class<?> loadFixture(URLClassLoader owner, Path image) throws Exception {
+    Class<?> fixture = owner.loadClass("SystemLoadFixture");
+    call(fixture, "load", new Class<?>[] {String.class}, image.toString());
+    return fixture;
+  }
+
+  private static WeakReference<ClassLoader> dependencyConflict(
+      String jar, Path first, Path second, int value, Path shared) throws Exception {
+    try (URLClassLoader owner = loader(jar, first.toString());
+        URLClassLoader other = loader(jar, second.toString())) {
+      Class<?> fixture = loadFixture(owner, first);
+      check((Integer) call(fixture, "dependencyValue", new Class<?>[0]) == value,
+          "first module uses its bundled dependency");
+
+      int expectedConstructors = 1;
+      if (shared != null) {
+        try (URLClassLoader common = loader(jar, shared.toString())) {
+          Class<?> sharing = loadFixture(common, shared);
+          check((Integer) call(sharing, "dependencyValue", new Class<?>[0]) == value,
+              "the same dependency file can be shared");
+          expectedConstructors++;
+        }
+      }
+
+      try {
+        loadFixture(other, second);
+        throw new AssertionError("conflicting dependency accepted");
+      } catch (UnsatisfiedLinkError expected) {
+        String message = expected.getMessage();
+        check(message.contains("Guest dependency conflict"), "dependency conflict: " + message);
+        System.err.println(message);
+      }
+
+      check((Integer) call(fixture, "dependencyLoads", new Class<?>[0]) == expectedConstructors,
+          "rejected module did not run its constructor");
+      check((Integer) call(fixture, "dependencyValue", new Class<?>[0]) == value,
+          "rejected module leaves the original dependency usable");
+      return new WeakReference<>(owner);
+    }
+  }
+
   private static void loaderRegressions(String jar, String image) throws Exception {
-    unicodePaths(jar, Paths.get(image));
+    Path guest = Paths.get(image);
+    unicodePaths(jar, guest);
+
+    Path dependencies = guest.resolveSibling("system-dependencies");
+    Path a = dependencies.resolve("a/module.so");
+    Path b = dependencies.resolve("b/module.so");
+    Path shared = dependencies.resolve("shared/module.so");
+    int unloads = stats()[1];
+    awaitUnload(dependencyConflict(jar, a, b, 101, shared), unloads + 2);
+    awaitUnload(dependencyConflict(jar, b, a, 202, null), unloads + 3);
 
     int[] result = stats();
     check(result[2] == 0 && result[3] == result[4] && result[6] == 0,
-        "path tests balance image and closure lifetimes");
-    System.out.println("SYSTEM_LOAD_REGRESSIONS {\"result\":\"PASS\",\"unicode_paths\":2}");
+        "path and dependency tests balance image and closure lifetimes");
+    System.out.println("SYSTEM_LOAD_REGRESSIONS {\"result\":\"PASS\",\"unicode_paths\":2,"
+        + "\"conflict_orders\":2,\"shared_dependency\":true}");
   }
 
   public static int run(String jar, String image, String rejectedImage, String ordinary)
