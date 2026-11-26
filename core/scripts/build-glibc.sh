@@ -10,9 +10,25 @@ archive_sha=37f600f2bef3c5e8300147059568b2a2e40a7ad6ccc65ce942556d49429cc667
 runtime="build/glibc-runtime/$GW_ABI"
 mkdir -p vendor "$runtime" work
 
-if [[ ! -f $archive ]]; then
-  curl -fLsS "https://ftp.gnu.org/gnu/libc/glibc-$version.tar.xz" -o "$archive.tmp"
-  mv "$archive.tmp" "$archive"
+if [[ ! -f $archive ]] \
+  || ! printf '%s  %s\n' "$archive_sha" "$archive" | sha256sum -c --status -; then
+  (
+    partial=$(mktemp "$archive.XXXXXX")
+    trap 'rm -f -- "$partial"' EXIT
+
+    for source in https://ftpmirror.gnu.org/libc \
+      https://mirrors.kernel.org/gnu/libc https://ftp.gnu.org/gnu/libc; do
+      if curl -fLsS --connect-timeout 12 --max-time 120 --retry 1 \
+        "$source/glibc-$version.tar.xz" -o "$partial" \
+        && printf '%s  %s\n' "$archive_sha" "$partial" | sha256sum -c -; then
+        mv -- "$partial" "$archive"
+        exit 0
+      fi
+    done
+
+    echo "Could not download a verified glibc $version archive" >&2
+    exit 1
+  )
 fi
 echo "$archive_sha  $archive" | sha256sum -c -
 
