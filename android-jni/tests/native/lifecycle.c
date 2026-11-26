@@ -16,11 +16,12 @@
 static int mode, created, deleted;
 static JavaVM target_vm;
 static struct shared startup;
+static const char startup_path[] = "unused";
 static const struct gw_host_bridge_config options = {
     .abi_version = GW_HOST_BRIDGE_CONFIG_V2,
     .struct_size = sizeof options,
-    .native_directory = "unused",
-    .image_catalog = "unused"};
+    .native_directory = startup_path,
+    .image_catalog = startup_path};
 
 void *__real_mmap(void *, size_t, int, int, int, off_t);
 
@@ -91,9 +92,18 @@ static jmethodID get_method(JNIEnv *env, jclass cls, const char *name,
   return (jmethodID)(uintptr_t)1;
 }
 
-static jstring new_string(JNIEnv *env, const char *s) {
+static jbyteArray new_byte_array(JNIEnv *env, jsize length) {
   (void)env;
-  return (jstring)s;
+  assert(length == sizeof startup_path - 1);
+  return (jbyteArray)(uintptr_t)2;
+}
+
+static void set_byte_array_region(JNIEnv *env, jbyteArray array, jsize start,
+                                  jsize length, const jbyte *data) {
+  (void)env;
+  assert(array == (jbyteArray)(uintptr_t)2);
+  assert(!start && length == sizeof startup_path - 1);
+  assert(!memcmp(data, startup_path, length));
 }
 
 static void call_void(JNIEnv *env, jclass cls, jmethodID method, ...) {
@@ -113,17 +123,19 @@ static jint throw_new(JNIEnv *env, jclass cls, const char *message) {
   (void)message;
   return JNI_OK;
 }
-static const struct JNINativeInterface vm = {.GetVersion = version,
-                                             .GetJavaVM = get_vm,
-                                             .FindClass = find_class,
-                                             .NewGlobalRef = new_global,
-                                             .DeleteGlobalRef = delete_global,
-                                             .DeleteLocalRef = delete_local,
-                                             .GetStaticMethodID = get_method,
-                                             .NewStringUTF = new_string,
-                                             .CallStaticVoidMethod = call_void,
-                                             .ExceptionCheck = exception_check,
-                                             .ThrowNew = throw_new};
+static const struct JNINativeInterface vm = {
+    .GetVersion = version,
+    .GetJavaVM = get_vm,
+    .FindClass = find_class,
+    .NewGlobalRef = new_global,
+    .DeleteGlobalRef = delete_global,
+    .DeleteLocalRef = delete_local,
+    .GetStaticMethodID = get_method,
+    .NewByteArray = new_byte_array,
+    .SetByteArrayRegion = set_byte_array_region,
+    .CallStaticVoidMethod = call_void,
+    .ExceptionCheck = exception_check,
+    .ThrowNew = throw_new};
 static JNIEnv env = &vm;
 
 static int install(JNIEnv *e, const char *dir, const char *path,

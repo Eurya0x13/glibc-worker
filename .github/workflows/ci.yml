@@ -19,9 +19,17 @@ defaults:
 
 jobs:
   test:
-    name: Test on Linux
-    runs-on: ubuntu-24.04
+    name: Test native components (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,8 +38,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libclang-rt-dev
-      - name: Check documentation
-        run: python3 scripts/check-docs.py
+      - name: Test workspace scripts and documentation
+        if: matrix.arch == 'x86_64'
+        run: |
+          python3 scripts/check-docs.py
+          python3 -m unittest discover -s scripts/tests
       - name: Build native test targets
         id: native-build
         run: |
@@ -55,17 +66,56 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-test-results
+          name: linux-test-results-${{ matrix.arch }}
           path: |
             core/build/ci/ctest.xml
             core/build/ci/Testing/Temporary/LastTest.log
             bionic-dlopen/build/ci/ctest.xml
             bionic-dlopen/build/ci/Testing/Temporary/LastTest.log
 
+  test-jvm:
+    name: Test desktop JVM adapters
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: |
+            11
+            17
+      - name: Test result publishing and recovery
+        run: python3 jvm-jni/tests/scripts/test-evidence.py
+      - name: Test JRE 8, 11, 17, 21 and 25 adapters
+        run: |
+          python3 jvm-jni/tests/scripts/test-adapters.py --pinned --jdk "$JAVA_HOME" \
+            --runtime "3:$JAVA_HOME_11_X64" --runtime "5:$JAVA_HOME"
+      - name: Test signal registration reclamation in HotSpot
+        if: ${{ !cancelled() }}
+        run: |
+          cmake -S core -B core/build/ci-vm -DBUILD_TESTING=OFF
+          cmake --build core/build/ci-vm
+          cmake --install core/build/ci-vm --prefix "$PWD/core/build/ci-vm/install"
+          python3 jvm-jni/tests/signal_reclaim.py --jdk "$JAVA_HOME" \
+            --core-prefix core/build/ci-vm/install
+      - name: Upload JVM test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-jvm-test-results
+          path: |
+            jvm-jni/build/adapter-tests/*.json
+            jvm-jni/build/adapter-tests/*.log
+            jvm-jni/build/tests/signal-reclaim/pc/*.json
+          if-no-files-found: ignore
+
   build:
     name: Build Android (${{ matrix.abi }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
@@ -87,6 +137,8 @@ jobs:
           packages=(bison gawk texinfo)
           if [[ "$GW_ABI" == arm64-v8a ]]; then
             packages+=(gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross)
+          else
+            packages+=(clang libclang-rt-dev libffi-dev pkg-config)
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
@@ -113,25 +165,8 @@ jobs:
           tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Build Android SDK and runtime
+        id: runtime-build
         run: scripts/build-runtime.sh --module jvm-jni
-      - name: Test same-thread JNI on Linux
-        if: matrix.abi == 'x86_64'
-        run: |
-          manifest="jvm-jni/build/$GW_ABI/compat/domain-runtime.json"
-          key=$(python3 - "$manifest" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as manifest:
-              print(json.load(manifest)["runtime"]["key"])
-          PY
-          )
-
-          python3 android-jni/tests/same-thread/build.py --abi "$GW_ABI" \
-            --ndk "$ANDROID_NDK_HOME" --jdk "$JAVA_HOME" \
-            --runtime "core/build/domain-runtime/$GW_ABI/$key"
-          python3 android-jni/tests/same-thread/run.py \
-            --build "android-jni/build/tests/same-thread/$GW_ABI" --jdk "$JAVA_HOME"
       - name: Check relocated SDK and package outputs
         run: |
           jvm_build="$PWD/jvm-jni/build/$GW_ABI"
@@ -156,12 +191,132 @@ jobs:
           path: ${{ runner.temp }}/glibc-worker-${{ matrix.abi }}/
           compression-level: 0
           if-no-files-found: error
+
+      - name: Select the built GNU runtime for Linux tests
+        id: linux-runtime
+        if: ${{ !cancelled() && matrix.abi == 'x86_64' && steps.runtime-build.outcome == 'success' }}
+        run: |
+          manifest="jvm-jni/build/$GW_ABI/compat/domain-runtime.json"
+          key=$(python3 - "$manifest" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as manifest:
+              print(json.load(manifest)["runtime"]["key"])
+          PY
+          )
+          echo "GW_TEST_DOMAIN_RUNTIME=$PWD/core/build/domain-runtime/$GW_ABI/$key" >> "$GITHUB_ENV"
+      - name: Test JNI resources and failure handling on Linux
+        if: ${{ !cancelled() && matrix.abi == 'x86_64' && steps.runtime-build.outcome == 'success' }}
+        run: |
+          failed=0
+          for suite in array_cache audit bindings context_pages failures lifecycle resources; do
+            python3 "android-jni/tests/$suite.py" || failed=1
+          done
+          python3 android-jni/tests/owner_work.py \
+            --output android-jni/build/owner-work-tests || failed=1
+          exit "$failed"
+      - name: Test GNU runtime and packaged SONAME aliases on Linux
+        if: ${{ !cancelled() && steps.linux-runtime.outcome == 'success' }}
+        run: |
+          failed=0
+          package="jvm-jni/build/$GW_ABI/compat"
+          python3 core/tests/guest_async.py --runtime "$GW_TEST_DOMAIN_RUNTIME" \
+            --notification 55 || failed=1
+          python3 android-jni/tests/guest_signal_unwind.py \
+            --runtime "$GW_TEST_DOMAIN_RUNTIME" || failed=1
+          python3 android-jni/tests/runtime-aliases.py --package "$package" \
+            --helpers "$package/glibc-bridge-helpers.jar" || failed=1
+          exit "$failed"
+      - name: Test same-thread JNI on Linux
+        if: ${{ !cancelled() && steps.linux-runtime.outcome == 'success' }}
+        run: |
+          python3 android-jni/tests/same-thread/build.py --abi "$GW_ABI" \
+            --ndk "$ANDROID_NDK_HOME" --jdk "$JAVA_HOME" --runtime "$GW_TEST_DOMAIN_RUNTIME"
+          python3 android-jni/tests/same-thread/run.py \
+            --build "android-jni/build/tests/same-thread/$GW_ABI" --jdk "$JAVA_HOME"
+      - name: Test System.load with dual libc on Linux
+        if: ${{ !cancelled() && steps.linux-runtime.outcome == 'success' }}
+        run: |
+          python3 android-jni/tests/same-thread/build.py --abi "$GW_ABI" \
+            --ndk "$ANDROID_NDK_HOME" --jdk "$JAVA_HOME" --runtime "$GW_TEST_DOMAIN_RUNTIME" \
+            --system-load --jvm-family 5
+          python3 jvm-jni/tests/same-thread/system-load.py \
+            --build "jvm-jni/build/tests/system-load/$GW_ABI" --jdk "$JAVA_HOME"
       - name: Upload JNI test results
-        if: ${{ !cancelled() && matrix.abi == 'x86_64' }}
+        if: ${{ !cancelled() && steps.linux-runtime.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-jni-test-results
-          path: android-jni/build/tests/same-thread/x86_64/runs/
+          path: |
+            android-jni/build/*-tests/**/summary.json
+            android-jni/build/*-tests/**/*.log
+            android-jni/build/array-cache-tests/run.txt
+            android-jni/build/tests/guest-signal-unwind/*.json
+            android-jni/build/tests/guest-signal-unwind/*.log
+            android-jni/build/tests/same-thread/x86_64/runs/
+            core/build/tests/guest-async/*.json
+            core/build/tests/guest-async/*.log
+            jvm-jni/build/tests/system-load/x86_64/runs/
+          if-no-files-found: ignore
+
+      - name: Prepare the x86_64 Android test app
+        id: android-test-app
+        if: ${{ !cancelled() && matrix.abi == 'x86_64' && steps.runtime-build.outcome == 'success' }}
+        env:
+          GW_DEPS_READY: '1'
+          GW_JRE_ARTIFACT: pojav-17-ec28559-x86_64
+        run: |
+          sdkmanager --install emulator 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
+          jvm-jni/tests/android/gradlew -p jvm-jni/tests/android --no-daemon \
+            --max-workers=2 --console=plain :app:assembleDebug
+          python3 jvm-jni/tests/scripts/test-jre-artifacts.py
+      - name: Test Android smoke and coverage in an emulator
+        if: ${{ !cancelled() && steps.android-test-app.outcome == 'success' }}
+        timeout-minutes: 20
+        run: |
+          results="$PWD/jvm-jni/build/ci-android"
+          mkdir -p "$results"
+          printf 'no\n' | avdmanager create avd --name glibc-worker-ci \
+            --package 'system-images;android-36;google_apis;x86_64'
+          sudo chgrp "$(id -gn)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+
+          serial=emulator-5554
+          "$ANDROID_HOME/emulator/emulator" -avd glibc-worker-ci -port 5554 -memory 3072 \
+            -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader -accel on \
+            >"$results/emulator.log" 2>&1 &
+          emulator_pid=$!
+          finish() {
+            timeout 20 adb -s "$serial" logcat -d >"$results/logcat.txt" 2>&1 || true
+            kill "$emulator_pid" 2>/dev/null || true
+            wait "$emulator_pid" 2>/dev/null || true
+          }
+          trap finish EXIT
+
+          timeout 180 adb -s "$serial" wait-for-device
+          boot_deadline=$((SECONDS + 180))
+          until [[ $(timeout 10 adb -s "$serial" shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; do
+            if (( SECONDS >= boot_deadline )); then
+              echo 'Android emulator did not finish booting' >&2
+              exit 1
+            fi
+            kill -0 "$emulator_pid"
+            sleep 2
+          done
+          adb -s "$serial" shell wm dismiss-keyguard
+          jvm-jni/tests/smoke/run.sh --device "$serial" --reuse-apk --direct \
+            --timeout 240 --output "$results/smoke"
+          jvm-jni/tests/coverage/run.sh --device "$serial" --reuse-apk --direct \
+            --timeout 420 --output "$results/coverage"
+      - name: Upload Android test reports
+        if: ${{ !cancelled() && matrix.abi == 'x86_64' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-x86_64-test-results
+          path: |
+            jvm-jni/build/ci-android/
+            jvm-jni/build/aud10/artifact-tests.json
           if-no-files-found: ignore
       - name: Upload failure logs
         if: failure()

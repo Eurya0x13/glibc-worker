@@ -33,9 +33,20 @@ with the required static JNI target. See the [bootstrap guide](../../core/docs/e
 ## GitHub Actions
 
 [CI](../../.github/workflows/ci.yml) runs for pushes and pull requests to
-`main` and can be dispatched manually. The Linux test job runs the core and
-loader CTest suites and uploads their JUnit reports. The x86_64 build also runs
-the same-thread JNI fixture in a desktop JDK17 and uploads its reports.
+`main` and can be dispatched manually.
+
+- Linux x86_64 and ARM64 run the core and loader CTest suites and upload JUnit
+  reports per architecture. Linux x86_64 also checks documentation and cache
+  cleanup.
+- Desktop HotSpot tests exercise the loader adapters on JRE 8, 11, 17, 21 and
+  25, signal registration reclamation on JDK 17, and test result recovery.
+- After the x86_64 Android SDK build, Linux runs the JNI resource and failure
+  fixtures under ASan/UBSan, GNU signal and SONAME tests, and the real JNI and
+  `System.load` suites across both libc domains.
+- An Android API 36 x86_64 emulator runs the application smoke and coverage
+  suites with the pinned Pojav JRE 17. The runner validates the installed APK
+  hash and starts each test group with `--direct` through ADB. It uploads the
+  reports and logcat. Android ARM64 execution still requires a device.
 
 The Android build jobs cross-compile arm64-v8a and x86_64 and link relocated
 C/C++ SDK consumers. Each `glibc-worker-android-<ABI>` artifact contains a

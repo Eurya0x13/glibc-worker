@@ -33,8 +33,17 @@ android-jni 的 Host 资源存储固定使用 Zig 0.16.0，构建机器必须提
 ## GitHub Actions
 
 推送到 `main` 或向 `main` 发起拉取请求时会运行 [CI](../../.github/workflows/ci.yml)，
-也可以手动运行。Linux 测试任务执行 core 和 loader 的 CTest 套件并上传 JUnit 报告。
-x86_64 构建还会在桌面 JDK 17 上运行同线程 JNI 测试并上传结果。
+也可以手动运行。
+
+- Linux x86_64 和 ARM64 运行 core 与 loader 的 CTest 套件，并分别上传 JUnit 报告。
+  Linux x86_64 还会检查文档和缓存清理脚本。
+- 桌面 HotSpot 回归覆盖 JRE 8、11、17、21、25 的装载适配器、JDK 17 的信号注册回收，
+  以及测试报告恢复。
+- x86_64 Android SDK 构建完成后，Linux 运行 ASan/UBSan 下的 JNI 资源与失败夹具、GNU
+  信号及 SONAME 测试，以及跨两套 libc 的真实 JNI 和 `System.load` 套件。
+- Android API 36 x86_64 模拟器使用固定的 Pojav JRE 17 执行应用冒烟和覆盖测试。
+  测试脚本校验已安装 APK 的散列，用 `--direct` 通过 ADB 启动各组，并上传报告和
+  logcat。Android ARM64 的运行验证仍需真机。
 
 Android 构建任务交叉编译 arm64-v8a 和 x86_64，并验证 C/C++ 调用方能链接到迁移后的
 SDK。每个 `glibc-worker-android-<ABI>` 制品包含一份经过验证的归档，其中 `prefixes/`

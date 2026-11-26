@@ -82,6 +82,11 @@ public final class MainActivity extends Activity {
     setContentView(root);
     run.setOnClickListener(v -> startProbe(false));
     smoke.setOnClickListener(v -> startProbe(true));
+
+    String group = getIntent().getStringExtra("test-group");
+    if ("smoke".equals(group) || "coverage".equals(group)) {
+      handler.post(() -> startProbe("smoke".equals(group)));
+    }
   }
 
   private void startProbe(boolean smokeOnly) {

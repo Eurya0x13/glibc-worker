@@ -62,8 +62,43 @@ def arguments():
         action="store_true",
         help="Skip installation after verifying installed APK hash",
     )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Start the current test app through its test-group intent using adb",
+    )
     parser.add_argument("--timeout", type=int, default=600)
     return parser.parse_args()
+
+
+def tap_test_button(adb, device, group, output):
+    label = "运行冒烟测试" if group == "smoke" else "运行覆盖测试"
+    layout = output / "ready.json"
+    for _ in range(12):
+        subprocess.run(
+            [
+                "android",
+                "layout",
+                "--device=" + device,
+                "--flat",
+                "--output=" + str(layout),
+            ],
+            check=True,
+        )
+
+        matches = [
+            node
+            for window in json.loads(layout.read_text())
+            for node in window.get("content", [])
+            if node.get("text") == label
+            and "CLICKABLE" in node.get("interactions", [])
+        ]
+        if len(matches) == 1:
+            x, y = re.findall(r"\d+", matches[0]["center"])
+            subprocess.run(adb + ["shell", "input", "tap", x, y], check=True)
+            return
+        time.sleep(0.5)
+    raise SystemExit("Test action missing: " + label)
 
 
 def execute(args, output, attempt):
@@ -157,18 +192,19 @@ def execute(args, output, attempt):
     apk_hash = hashlib.sha256(apk.read_bytes()).hexdigest()
     attempt.update(abi=abi, apk_sha256=apk_hash)
     if not args.installed:
-        subprocess.run(
-            [
+        install = (
+            [*adb, "install", "-r", str(apk)]
+            if args.direct
+            else [
                 "android",
                 "run",
                 "--device=" + args.device,
                 "--apks=" + str(apk),
                 "--activity=dev.glibc.worker.MainActivity",
                 "--use-delta-install=false",
-            ],
-            cwd=ROOT,
-            check=True,
+            ]
         )
+        subprocess.run(install, cwd=ROOT, check=True)
 
     remote = (
         subprocess.check_output(
@@ -184,13 +220,12 @@ def execute(args, output, attempt):
         raise SystemExit("Installed APK differs from the selected test build")
     attempt.update(installed_apk_sha256=actual)
 
-    subprocess.run(
+    launch = (
         adb
         + [
             "shell",
             "am",
             "start",
-            "-S",
             "-n",
             "dev.glibc.worker/.MainActivity",
             "--ez",
@@ -211,11 +246,13 @@ def execute(args, output, attempt):
             else []
         )
         + (["--es", "cpu-mask", args.cpu_mask] if args.cpu_mask else [])
-        + (["--es", "native-jar", args.native_jar] if args.native_jar else []),
-        check=True,
+        + (["--es", "native-jar", args.native_jar] if args.native_jar else [])
     )
 
     # The previous probe is stopped before deleting its result.
+    subprocess.run(
+        [*adb, "shell", "am", "force-stop", "dev.glibc.worker"], check=True
+    )
     subprocess.run(
         adb
         + [
@@ -241,7 +278,6 @@ def execute(args, output, attempt):
         ],
         check=True,
     )
-    label = "运行冒烟测试" if args.group == "smoke" else "运行覆盖测试"
     subprocess.run(
         adb
         + [
@@ -291,36 +327,11 @@ def execute(args, output, attempt):
         check=True,
     )
 
-    layout = output / "ready.json"
-    button = None
-    for _ in range(12):
-        subprocess.run(
-            [
-                "android",
-                "layout",
-                "--device=" + args.device,
-                "--flat",
-                "--output=" + str(layout),
-            ],
-            check=True,
-        )
-
-        matches = [
-            node
-            for window in json.loads(layout.read_text())
-            for node in window.get("content", [])
-            if node.get("text") == label
-            and "CLICKABLE" in node.get("interactions", [])
-        ]
-        if len(matches) == 1:
-            button = matches[0]
-            break
-        time.sleep(0.5)
-    if button is None:
-        raise SystemExit("Test action missing: " + label)
-
-    x, y = re.findall(r"\d+", button["center"])
-    subprocess.run(adb + ["shell", "input", "tap", x, y], check=True)
+    if args.direct:
+        launch += ["--es", "test-group", args.group]
+    subprocess.run(launch, check=True)
+    if not args.direct:
+        tap_test_button(adb, args.device, args.group, output)
 
     deadline = time.monotonic() + args.timeout
     scheduling = None
