@@ -81,7 +81,6 @@ includes = [
 ]
 flags = [
     "-std=gnu17",
-    "-O2",
     "-g",
     "-fPIC",
     "-Wall",
@@ -197,9 +196,10 @@ if args.system_load:
 commands = []
 
 
-def compile(cc, target, files, extra):
+def compile(cc, target, files, extra, *, optimization="-O2"):
     command = [
         cc,
+        optimization,
         *flags,
         *map(str, files),
         *map(str, extra),
@@ -241,17 +241,20 @@ compile(
 )
 dependency_fixtures = []
 if args.system_load:
+    # Use the measured optimization level for the native workload in both DSOs.
     compile(
         guest_cc,
         "system-load.so",
         [jvm / "system-load-fixture.c"],
         ["-shared", "-Wl,--no-as-needed", "-lc"],
+        optimization="-O3",
     )
     compile(
         guest_cc,
         "system-reject.so",
         [jvm / "system-load-fixture.c"],
         ["-shared", "-DREJECT_VERSION=JNI_ERR", "-Wl,--no-as-needed", "-lc"],
+        optimization="-O3",
     )
     compile(
         host_cc,
@@ -265,6 +268,7 @@ if args.system_load:
                 else ["-nostdlib", "-Wl,--as-needed"]
             ),
         ],
+        optimization="-O3",
     )
 
     directory = out / "system-dependencies"

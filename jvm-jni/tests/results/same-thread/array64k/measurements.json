@@ -1,0 +1,524 @@
+{
+  "version": 1,
+  "commit": "cb32effd7feb975f566786963ff863dbb41764be",
+  "platform": {
+    "abi": "arm64-v8a",
+    "device": "V2239A",
+    "android": 13,
+    "threads": 1
+  },
+  "compilers": {
+    "bionic": "NDK Clang 21.0.0",
+    "guest": "GNU GCC 14.2.1"
+  },
+  "values": "Microseconds per call, median of warmed batch averages in each run.",
+  "levels": {
+    "-O2": {
+      "capture": "20261126T021158Z",
+      "apk_sha256": "5a61caba9e37f3859198768a8f05d61ee650b2d57b1a0c231c54e314fbd71472",
+      "thermal_statuses": [
+        0
+      ],
+      "battery_temperature_range_c": [
+        24.5,
+        24.8
+      ],
+      "paired_runs": [
+        {
+          "pair": 1,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.3620859375,
+            "shared_walk_total_us": 7.4498203125,
+            "diagnostic_total_us": 7.76877734375,
+            "native_walk_us": 4.901921875,
+            "vm_array_us": 2.60591015625,
+            "bridge_residual_us": 0.13280859374999998
+          },
+          "domain": {
+            "array_total_us": 36.6421328125,
+            "shared_walk_total_us": 9.6959140625,
+            "diagnostic_total_us": 33.016828125,
+            "native_walk_us": 28.70203125,
+            "vm_array_us": 2.6356640625,
+            "bridge_residual_us": 1.64571875
+          }
+        },
+        {
+          "pair": 2,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 36.4945859375,
+            "shared_walk_total_us": 10.3045390625,
+            "diagnostic_total_us": 34.46048828125,
+            "native_walk_us": 28.818664062499998,
+            "vm_array_us": 2.8092421874999998,
+            "bridge_residual_us": 1.6265625
+          },
+          "direct": {
+            "array_total_us": 8.74909375,
+            "shared_walk_total_us": 8.3783046875,
+            "diagnostic_total_us": 8.7173984375,
+            "native_walk_us": 5.50598828125,
+            "vm_array_us": 2.96225390625,
+            "bridge_residual_us": 0.15445312500000002
+          }
+        },
+        {
+          "pair": 3,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.916765625,
+            "shared_walk_total_us": 8.08053125,
+            "diagnostic_total_us": 8.46709765625,
+            "native_walk_us": 5.2937421875,
+            "vm_array_us": 2.866890625,
+            "bridge_residual_us": 0.133859375
+          },
+          "domain": {
+            "array_total_us": 36.3079921875,
+            "shared_walk_total_us": 9.50811328125,
+            "diagnostic_total_us": 33.042515625,
+            "native_walk_us": 28.70896875,
+            "vm_array_us": 2.64841796875,
+            "bridge_residual_us": 1.62815625
+          }
+        },
+        {
+          "pair": 4,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 35.2491015625,
+            "shared_walk_total_us": 10.62334765625,
+            "diagnostic_total_us": 33.15430078125,
+            "native_walk_us": 28.742125,
+            "vm_array_us": 2.66922265625,
+            "bridge_residual_us": 1.6415625
+          },
+          "direct": {
+            "array_total_us": 8.7950625,
+            "shared_walk_total_us": 8.759015625,
+            "diagnostic_total_us": 8.024488281250001,
+            "native_walk_us": 4.9872499999999995,
+            "vm_array_us": 2.749828125,
+            "bridge_residual_us": 0.13084374999999998
+          }
+        },
+        {
+          "pair": 5,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.86178125,
+            "shared_walk_total_us": 8.577375,
+            "diagnostic_total_us": 8.2982265625,
+            "native_walk_us": 5.29387109375,
+            "vm_array_us": 2.7929765625,
+            "bridge_residual_us": 0.13565625
+          },
+          "domain": {
+            "array_total_us": 32.5685078125,
+            "shared_walk_total_us": 9.47911328125,
+            "diagnostic_total_us": 33.063703125,
+            "native_walk_us": 28.73586328125,
+            "vm_array_us": 2.6272109375,
+            "bridge_residual_us": 1.65615625
+          }
+        },
+        {
+          "pair": 6,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 35.1649609375,
+            "shared_walk_total_us": 9.36087890625,
+            "diagnostic_total_us": 33.3517109375,
+            "native_walk_us": 28.84050390625,
+            "vm_array_us": 2.7180234375000003,
+            "bridge_residual_us": 1.69549609375
+          },
+          "direct": {
+            "array_total_us": 8.781546875,
+            "shared_walk_total_us": 8.740234375,
+            "diagnostic_total_us": 7.77884765625,
+            "native_walk_us": 4.90005078125,
+            "vm_array_us": 2.66333984375,
+            "bridge_residual_us": 0.12861328125
+          }
+        },
+        {
+          "pair": 7,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.109984375,
+            "shared_walk_total_us": 8.5899921875,
+            "diagnostic_total_us": 7.99909765625,
+            "native_walk_us": 4.984984375,
+            "vm_array_us": 2.7493867187500003,
+            "bridge_residual_us": 0.12588671875
+          },
+          "domain": {
+            "array_total_us": 34.116890625,
+            "shared_walk_total_us": 10.26307421875,
+            "diagnostic_total_us": 35.6189921875,
+            "native_walk_us": 30.811722656249998,
+            "vm_array_us": 2.8326171875,
+            "bridge_residual_us": 1.80377734375
+          }
+        },
+        {
+          "pair": 8,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 32.8013828125,
+            "shared_walk_total_us": 9.74579296875,
+            "diagnostic_total_us": 33.076171875,
+            "native_walk_us": 28.7088125,
+            "vm_array_us": 2.680109375,
+            "bridge_residual_us": 1.63744140625
+          },
+          "direct": {
+            "array_total_us": 8.911953125,
+            "shared_walk_total_us": 8.57316796875,
+            "diagnostic_total_us": 8.34209765625,
+            "native_walk_us": 5.290890624999999,
+            "vm_array_us": 2.824953125,
+            "bridge_residual_us": 0.13866406250000002
+          }
+        },
+        {
+          "pair": 9,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.829328125,
+            "shared_walk_total_us": 8.3802578125,
+            "diagnostic_total_us": 8.389875,
+            "native_walk_us": 5.2885507812500006,
+            "vm_array_us": 2.90265234375,
+            "bridge_residual_us": 0.13852734374999998
+          },
+          "domain": {
+            "array_total_us": 32.5673046875,
+            "shared_walk_total_us": 10.77238671875,
+            "diagnostic_total_us": 33.09224609375,
+            "native_walk_us": 28.742203125,
+            "vm_array_us": 2.673921875,
+            "bridge_residual_us": 1.6032890625
+          }
+        },
+        {
+          "pair": 10,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 32.4750625,
+            "shared_walk_total_us": 9.79777734375,
+            "diagnostic_total_us": 33.016671875,
+            "native_walk_us": 28.64646484375,
+            "vm_array_us": 2.6757421875,
+            "bridge_residual_us": 1.59236328125
+          },
+          "direct": {
+            "array_total_us": 8.746390625,
+            "shared_walk_total_us": 8.67833203125,
+            "diagnostic_total_us": 8.423078125,
+            "native_walk_us": 5.28769140625,
+            "vm_array_us": 2.92875,
+            "bridge_residual_us": 0.138515625
+          }
+        }
+      ]
+    },
+    "-O3": {
+      "capture": "20261126T022338Z-O3",
+      "apk_sha256": "858c1235334dbdcb1c7e5c55d3190cf2c1cb2209fa8efcb95b885347b06d03e0",
+      "thermal_statuses": [
+        0
+      ],
+      "battery_temperature_range_c": [
+        24.4,
+        24.5
+      ],
+      "paired_runs": [
+        {
+          "pair": 1,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.3602734375,
+            "shared_walk_total_us": 9.256609375,
+            "diagnostic_total_us": 8.87064453125,
+            "native_walk_us": 5.5072109375,
+            "vm_array_us": 2.98998046875,
+            "bridge_residual_us": 0.15310546875
+          },
+          "domain": {
+            "array_total_us": 16.6343125,
+            "shared_walk_total_us": 10.160453125,
+            "diagnostic_total_us": 16.74113671875,
+            "native_walk_us": 12.299859375,
+            "vm_array_us": 2.79600390625,
+            "bridge_residual_us": 1.6651171875
+          }
+        },
+        {
+          "pair": 2,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 18.1250078125,
+            "shared_walk_total_us": 9.422625,
+            "diagnostic_total_us": 17.43990234375,
+            "native_walk_us": 12.806640625,
+            "vm_array_us": 2.8309179687499997,
+            "bridge_residual_us": 1.7511562500000002
+          },
+          "direct": {
+            "array_total_us": 8.954625,
+            "shared_walk_total_us": 8.6119296875,
+            "diagnostic_total_us": 8.70703125,
+            "native_walk_us": 5.50991796875,
+            "vm_array_us": 2.9839375,
+            "bridge_residual_us": 0.13765625
+          }
+        },
+        {
+          "pair": 3,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.79778125,
+            "shared_walk_total_us": 8.75645703125,
+            "diagnostic_total_us": 8.80889453125,
+            "native_walk_us": 5.50585546875,
+            "vm_array_us": 3.07856640625,
+            "bridge_residual_us": 0.14137890625
+          },
+          "domain": {
+            "array_total_us": 17.712734375,
+            "shared_walk_total_us": 9.8864140625,
+            "diagnostic_total_us": 17.4502734375,
+            "native_walk_us": 12.75675,
+            "vm_array_us": 2.90580859375,
+            "bridge_residual_us": 1.690265625
+          }
+        },
+        {
+          "pair": 4,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 17.3188125,
+            "shared_walk_total_us": 9.50360546875,
+            "diagnostic_total_us": 17.4095546875,
+            "native_walk_us": 12.70208203125,
+            "vm_array_us": 2.8861445312500003,
+            "bridge_residual_us": 1.690171875
+          },
+          "direct": {
+            "array_total_us": 8.8536640625,
+            "shared_walk_total_us": 8.58879296875,
+            "diagnostic_total_us": 8.532152343749999,
+            "native_walk_us": 5.386242187500001,
+            "vm_array_us": 2.9066015624999997,
+            "bridge_residual_us": 0.13655078125
+          }
+        },
+        {
+          "pair": 5,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.71153125,
+            "shared_walk_total_us": 8.71439453125,
+            "diagnostic_total_us": 8.57031640625,
+            "native_walk_us": 5.304996093750001,
+            "vm_array_us": 2.9396132812499998,
+            "bridge_residual_us": 0.1287421875
+          },
+          "domain": {
+            "array_total_us": 16.65534375,
+            "shared_walk_total_us": 9.4783671875,
+            "diagnostic_total_us": 17.436750000000004,
+            "native_walk_us": 12.71557421875,
+            "vm_array_us": 2.85625,
+            "bridge_residual_us": 1.76398828125
+          }
+        },
+        {
+          "pair": 6,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 17.6862890625,
+            "shared_walk_total_us": 9.30198046875,
+            "diagnostic_total_us": 17.655796875,
+            "native_walk_us": 12.858496093749999,
+            "vm_array_us": 2.8410078125,
+            "bridge_residual_us": 1.7952304687499998
+          },
+          "direct": {
+            "array_total_us": 8.911359375,
+            "shared_walk_total_us": 8.525390625,
+            "diagnostic_total_us": 7.70793359375,
+            "native_walk_us": 4.8954179687499995,
+            "vm_array_us": 2.60201171875,
+            "bridge_residual_us": 0.1194296875
+          }
+        },
+        {
+          "pair": 7,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.8689921875,
+            "shared_walk_total_us": 8.65339453125,
+            "diagnostic_total_us": 8.43825,
+            "native_walk_us": 5.29341796875,
+            "vm_array_us": 2.93180859375,
+            "bridge_residual_us": 0.13434374999999998
+          },
+          "domain": {
+            "array_total_us": 17.7752421875,
+            "shared_walk_total_us": 9.2698359375,
+            "diagnostic_total_us": 17.21138671875,
+            "native_walk_us": 12.628882812499999,
+            "vm_array_us": 2.8084140625,
+            "bridge_residual_us": 1.69266015625
+          }
+        },
+        {
+          "pair": 8,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 17.6204921875,
+            "shared_walk_total_us": 9.443359375,
+            "diagnostic_total_us": 17.142578125,
+            "native_walk_us": 12.58596875,
+            "vm_array_us": 2.89816796875,
+            "bridge_residual_us": 1.7670390625
+          },
+          "direct": {
+            "array_total_us": 8.78846875,
+            "shared_walk_total_us": 8.55062890625,
+            "diagnostic_total_us": 8.55303515625,
+            "native_walk_us": 5.293878906250001,
+            "vm_array_us": 2.8793671874999998,
+            "bridge_residual_us": 0.13876171874999998
+          }
+        },
+        {
+          "pair": 9,
+          "order": [
+            "direct",
+            "domain"
+          ],
+          "direct": {
+            "array_total_us": 8.71875,
+            "shared_walk_total_us": 8.5866875,
+            "diagnostic_total_us": 8.6798359375,
+            "native_walk_us": 5.4538671875,
+            "vm_array_us": 2.98062109375,
+            "bridge_residual_us": 0.137171875
+          },
+          "domain": {
+            "array_total_us": 16.738578125,
+            "shared_walk_total_us": 9.7474453125,
+            "diagnostic_total_us": 17.31144921875,
+            "native_walk_us": 12.778703125,
+            "vm_array_us": 2.8763789062500003,
+            "bridge_residual_us": 1.7269687500000002
+          }
+        },
+        {
+          "pair": 10,
+          "order": [
+            "domain",
+            "direct"
+          ],
+          "domain": {
+            "array_total_us": 17.9930859375,
+            "shared_walk_total_us": 10.222953125,
+            "diagnostic_total_us": 17.355773437499998,
+            "native_walk_us": 12.7729921875,
+            "vm_array_us": 2.81218359375,
+            "bridge_residual_us": 1.6905625
+          },
+          "direct": {
+            "array_total_us": 8.9266796875,
+            "shared_walk_total_us": 8.71259375,
+            "diagnostic_total_us": 8.522984375,
+            "native_walk_us": 5.2950937499999995,
+            "vm_array_us": 2.97761328125,
+            "bridge_residual_us": 0.136703125
+          }
+        }
+      ]
+    }
+  },
+  "jre": {
+    "id": "pojav-17-ec28559-arm64-v8a",
+    "abi": "arm64-v8a",
+    "major": 17,
+    "family": 4,
+    "url": "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559/jre17-arm64-20210825-release.tar.xz",
+    "archive": "jre17-arm64-20210825-release.tar.xz",
+    "archive_sha256": "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
+    "libjvm": {
+      "path": "lib/server/libjvm.so",
+      "sha256": "e340425f9ef8d4280c9d64786d488d5699131b9d62333a2b990a47c0ca34b2de"
+    },
+    "libjava": {
+      "path": "lib/libjava.so",
+      "sha256": "a837701c8406adeac8c9b01c531045d21c816c6ba18ae251410f7b0f5ecea5b1"
+    },
+    "startup": "saved-jvm-path",
+    "boot_library_path": "lib",
+    "jni_capability": 655360
+  },
+  "shared_walk_code_sha256": "d53ada7548a41b49f3d31ad2f8f20eb11e9a785c2a068363ca5a4e662b1781ca"
+}

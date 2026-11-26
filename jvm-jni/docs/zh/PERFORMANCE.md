@@ -29,6 +29,10 @@ runner 校验 native 输入和已安装 APK 的散列。每轮启动新应用进
 普通 JNI 参考用 Android 编译器构建同一夹具源码，使用宿主原生装载。编译器和 libc 的差异
 也会进入该参考值，比较时应保留这一条件。
 
+System.load 的 bionic 与 GNU Guest JNI 夹具均使用 `-O3` 构建。
+[64 KiB 数组对照](../../tests/results/same-thread/array64k/REPORT.md)记录了优化级别
+对 ARM64 遍历指令的影响。
+
 每项使用 1 或 8 个 Java 调用线程，各预热 8 批，再测 30 批。每批 256 次调用，
 大数组每批 64 次。所有线程完成预热后开始收集进程 CPU 与切换次数，全部完成批次后结束。
 窗口内包含 Guest worker、VM/ART 后台工作、同步和调度。八线程时，墙钟除以完成调用数

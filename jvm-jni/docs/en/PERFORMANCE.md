@@ -36,6 +36,10 @@ ordinary reference builds the same fixture source with the Android compiler and
 bypasses the Guest loader. Different compilers/libcs make it a reference floor,
 not an exact algebraic subtraction of bridge instructions.
 
+The System.load JNI fixture uses `-O3` for both the bionic and GNU Guest builds.
+The [64 KiB array comparison](../../tests/results/same-thread/array64k/REPORT.md)
+shows how the optimization level affects the generated traversal on ARM64.
+
 Each case creates one or eight calling Java threads, warms each with eight
 batches, and takes thirty batches of 256 calls (64 for the large array).
 The process CPU/switch window starts after all callers finish warmup and ends
