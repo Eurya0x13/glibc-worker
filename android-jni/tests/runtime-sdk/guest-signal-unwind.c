@@ -57,7 +57,9 @@ static void handler(int number, siginfo_t *information, void *context) {
     pthread_exit((void *)(uintptr_t)73);
   }
   char byte;
-  read(state->descriptors[0], &byte, 1);
+  if (read(state->descriptors[0], &byte, 1) < 0) {
+    _exit(179);
+  }
   _exit(169);
 }
 

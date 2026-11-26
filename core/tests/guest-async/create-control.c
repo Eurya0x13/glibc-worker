@@ -10,6 +10,7 @@
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -207,8 +208,9 @@ static void *user(void *argument) {
     pthread_cleanup_push(cleanup, &cancelled_cleanup);
     atomic_store_explicit(&child_waiting, 1, memory_order_release);
     char byte;
-    read(descriptors[0], &byte, 1);
-    assert(0);
+    ssize_t count = read(descriptors[0], &byte, 1);
+    fprintf(stderr, "Read returned %zd before cancellation\n", count);
+    abort();
     pthread_cleanup_pop(0);
   }
   if (current->mode == PARENT_FIRST && !child_only) {
