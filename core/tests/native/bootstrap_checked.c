@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static unsigned file_descriptors(void) {
@@ -68,6 +69,11 @@ int main(void) {
   assert(!gw_bootstrap_map_checked(filename, &image));
   assert(image.size == 2 * page);
   assert(image.entry == (char *)image.base + eh.e_entry);
+
+  struct stat st;
+  assert(!fstat(fd, &st));
+  assert(image.device == st.st_dev && image.inode == st.st_ino);
+
   assert(!munmap(image.base, image.size));
   assert(!close(fd));
   assert(!unlink(filename));

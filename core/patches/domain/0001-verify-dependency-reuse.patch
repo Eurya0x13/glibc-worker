@@ -237,3 +237,65 @@
    return _dl_map_new_object (loader, name, type, trace_mode, mode, nsid);
  }
  
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -54,6 +54,7 @@
+ #include <dl-audit-check.h>
+ #include <dl-call_tls_init_tp.h>
+ #include <dl-exec-post.h>
++#include "gw-loader-auxv.h"
+ 
+ #include <assert.h>
+ 
+@@ -1338,6 +1339,43 @@
+ #endif
+ }
+ 
++/* The synthetic stack identifies the loader's mapped file without reopening
++   its path.  For a direct kernel exec, /proc/self/exe identifies that file.  */
++static void
++init_rtld_file_id (const ElfW(auxv_t) *auxv)
++{
++  struct r_file_id id;
++  bool have_dev = false;
++  bool have_ino = false;
++
++  for (; auxv->a_type != AT_NULL; ++auxv)
++    {
++      if (auxv->a_type == GW_AT_LOADER_DEV)
++        {
++          id.dev = auxv->a_un.a_val;
++          have_dev = true;
++        }
++      if (auxv->a_type == GW_AT_LOADER_INO)
++        {
++          id.ino = auxv->a_un.a_val;
++          have_ino = true;
++        }
++    }
++
++  if (have_dev && have_ino)
++    {
++      _dl_rtld_map.l_file_id = id;
++      return;
++    }
++
++  int fd = __open64_nocancel ("/proc/self/exe", O_RDONLY | O_CLOEXEC);
++  if (fd != -1)
++    {
++      _dl_get_file_id (fd, &_dl_rtld_map.l_file_id);
++      __close_nocancel (fd);
++    }
++}
++
+ static void
+ dl_main (const ElfW(Phdr) *phdr,
+ 	 ElfW(Word) phnum,
+@@ -1390,6 +1428,7 @@
+ 
+       /* Note the place where the dynamic linker actually came from.  */
+       _dl_rtld_map.l_name = rtld_progname;
++      init_rtld_file_id (auxv);
+ 
+       while (_dl_argc > 1)
+ 	if (! strcmp (_dl_argv[1], "--list"))

@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include "loader_image.h"
 #include "arch.h"
+#include "loader_auxv.h"
 
 enum { BOOTSTRAP_AUX_CAPACITY = 24, BOOTSTRAP_PHDR_CAPACITY = 64 };
 
@@ -223,7 +224,12 @@ int gw_bootstrap_map_checked(const char *path, struct gw_bootstrap_image *out) {
   }
 
   close(fd);
-  *out = (struct gw_bootstrap_image){base, base + e.e_entry, total, e};
+  *out = (struct gw_bootstrap_image){.base = base,
+                                     .entry = base + e.e_entry,
+                                     .size = total,
+                                     .eh = e,
+                                     .device = st.st_dev,
+                                     .inode = st.st_ino};
   return 0;
 fail:
   if (mapping != MAP_FAILED) {
@@ -349,6 +355,8 @@ int gw_bootstrap_stack_checked(struct gw_bootstrap_image l, void *stack,
   AUX(AT_PLATFORM, platform);
   AUX(AT_RANDOM, random);
   AUX(AT_EXECFN, av[0]);
+  AUX(GW_AT_LOADER_DEV, l.device);
+  AUX(GW_AT_LOADER_INO, l.inode);
   AUX(AT_NULL, 0);
 #undef AUX
 

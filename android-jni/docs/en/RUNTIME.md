@@ -89,11 +89,25 @@ The package script rejects a manifest with the wrong ABI or adoption version.
 ### Packaged glibc library names
 
 The package validates the architecture and exact `DT_SONAME` of each bundled
-glibc image. The `glibc_aliases` object in `domain-runtime.json` records the
+Guest library. The `glibc_aliases` object in `domain-runtime.json` records the
 ABI names and their packaged files. For example, `libdl.so.2` maps to
 `libguest_dl.so` on both ABIs. Use `compat/glibc-libs` in `library_path` for an
 unpacked compatibility package. Keep its relative symlinks when relocating
 the package.
+
+`libgcc_s.so.1` maps to the bundled `libguest_unwind.so`. Set
+`GW_PACKAGE_LIBSTDCXX=1` when building the SDK to also include
+`libguest_stdcpp.so` with the `libstdc++.so.6` alias.
+
+```sh
+GW_PACKAGE_LIBSTDCXX=1 scripts/build-runtime.sh --module jvm-jni
+```
+
+Both compiler libraries come from the selected GNU toolchain for the target
+ABI. Packaging checks their `DT_NEEDED` entries against the bundled libraries,
+and the GNU loader checks required symbol versions when loading a module.
+If you set `GW_DOMAIN_RUNTIME` when packaging the C++ library, use a runtime
+built from this SDK so the loader can verify its own SONAME as a dependency.
 
 For an APK, deploy the matching `libguest_*.so` files as installed native
 libraries and keep their bytes unchanged during packaging. Include the
@@ -119,7 +133,10 @@ The full message goes to Guest stderr if it exceeds the bridge's diagnostic
 buffer. Requests that resolve to the same device and inode, or have no
 candidate on those paths, can share the resident dependency.
 
-Run the regression against the packaged loader and helper JAR. Add
+Run the regression against the packaged loader and helper JAR. It checks cold
+`libgcc_s.so.1` resolution and exercises C++ string allocation and exception
+unwinding when the package includes `libstdc++.so.6`. It also checks that
+the loader's own alias works and a separate copy under that name is rejected. Add
 `--runner qemu-aarch64` for an arm64-v8a package on an x86_64 machine with the
 GNU cross compiler installed.
 

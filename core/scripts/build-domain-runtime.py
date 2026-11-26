@@ -20,6 +20,7 @@ source = Path(__file__).resolve().parent
 core = source.parent
 fragments = core / "src/runtime"
 dependency_patch = core / "patches/domain/0001-verify-dependency-reuse.patch"
+loader_auxv = core / "src/bootstrap/loader_auxv.h"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--abi", choices=["x86_64", "arm64-v8a"], required=True)
 parser.add_argument("--jobs", type=int, default=4)
@@ -33,6 +34,7 @@ target = json.loads((core / "config/targets.json").read_text())[args.abi]
 inputs = [
     Path(__file__),
     dependency_patch,
+    loader_auxv,
     fragments / "adopt-nptl.inc",
     fragments / "signal-guard.inc",
     fragments / "signal-send.h",
@@ -86,6 +88,7 @@ if not (root / "patched").exists():
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(base_source, src)
+    shutil.copyfile(loader_auxv, src / "elf/gw-loader-auxv.h")
     subprocess.run(
         [*patch_command, str(dependency_patch)], stdout=sys.stderr, check=True
     )

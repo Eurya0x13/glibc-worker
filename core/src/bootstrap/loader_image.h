@@ -2,15 +2,19 @@
 #define GW_BOOTSTRAP_LOADER_IMAGE_H
 #include <elf.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* One validated, pinned ld.so mapping held for the process lifetime. base is
  * where ELF vaddr 0 landed; entry is the absolute entry (base + e_entry); size
  * is the page-rounded reserved span. eh is saved so consumers can rebuild
- * auxv/PHDR data later without rereading the file. */
+ * auxv/PHDR data later without rereading the file. The device and inode come
+ * from the mapped descriptor and identify this loader during dependency reuse.
+ */
 struct gw_bootstrap_image {
   void *base, *entry;
   size_t size;
   Elf64_Ehdr eh;
+  uint64_t device, inode;
 };
 
 /* Checked bootstrap APIs return an errno value, leave the output unchanged

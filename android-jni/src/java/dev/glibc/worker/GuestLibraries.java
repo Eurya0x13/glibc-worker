@@ -15,13 +15,13 @@ import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Prepares GNU loader search entries for the glibc images installed with the app. */
+/** Prepares GNU loader search entries for the Guest libraries installed with the app. */
 public final class GuestLibraries {
   private GuestLibraries() {}
 
   /**
-   * Verifies bundled glibc images against the matching glibc-libs.tsv asset and closes the stream.
-   * The return value is a directory under privateStorage for use in the Guest library path.
+   * Verifies bundled Guest libraries against the matching glibc-libs.tsv asset and closes the
+   * stream. The return value is a directory under privateStorage for use in the Guest library path.
    * nativeDirectory is the installed nativeLibraryDir (or the native files in a desktop package).
    */
   public static File prepare(File privateStorage, File nativeDirectory, InputStream catalog)
@@ -42,7 +42,7 @@ public final class GuestLibraries {
       }
     }
     if (aliases.isEmpty()) {
-      throw new IOException("Empty glibc library catalog");
+      throw new IOException("Empty Guest library catalog");
     }
 
     Path storage = Files.createDirectories(privateStorage.toPath().toAbsolutePath());
@@ -54,18 +54,18 @@ public final class GuestLibraries {
   private static void parseAlias(String row, Path installed, Map<String, Path> aliases)
       throws IOException {
     String[] fields = row.split("\t", -1);
-    if (fields.length != 3 || !fields[0].matches("(lib|ld-linux)[A-Za-z0-9_.-]+\\.so(\\.[0-9]+)*")
+    if (fields.length != 3 || !fields[0].matches("(lib|ld-linux)[A-Za-z0-9_.+-]+\\.so(\\.[0-9]+)*")
         || !fields[1].matches("libguest_[a-z0-9_]+\\.so") || !fields[2].matches("[0-9a-f]{64}")) {
-      throw new IOException("Invalid glibc library catalog entry: " + row);
+      throw new IOException("Invalid Guest library catalog entry: " + row);
     }
     if (aliases.containsKey(fields[0])) {
-      throw new IOException("Conflicting glibc alias: " + fields[0]);
+      throw new IOException("Conflicting Guest library alias: " + fields[0]);
     }
 
     Path image = installed.resolve(fields[1]);
     if (!Files.isRegularFile(image, LinkOption.NOFOLLOW_LINKS)
         || !fields[2].equals(GuestImages.sha256(image.toFile()))) {
-      throw new IOException("Installed glibc image does not match catalog: " + image);
+      throw new IOException("Installed Guest library does not match catalog: " + image);
     }
     aliases.put(fields[0], image);
   }
@@ -87,7 +87,7 @@ public final class GuestLibraries {
         Files.createSymbolicLink(link, target);
       } catch (FileAlreadyExistsException existing) {
         if (!Files.isSymbolicLink(link) || !target.equals(Files.readSymbolicLink(link))) {
-          throw new IOException("Conflicting glibc alias: " + link, existing);
+          throw new IOException("Conflicting Guest library alias: " + link, existing);
         }
       }
     }
@@ -95,7 +95,7 @@ public final class GuestLibraries {
     try (DirectoryStream<Path> contents = Files.newDirectoryStream(directory)) {
       for (Path entry : contents) {
         if (!aliases.containsKey(entry.getFileName().toString())) {
-          throw new IOException("Unexpected glibc alias entry: " + entry);
+          throw new IOException("Unexpected Guest library alias entry: " + entry);
         }
       }
     }

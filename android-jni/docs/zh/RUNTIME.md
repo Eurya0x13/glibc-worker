@@ -60,10 +60,23 @@ Guest 信号描述符仍打开或 Host 描述符等待仍在进行时，在关�
 
 ### 打包后的 glibc 库名
 
-打包时校验每个内置 glibc 库的架构与完整 `DT_SONAME`。`domain-runtime.json` 中的
+打包时校验每个随包 Guest 库的架构与完整 `DT_SONAME`。`domain-runtime.json` 中的
 `glibc_aliases` 记录 ABI 库名及其打包文件。两个 ABI 的 `libdl.so.2` 均对应
 `libguest_dl.so`。解包使用时，将 `compat/glibc-libs` 加入 `library_path`。移动制品时保留
 目录中的相对符号链接。
+
+`libgcc_s.so.1` 对应随包的 `libguest_unwind.so`。构建 SDK 时设定
+`GW_PACKAGE_LIBSTDCXX=1`，即可一并打包 `libguest_stdcpp.so` 和
+`libstdc++.so.6` 别名。
+
+```sh
+GW_PACKAGE_LIBSTDCXX=1 scripts/build-runtime.sh --module jvm-jni
+```
+
+两份编译器运行库都来自目标 ABI 选用的 GNU 工具链。打包时检查它们的
+`DT_NEEDED` 能否由随包库提供，GNU loader 在装载模组时检查所需的符号版本。
+启用 C++ 库并显式设置 `GW_DOMAIN_RUNTIME` 时，使用由当前 SDK 构建的运行时，
+以便 GNU loader 在依赖解析时校验自己的 SONAME 别名。
 
 打 APK 时，将匹配的 `libguest_*.so` 部署为安装时解包的原生库，并保持文件内容不变。
 将对应 ABI 的 `glibc-libs.tsv` 加入 assets。宿主启动运行时前，调用
@@ -81,8 +94,11 @@ GNU loader 通过搜索路径处理裸库名和 `DT_NEEDED`。按路径装载时
 诊断超出桥接缓冲区时，完整文本会写入 Guest stderr。解析到相同设备号和 inode，或配置路径
 中找不到候选时，可以复用已装载的依赖。
 
-下面的回归使用打包的 GNU loader 和辅助 JAR。在 x86_64 上测试 arm64-v8a 制品时，使用
-GNU 交叉编译器，并附加 `--runner qemu-aarch64`。
+下面的回归使用打包的 GNU loader 和辅助 JAR，验证首次解析 `libgcc_s.so.1`。
+如果包内包含 `libstdc++.so.6`，还会验证 C++ 字符串分配和异常展开，以及 loader
+能否通过自身的别名被复用，并拒绝按同名加载另一份文件。
+在 x86_64 上测试 arm64-v8a 制品时，使用 GNU 交叉编译器，并附加
+`--runner qemu-aarch64`。
 
 ```sh
 python3 android-jni/tests/runtime-aliases.py --package "$GW_PACKAGE" \

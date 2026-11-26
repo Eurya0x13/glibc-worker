@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "loader_image.h"
+#include "loader_auxv.h"
 
 static char *region;
 static size_t size;
@@ -96,6 +97,8 @@ int main(void) {
   image.entry = (void *)(uintptr_t)0x101000;
   image.eh.e_phoff = 64;
   image.eh.e_phnum = 7;
+  image.device = 77;
+  image.inode = UINT64_C(0x123456789);
   for (size_t count = 1; count <= 16; count += 15) {
     char *args[16];
     for (size_t i = 0; i < count; i++) {
@@ -114,7 +117,7 @@ int main(void) {
     assert(!*sp++);
 
     Elf64_auxv_t *aux = (void *)sp;
-    int execfn = 0, random = 0, phdr = 0;
+    int execfn = 0, random = 0, phdr = 0, device = 0, inode = 0;
     for (size_t i = 0; aux[i].a_type; i++) {
       assert(i < 24);
       uintptr_t value = aux[i].a_un.a_val;
@@ -128,8 +131,14 @@ int main(void) {
       if (aux[i].a_type == AT_PHDR) {
         phdr = value == 0x100040;
       }
+      if (aux[i].a_type == GW_AT_LOADER_DEV) {
+        device = value == image.device;
+      }
+      if (aux[i].a_type == GW_AT_LOADER_INO) {
+        inode = value == image.inode;
+      }
     }
-    assert(execfn && random && phdr);
+    assert(execfn && random && phdr && device && inode);
   }
 
   assert(!munmap(mapping, size + 2 * page));
