@@ -10,7 +10,7 @@ project_root=$(cd "$(dirname "$0")" && pwd)
 : "${GW_FFI_GUEST:?Set GNU libffi prefix}"
 : "${GW_JNI_GENERATED:?Set JNI generated directory}"
 mkdir -p "$(dirname "$GW_GUEST_OUT")"
-flags=(-O1 -g -fPIC -Wall -Wextra -Werror -DGW_DOMAIN_JNI)
+flags=(-O3 -g -fPIC -Wall -Wextra -Werror -DGW_DOMAIN_JNI)
 if [[ ${GW_NATIVE_UNWIND_INTEGRATION:-0} == 1 ]]; then
   flags+=(-DGW_DOMAIN_NONLOCAL -D_GNU_SOURCE= -fexceptions
     -include "$project_root/src/guest/kernel-syscall.h")

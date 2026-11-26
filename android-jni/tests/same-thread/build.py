@@ -231,6 +231,7 @@ compile(
     "guest",
     guest_sources,
     ["-I" + str(guest_ffi / "include"), guest_ffi / "lib/libffi.a"],
+    optimization="-O3",
 )
 compile(guest_cc, "probe.so", [source / "module.c"], ["-shared"])
 compile(

@@ -81,8 +81,10 @@ The matching private transport supports descriptor preflight and the
 quiescent STOP acknowledgement. An older service is rejected before activation.
 The bridge's [lifecycle contract](LIFECYCLE.md) applies to both backends.
 
-`build-guest.sh` builds the matching service, and `scripts/package-runtime.sh`
-stages it with the adoption-enabled libc and a `domain-runtime.json` manifest.
+`build-guest.sh` builds the GNU Guest JNI service with `-O3`.
+`scripts/package-runtime.sh` stages it with the adoption-enabled libc and a
+`domain-runtime.json` manifest. Native loop optimizations in a Guest module
+are selected when compiling the module's own DSO.
 `GW_DOMAIN_RUNTIME` can select an explicitly built matching runtime directory.
 The package script rejects a manifest with the wrong ABI or adoption version.
 

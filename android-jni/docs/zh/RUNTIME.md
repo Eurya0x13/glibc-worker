@@ -54,8 +54,9 @@ Guest 信号描述符仍打开或 Host 描述符等待仍在进行时，在关�
 桥提交关闭后，如果 STOP 或分发线程 join 失败，返回终止性 `EIO` 并保留剩余资源。
 私有传输支持描述符预检和静默 STOP 确认，旧服务在激活前被拒绝。
 
-`build-guest.sh` 构建匹配服务；`scripts/package-runtime.sh` 将其与支持收养的 libc 及
-`domain-runtime.json` 清单一同打包。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录；打包器拒绝 ABI
+`build-guest.sh` 使用 `-O3` 构建 GNU Guest JNI 服务。`scripts/package-runtime.sh` 将其与
+支持收养的 libc 及 `domain-runtime.json` 清单一同打包。Guest 模组内部的原生循环优化由
+该模组自身的 DSO 构建决定。`GW_DOMAIN_RUNTIME` 可显式选择匹配目录。打包器拒绝 ABI
 或收养版本错误的清单。
 
 ### 打包后的 glibc 库名
