@@ -41,7 +41,8 @@ includes=(-Iandroid-jni/include -Icore/include -Iandroid-jni/src/common -Ibionic
 warnings=(-Wall -Wextra -Werror)
 host_flags=(-fPIC -fno-emulated-tls -O1 -g "${warnings[@]}" "${includes[@]}")
 guest_flags=(-fPIC -O1 -g "${warnings[@]}" "${includes[@]}" -Iandroid-jni/build/jni-include)
-guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1)
+# Keep the GNU ABI visible even in fixtures with no direct libc symbol references.
+guest_flags+=(-DGW_TEST_BINDING_CAPACITY=1 '-Wl,--push-state,--no-as-needed' -lc '-Wl,--pop-state')
 lab_sources=(jvm-jni/tests/native/harness/bootstrap.c
   jvm-jni/tests/native/harness/jni.c jvm-jni/tests/native/harness/jni_dispatch.c jvm-jni/tests/native/harness/jre_host.c
   jvm-jni/tests/native/harness/pojav_jli.c jvm-jni/tests/native/harness/jre_layout_spike.c jvm-jni/tests/native/harness/loader_smoke.c
