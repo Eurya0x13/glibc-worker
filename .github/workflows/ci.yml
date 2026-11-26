@@ -273,8 +273,9 @@ jobs:
         run: |
           sdk_tools="$ANDROID_HOME/cmdline-tools/latest/bin"
           "$sdk_tools/sdkmanager" --install \
-            emulator 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
-          echo "$sdk_tools" >> "$GITHUB_PATH"
+            emulator platform-tools 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
+          "$ANDROID_HOME/platform-tools/adb" version
+          printf '%s\n' "$sdk_tools" "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
           jvm-jni/tests/android/gradlew -p jvm-jni/tests/android --no-daemon \
             --max-workers=2 --console=plain :app:assembleDebug
