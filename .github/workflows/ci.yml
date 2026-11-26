@@ -285,32 +285,46 @@ jobs:
         timeout-minutes: 20
         run: |
           results="$PWD/jvm-jni/build/ci-android"
-          mkdir -p "$results"
-          printf 'no\n' | avdmanager create avd --name glibc-worker-ci \
-            --package 'system-images;android-36;google_apis;x86_64'
+          avd='glibc-worker-ci'
+          emulator="$ANDROID_HOME/emulator/emulator"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/avd"
+          mkdir -p "$results" "$ANDROID_AVD_HOME"
+          printf 'no\n' | avdmanager create avd --name "$avd" \
+            --package 'system-images;android-36;google_apis;x86_64' \
+            --path "$ANDROID_AVD_HOME/$avd.avd"
+          "$emulator" -list-avds | grep -Fx -- "$avd"
           sudo chgrp "$(id -gn)" /dev/kvm
           sudo chmod g+rw /dev/kvm
 
-          serial=emulator-5554
-          "$ANDROID_HOME/emulator/emulator" -avd glibc-worker-ci -port 5554 -memory 3072 \
+          serial='emulator-5554'
+          adb start-server
+          "$emulator" -avd "$avd" -port 5554 -memory 3072 \
             -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader -accel on \
             >"$results/emulator.log" 2>&1 &
           emulator_pid=$!
           finish() {
-            timeout 20 adb -s "$serial" logcat -d >"$results/logcat.txt" 2>&1 || true
+            local status=$?
+            if (( status != 0 )); then
+              tail -n 80 "$results/emulator.log" >&2
+            fi
+            if [[ $(timeout 5 adb -s "$serial" get-state 2>/dev/null) == device ]]; then
+              timeout 20 adb -s "$serial" logcat -d >"$results/logcat.txt" 2>&1 || true
+            fi
             kill "$emulator_pid" 2>/dev/null || true
             wait "$emulator_pid" 2>/dev/null || true
           }
           trap finish EXIT
 
-          timeout 180 adb -s "$serial" wait-for-device
-          boot_deadline=$((SECONDS + 180))
-          until [[ $(timeout 10 adb -s "$serial" shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; do
+          boot_deadline=$((SECONDS + 300))
+          until [[ $(timeout 10 adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r') == 1 ]]; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'Android emulator stopped before booting' >&2
+              exit 1
+            fi
             if (( SECONDS >= boot_deadline )); then
               echo 'Android emulator did not finish booting' >&2
               exit 1
             fi
-            kill -0 "$emulator_pid"
             sleep 2
           done
           adb -s "$serial" shell wm dismiss-keyguard
